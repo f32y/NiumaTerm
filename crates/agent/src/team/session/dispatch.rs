@@ -1,3 +1,5 @@
+use std::iter;
+
 use thiserror::Error;
 
 use crate::chat::SendOutcome;
@@ -5,7 +7,6 @@ use crate::team::attempt::{Attempt, AttemptState, BudgetScope, DispatchIntent};
 use crate::team::budget::{Budget, BudgetError, TurnPurpose};
 use crate::team::discussion::{ArrangementState, PauseReason};
 use crate::team::model::AttemptId;
-use crate::team::room::Room;
 use crate::team::storage::{RoomStore, StorageError};
 
 #[derive(Debug, Error)]
@@ -14,7 +15,7 @@ pub enum DispatchError {
     Storage(#[from] StorageError),
     #[error(transparent)]
     Budget(#[from] BudgetError),
-    #[error("attempt is unavailable, already sent, or belongs to an older owner")]
+    #[error("attempt is unavailable, already sent, or missing its recipient")]
     Ineligible,
 }
 
@@ -26,17 +27,31 @@ pub(crate) fn reserve_dispatches(
     let mut ids = Vec::with_capacity(intents.len());
 
     for intent in intents {
-        let member = next
-            .member(intent.recipient)
+        next.member(intent.recipient)
             .ok_or(DispatchError::Ineligible)?;
-
-        if member.ownership() != intent.ownership {
-            return Err(DispatchError::Ineligible);
-        }
 
         let id = AttemptId::new();
 
-        budget_mut(&mut next, intent.budget)?.reserve(&[(id, intent.purpose)])?;
+        if let BudgetScope::Direct(operation) = intent.budget {
+            next.direct_allowances
+                .entry(operation)
+                .or_insert_with(Budget::direct);
+        }
+
+        let budget = match intent.budget {
+            BudgetScope::Discussion(discussion) => {
+                &next
+                    .discussion(discussion)
+                    .ok_or(DispatchError::Ineligible)?
+                    .budget
+            }
+            BudgetScope::Direct(operation) => &next.direct_allowances[&operation],
+        };
+
+        budget.check_batch(
+            next.budget_attempts(intent.budget),
+            iter::once(intent.purpose),
+        )?;
 
         ids.push(id);
 
@@ -71,17 +86,11 @@ pub(crate) fn dispatch(
 
     let attempt = &next.attempts[index];
 
-    if attempt.state != AttemptState::Reserved
-        || next
-            .member(attempt.intent.recipient)
-            .is_none_or(|member| member.ownership() != attempt.intent.ownership)
-    {
+    if attempt.state != AttemptState::Reserved || next.member(attempt.intent.recipient).is_none() {
         return Err(DispatchError::Ineligible);
     }
 
     let intent = attempt.intent.clone();
-
-    budget_mut(&mut next, intent.budget)?.charge(id)?;
 
     next.attempts[index].state = AttemptState::Sending;
 
@@ -132,8 +141,6 @@ pub(crate) fn dispatch(
         SendOutcome::NotReady => {
             let mut next = store.room().clone();
 
-            budget_mut(&mut next, intent.budget)?.release_rejected(id)?;
-
             next.attempts[index].state = AttemptState::Rejected;
 
             if let BudgetScope::Discussion(discussion_id) = intent.budget {
@@ -151,17 +158,4 @@ pub(crate) fn dispatch(
     }
 
     Ok(outcome)
-}
-
-fn budget_mut(room: &mut Room, scope: BudgetScope) -> Result<&mut Budget, DispatchError> {
-    match scope {
-        BudgetScope::Discussion(id) => room
-            .discussion_mut(id)
-            .map(|run| &mut run.budget)
-            .ok_or(DispatchError::Ineligible),
-        BudgetScope::Direct(id) => Ok(room
-            .direct_allowances
-            .entry(id)
-            .or_insert_with(Budget::direct)),
-    }
 }

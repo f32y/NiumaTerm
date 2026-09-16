@@ -1,8 +1,3 @@
-pub use crate::team::session::DispatchError;
-
-pub(super) use crate::team::storage::records::digest;
-
-mod records;
 mod validation;
 
 #[cfg(test)]
@@ -30,11 +25,11 @@ const ROOMS_DIRECTORY: &str = "agent-teams";
 pub enum StorageError {
     #[error("room storage is unavailable: {0}")]
     Io(#[from] io::Error),
-    #[error("room records cannot be decoded: {0}")]
+    #[error("room snapshot cannot be decoded: {0}")]
     Json(#[from] serde_json::Error),
     #[error("unsupported Team data version {0}")]
     UnsupportedVersion(u64),
-    #[error("room records failed validation: {0}")]
+    #[error("room snapshot failed validation: {0}")]
     Invalid(&'static str),
     #[error("legacy Team room format is not supported; saved files were left unchanged")]
     LegacyFormat,
@@ -46,7 +41,7 @@ pub struct RoomStore {
     directory: PathBuf,
     _lock: File,
     room: Room,
-    sequence: u64,
+    revision: u64,
     failed: bool,
 }
 
@@ -59,10 +54,6 @@ struct Snapshot {
 }
 
 impl RoomStore {
-    pub(super) fn directory(&self) -> &Path {
-        &self.directory
-    }
-
     pub fn create(data_directory: &Path, room: Room) -> Result<Self, StorageError> {
         validation::validate(&room)?;
 
@@ -82,7 +73,7 @@ impl RoomStore {
             directory,
             _lock: lock,
             room,
-            sequence: 0,
+            revision: 0,
             failed: false,
         })
     }
@@ -153,7 +144,7 @@ impl RoomStore {
             directory,
             _lock: lock,
             room: snapshot.room,
-            sequence: snapshot.revision,
+            revision: snapshot.revision,
             failed: false,
         })
     }
@@ -163,7 +154,7 @@ impl RoomStore {
     }
 
     pub fn revision(&self) -> u64 {
-        self.sequence
+        self.revision
     }
 
     /// Publish memory only after the complete snapshot reaches durable storage.
@@ -180,19 +171,19 @@ impl RoomStore {
         validation::validate(&next)?;
         validation::validate_update(&self.room, &next)?;
 
-        let sequence = self
-            .sequence
+        let revision = self
+            .revision
             .checked_add(1)
             .ok_or(StorageError::Invalid("room revision exhausted"))?;
 
-        if let Err(error) = write_snapshot(&self.directory, &next, sequence) {
+        if let Err(error) = write_snapshot(&self.directory, &next, revision) {
             self.failed = true;
 
             return Err(error);
         }
 
         self.room = next;
-        self.sequence = sequence;
+        self.revision = revision;
 
         Ok(())
     }

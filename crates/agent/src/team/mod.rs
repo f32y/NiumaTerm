@@ -3,7 +3,6 @@
 pub mod attempt;
 pub mod budget;
 pub mod discussion;
-pub mod execution_slots;
 pub mod member;
 pub mod model;
 pub mod room;

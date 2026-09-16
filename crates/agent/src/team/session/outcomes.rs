@@ -3,9 +3,7 @@
 use crate::team::attempt::{Attempt, AttemptState, BudgetScope};
 use crate::team::budget::TurnPurpose;
 use crate::team::discussion::{ArrangementState, DiscussionState, PauseReason};
-use crate::team::model::{
-    AttemptId, Author, MemberId, MessageId, OwnershipGeneration, PublicMessage, Publication,
-};
+use crate::team::model::{AttemptId, Author, MemberId, MessageId, PublicMessage, Publication};
 use crate::team::room::Room;
 use crate::team::session::TeamError;
 
@@ -13,23 +11,17 @@ use crate::team::session::TeamError;
 pub struct AttemptEventKey {
     pub attempt: AttemptId,
     pub member: MemberId,
-    pub ownership: OwnershipGeneration,
     pub backend_generation: u64,
 }
 
 /// The index of the attempt `key` names, when its member still holds the
-/// ownership and backend generation the event was raised under.
+/// backend generation the event was raised under.
 pub(super) fn event_attempt(room: &Room, key: AttemptEventKey) -> Option<usize> {
-    let member = room.member(key.member)?;
-
-    if member.ownership != key.ownership {
-        return None;
-    }
+    room.member(key.member)?;
 
     room.attempts.iter().position(|attempt| {
         attempt.id == key.attempt
             && attempt.intent.recipient == key.member
-            && attempt.intent.ownership == key.ownership
             && attempt.intent.backend_generation == key.backend_generation
     })
 }
@@ -140,7 +132,6 @@ pub(super) fn complete(
         publication,
         text,
         replies_to,
-        attachments: Vec::new(),
     });
 
     member.coverage.messages.insert(id);

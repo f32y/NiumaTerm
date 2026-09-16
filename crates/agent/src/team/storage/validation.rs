@@ -1,7 +1,6 @@
 use std::collections::BTreeSet;
 
 use crate::team::attempt::{AttemptState, BudgetScope};
-use crate::team::budget::ReservationState;
 use crate::team::discussion::DiscussionState;
 use crate::team::model::Author;
 use crate::team::room::Room;
@@ -110,7 +109,10 @@ pub(super) fn validate(room: &Room) -> Result<(), StorageError> {
             return Err(invalid("invalid discussion participants"));
         }
 
-        if !discussion.budget.validate() {
+        if !discussion
+            .budget
+            .validate(room.budget_attempts(BudgetScope::Discussion(discussion.id)))
+        {
             return Err(invalid("budget exceeds scheduled turn limit"));
         }
 
@@ -144,8 +146,8 @@ pub(super) fn validate(room: &Room) -> Result<(), StorageError> {
         return Err(invalid("multiple active discussions"));
     }
 
-    for budget in room.direct_allowances.values() {
-        if !budget.validate() {
+    for (id, budget) in &room.direct_allowances {
+        if !budget.validate(room.budget_attempts(BudgetScope::Direct(*id))) {
             return Err(invalid("direct request exceeds scheduled turn limit"));
         }
     }
@@ -200,37 +202,14 @@ pub(super) fn validate(room: &Room) -> Result<(), StorageError> {
             _ => {}
         }
 
-        let budget = match attempt.intent.budget {
-            BudgetScope::Discussion(id) => room
-                .discussions
-                .iter()
-                .find(|run| run.id == id)
-                .map(|run| &run.budget),
-            BudgetScope::Direct(id) => room.direct_allowances.get(&id),
-        }
-        .ok_or(invalid("attempt has no budget"))?;
-
-        let reservation = budget.reservations().get(&attempt.id);
-
-        match attempt.state {
-            AttemptState::Rejected if reservation.is_none() => {}
-            AttemptState::Reserved
-                if reservation.is_some_and(|entry| {
-                    entry.state == ReservationState::Unsent
-                        && entry.purpose == attempt.intent.purpose
-                }) => {}
-            AttemptState::Sending
-            | AttemptState::Accepted { .. }
-            | AttemptState::Completed { .. }
-            | AttemptState::Summarized { .. }
-            | AttemptState::Failed
-            | AttemptState::Uncertain
-            | AttemptState::Abandoned
-                if reservation.is_some_and(|entry| {
-                    entry.state == ReservationState::Charged
-                        && entry.purpose == attempt.intent.purpose
-                }) => {}
-            _ => return Err(invalid("attempt and budget reservation disagree")),
+        match attempt.intent.budget {
+            BudgetScope::Discussion(id) if !discussions.contains(&id) => {
+                return Err(invalid("attempt has no discussion budget"));
+            }
+            BudgetScope::Direct(id) if !room.direct_allowances.contains_key(&id) => {
+                return Err(invalid("attempt has no direct budget"));
+            }
+            _ => {}
         }
     }
 

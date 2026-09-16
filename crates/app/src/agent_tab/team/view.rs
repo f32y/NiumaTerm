@@ -508,7 +508,7 @@ impl TeamPane {
             parts.push(
                 t!(
                     "team-budget-status",
-                    remaining = run.budget().remaining_non_report_turns()
+                    remaining = run.remaining_non_report_turns(room.attempts())
                 )
                 .into_owned(),
             );
@@ -524,7 +524,7 @@ impl TeamPane {
                         PauseReason::ContextSelection | PauseReason::SummaryFailed(_) => {
                             t!("team-context-needed")
                         }
-                        PauseReason::MemberUnavailable(_) | PauseReason::ModeratorUnavailable => {
+                        PauseReason::MemberUnavailable(_) => {
                             t!("team-unavailable")
                         }
                         _ => t!("team-continue-hint"),

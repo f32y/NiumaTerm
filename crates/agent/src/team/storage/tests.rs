@@ -5,22 +5,16 @@ use tempfile::tempdir;
 use crate::AgentWorkspace;
 use crate::chat::SendOutcome;
 use crate::team::attempt::{AttemptState, BudgetScope, DispatchIntent};
-use crate::team::budget::TurnPurpose;
+use crate::team::budget::{BudgetError, TurnPurpose};
 use crate::team::discussion::{
     Arrangement, ArrangementState, DiscussionMode, PauseReason, PublicSnapshot, Stage, StageKind,
 };
-#[cfg(test)]
-use crate::team::model::AttachmentId;
 use crate::team::model::{
-    AttachmentReference, AttemptId, Author, MessageId, OperationId, OwnershipGeneration,
-    PublicMessage, Publication, RoomId, StageId, Summary, SummaryId, UserInput,
+    Author, MessageId, OperationId, PublicMessage, Publication, RoomId, StageId, Summary,
+    SummaryId, UserInput,
 };
 use crate::team::room::Room;
-use crate::team::session::dispatch::{dispatch, reserve_dispatches};
-use crate::team::session::read_attachment;
-#[cfg(test)]
-use crate::team::storage::atomic_write;
-use crate::team::storage::records::digest;
+use crate::team::session::dispatch::{DispatchError, dispatch, reserve_dispatches};
 use crate::team::storage::{RoomStore, StorageError};
 use crate::team::tests::config;
 
@@ -36,10 +30,6 @@ fn restart_retains_sources_scopes_controls_pending_work_and_budget() {
 
     let mut store = RoomStore::create(directory.path(), room.clone()).unwrap();
 
-    let attachment = store
-        .save_attachment("image/png", b"retained image bytes")
-        .unwrap();
-
     let message = MessageId::new();
 
     room.messages.push(PublicMessage {
@@ -51,7 +41,6 @@ fn restart_retains_sources_scopes_controls_pending_work_and_budget() {
         publication: Publication::RootReply,
         text: "Use separate roots".into(),
         replies_to: Vec::new(),
-        attachments: vec![attachment.clone()],
     });
 
     room.summaries.push(Summary {
@@ -70,7 +59,6 @@ fn restart_retains_sources_scopes_controls_pending_work_and_budget() {
     room.input_history.push(UserInput {
         text: "Review this".into(),
         references: vec![message],
-        attachments: vec![attachment.clone()],
     });
 
     room.create_discussion(
@@ -81,15 +69,6 @@ fn restart_retains_sources_scopes_controls_pending_work_and_budget() {
     .unwrap();
 
     room.discussions[0].pause(PauseReason::User);
-
-    let attempt = AttemptId::new();
-
-    room.discussions[0]
-        .budget
-        .reserve(&[(attempt, TurnPurpose::Moderation)])
-        .unwrap();
-
-    room.discussions[0].budget.charge(attempt).unwrap();
 
     room.discussions[0].stages.push(Stage {
         decision: None,
@@ -120,10 +99,6 @@ fn restart_retains_sources_scopes_controls_pending_work_and_budget() {
 
     assert_eq!(store.revision(), 2);
     assert_eq!(store.room(), &room);
-    assert_eq!(
-        read_attachment(store.directory(), &attachment).unwrap(),
-        b"retained image bytes"
-    );
     assert!(RoomStore::open(directory.path(), id).is_err());
 
     let metadata = fs::read_to_string(store.directory.join("room.json")).unwrap();
@@ -208,11 +183,10 @@ fn storage_failures_preserve_input_and_reservations_without_backend_dispatch() {
 
     let intent = DispatchIntent {
         invocation: Default::default(),
-        attachments: Vec::new(),
         backend_generation: 1,
         coverage: Default::default(),
         recipient: alice,
-        ownership: OwnershipGeneration::default(),
+
         operation,
         stage: None,
         budget: BudgetScope::Direct(operation),
@@ -282,9 +256,10 @@ fn storage_failures_preserve_input_and_reservations_without_backend_dispatch() {
     let mut store = RoomStore::open(directory.path(), room_id).unwrap();
 
     assert_eq!(
-        store.room.direct_allowances[&operation]
-            .reservations()
-            .len(),
+        store
+            .room
+            .budget_attempts(BudgetScope::Direct(operation))
+            .count(),
         1
     );
 
@@ -304,9 +279,10 @@ fn storage_failures_preserve_input_and_reservations_without_backend_dispatch() {
     );
     assert_eq!(sends, 1);
     assert_eq!(
-        store.room.direct_allowances[&operation]
-            .reservations()
-            .len(),
+        store
+            .room
+            .budget_attempts(BudgetScope::Direct(operation))
+            .count(),
         1
     );
 
@@ -324,23 +300,110 @@ fn storage_failures_preserve_input_and_reservations_without_backend_dispatch() {
     assert_eq!(sends, 1);
 }
 
-impl RoomStore {
-    fn save_attachment(
-        &self,
-        media_type: &str,
-        bytes: &[u8],
-    ) -> Result<AttachmentReference, StorageError> {
-        let id = AttachmentId::new();
-        let directory = self.directory.join("attachments");
+#[test]
+fn batch_admission_is_atomic_and_only_unsent_or_rejected_work_releases_allowance() {
+    let directory = tempdir().unwrap();
 
-        fs::create_dir_all(&directory)?;
-        atomic_write(&directory.join(id.to_string()), bytes)?;
+    let mut room = Room::new(AgentWorkspace::default());
 
-        Ok(AttachmentReference {
-            id,
-            media_type: media_type.into(),
-            bytes: bytes.len() as u64,
-            digest: digest(bytes),
-        })
-    }
+    let member = room.add_member(config("Alice", "C:/a")).unwrap();
+
+    let discussion = room
+        .create_discussion(
+            "Review".into(),
+            vec![member],
+            DiscussionMode::Fixed {
+                report_author: member,
+            },
+        )
+        .unwrap()
+        .id();
+
+    let mut store = RoomStore::create(directory.path(), room).unwrap();
+
+    let intent = |purpose| DispatchIntent {
+        invocation: Default::default(),
+        recipient: member,
+        backend_generation: 1,
+        operation: OperationId::new(),
+        stage: None,
+        budget: BudgetScope::Discussion(discussion),
+        purpose,
+        input: UserInput::default(),
+        prepared_text: "Review".into(),
+        snapshot: PublicSnapshot::default(),
+        coverage: Default::default(),
+    };
+
+    reserve_dispatches(
+        &mut store,
+        (0..10).map(|_| intent(TurnPurpose::Response)).collect(),
+    )
+    .unwrap();
+
+    let before = store.room().clone();
+
+    assert!(matches!(
+        reserve_dispatches(
+            &mut store,
+            vec![
+                intent(TurnPurpose::Summary),
+                intent(TurnPurpose::Moderation)
+            ]
+        ),
+        Err(DispatchError::Budget(BudgetError::InsufficientTurns))
+    ));
+    assert_eq!(store.room(), &before);
+
+    let summary = reserve_dispatches(&mut store, vec![intent(TurnPurpose::Summary)]).unwrap()[0];
+    let report = reserve_dispatches(&mut store, vec![intent(TurnPurpose::Report)]).unwrap()[0];
+
+    let mut room = store.room().clone();
+
+    room.attempts
+        .iter_mut()
+        .find(|attempt| attempt.id == summary)
+        .unwrap()
+        .state = AttemptState::Rejected;
+
+    room.attempts
+        .iter_mut()
+        .find(|attempt| attempt.id == report)
+        .unwrap()
+        .state = AttemptState::Sending;
+
+    store.commit(room).unwrap();
+
+    assert!(matches!(
+        reserve_dispatches(&mut store, vec![intent(TurnPurpose::Moderation)]),
+        Err(DispatchError::Budget(BudgetError::InsufficientTurns))
+    ));
+
+    let mut room = store.room().clone();
+
+    room.discussion_mut(discussion)
+        .unwrap()
+        .budget
+        .add_turns(1)
+        .unwrap();
+
+    store.commit(room).unwrap();
+    reserve_dispatches(&mut store, vec![intent(TurnPurpose::Moderation)]).unwrap();
+
+    let room_id = store.room().id();
+    let expected = store.room().clone();
+
+    drop(store);
+
+    let store = RoomStore::open(directory.path(), room_id).unwrap();
+
+    assert_eq!(store.room(), &expected);
+    assert_eq!(
+        store
+            .room()
+            .discussion(discussion)
+            .unwrap()
+            .remaining_non_report_turns(store.room().attempts()),
+        0
+    );
 }

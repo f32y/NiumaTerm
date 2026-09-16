@@ -1,18 +1,14 @@
-use std::collections::BTreeSet;
-
 use crate::AgentWorkspace;
 use crate::chat::ThreadSettings;
 use crate::session::AgentKind;
-use crate::team::budget::{Budget, BudgetError, TurnPurpose};
 use crate::team::discussion::{
     Arrangement, ArrangementState, DiscussionError, DiscussionMode, DiscussionState, PauseReason,
     PublicSnapshot, Stage, StageKind,
 };
-use crate::team::member::{HistoryScope, MemberConfig, ProfileReference};
+use crate::team::member::{MemberConfig, ProfileReference};
 use crate::team::model::{
     AttemptId, Author, ContextError, ContextLimits, InteractionId, MessageId, OperationId,
-    OwnershipGeneration, PublicMessage, Publication, SourceFragment, StageId, Summary, SummaryId,
-    UserInput,
+    PublicMessage, Publication, SourceFragment, StageId, Summary, SummaryId, UserInput,
 };
 use crate::team::room::{MemberError, Room};
 
@@ -30,7 +26,6 @@ pub(super) fn config(name: &str, root: &str) -> MemberConfig {
             ..ThreadSettings::default()
         },
         role: String::new(),
-        history: HistoryScope::CompletedPublic,
     }
 }
 
@@ -47,8 +42,7 @@ fn shared_profile_members_keep_independent_conversations_settings_and_roots() {
     settings.model = Some("another-model".into());
     settings.sandbox = Some("workspace-write".into());
 
-    room.set_member_settings(alice, OwnershipGeneration::default(), settings)
-        .unwrap();
+    room.set_member_settings(alice, settings).unwrap();
 
     room.members[0].coverage.messages.insert(MessageId::new());
 
@@ -66,7 +60,7 @@ fn shared_profile_members_keep_independent_conversations_settings_and_roots() {
 }
 
 #[test]
-fn duplicate_names_and_stale_settings_leave_member_state_unchanged() {
+fn duplicate_names_leave_member_state_unchanged() {
     let mut room = Room::new(AgentWorkspace::default());
 
     let alice = room.add_member(config("Alice", "C:/a")).unwrap();
@@ -84,14 +78,6 @@ fn duplicate_names_and_stale_settings_leave_member_state_unchanged() {
     assert_eq!(
         room.rename_member(alice, "\n"),
         Err(MemberError::InvalidName)
-    );
-    assert_eq!(
-        room.set_member_settings(
-            alice,
-            OwnershipGeneration::default().next().unwrap(),
-            ThreadSettings::default()
-        ),
-        Err(MemberError::StaleOwner)
     );
     assert_eq!(room, before);
 
@@ -118,12 +104,6 @@ fn mode_changes_preserve_checkpoints_budget_and_independent_pause_reasons() {
 
     let run = &mut room.discussions[0];
     let attempt = AttemptId::new();
-
-    run.budget
-        .reserve(&[(attempt, TurnPurpose::Response)])
-        .unwrap();
-
-    run.budget.charge(attempt).unwrap();
 
     run.stages.push(Stage {
         decision: None,
@@ -161,7 +141,7 @@ fn mode_changes_preserve_checkpoints_budget_and_independent_pause_reasons() {
     assert!(run.pauses().contains(&PauseReason::ModeChange));
     assert_eq!(run.state(), DiscussionState::Paused);
     assert_eq!(run.stages(), stages);
-    assert_eq!(run.budget(), &budget);
+    assert_eq!(run.budget, budget);
     assert_eq!(run.participants(), &[alice, bob]);
     assert_eq!(run.mode(), DiscussionMode::Moderated { moderator: bob });
     assert!(matches!(
@@ -180,64 +160,6 @@ fn mode_changes_preserve_checkpoints_budget_and_independent_pause_reasons() {
     assert_eq!(room.discussions()[0].participants(), &[alice, bob]);
 }
 
-#[test]
-fn stage_reservations_are_atomic_and_keep_the_report_turn() {
-    let mut budget = Budget::discussion();
-
-    let initial: Vec<_> = (0..10)
-        .map(|_| (AttemptId::new(), TurnPurpose::Response))
-        .collect();
-
-    budget.reserve(&initial).unwrap();
-
-    let before = budget.clone();
-
-    let group = [
-        (AttemptId::new(), TurnPurpose::Summary),
-        (AttemptId::new(), TurnPurpose::Moderation),
-    ];
-
-    assert_eq!(budget.reserve(&group), Err(BudgetError::InsufficientTurns));
-    assert_eq!(budget, before);
-
-    budget.reserve(&group[..1]).unwrap();
-
-    assert_eq!(
-        budget.reserve(&group[1..]),
-        Err(BudgetError::InsufficientTurns)
-    );
-
-    let report = AttemptId::new();
-
-    budget.reserve(&[(report, TurnPurpose::Report)]).unwrap();
-
-    budget.charge(report).unwrap();
-
-    assert_eq!(
-        budget.cancel_unsent(report),
-        Err(BudgetError::AlreadyDispatched)
-    );
-
-    budget.cancel_unsent(group[0].0).unwrap();
-
-    assert_eq!(
-        budget.reserve(&group[1..]),
-        Err(BudgetError::InsufficientTurns)
-    );
-
-    budget.add_turns(1).unwrap();
-
-    budget.reserve(&group[1..]).unwrap();
-
-    let charged = budget.clone();
-
-    assert_eq!(
-        budget.reserve(&[group[1]]),
-        Err(BudgetError::DuplicateAttempt)
-    );
-    assert_eq!(budget, charged);
-}
-
 fn message(text: &str) -> PublicMessage {
     PublicMessage {
         id: MessageId::new(),
@@ -245,7 +167,6 @@ fn message(text: &str) -> PublicMessage {
         publication: Publication::UserInput,
         text: text.into(),
         replies_to: Vec::new(),
-        attachments: Vec::new(),
     }
 }
 
@@ -398,11 +319,6 @@ fn summary_scope_cannot_include_omitted_sources_and_disabling_requires_originals
 
     room.summaries.push(summary.clone());
 
-    room.members[0].history = HistoryScope::Selected {
-        messages: BTreeSet::from([selected.id]),
-        summaries: BTreeSet::new(),
-    };
-
     let limits = ContextLimits {
         max_bytes: 10_000,
         recent_messages: 0,
@@ -411,7 +327,10 @@ fn summary_scope_cannot_include_omitted_sources_and_disabling_requires_originals
     let prepared = room
         .prepare_context(
             alice,
-            &room.public_snapshot(),
+            &PublicSnapshot {
+                messages: vec![selected.id],
+                summaries: vec![summary.id],
+            },
             &UserInput::default(),
             &limits,
         )
@@ -421,7 +340,6 @@ fn summary_scope_cannot_include_omitted_sources_and_disabling_requires_originals
     assert!(!prepared.text.contains("Both topics"));
     assert!(!prepared.text.contains("Omitted topic"));
 
-    room.members[0].history = HistoryScope::CompletedPublic;
     room.controls.automatic_summaries = false;
 
     let prepared = room

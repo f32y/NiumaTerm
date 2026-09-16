@@ -36,14 +36,16 @@ pub(super) fn public_request(input: UserInput) -> PublicMessage {
         publication: Publication::UserInput,
         text: input.text,
         replies_to: input.references,
-        attachments: input.attachments,
     }
 }
 
 /// The stage `discussion` opens once its last one settled. A spent turn budget
 /// goes straight to the report, unless the moderator was just asked to decide.
-pub(super) fn next_stage(discussion: &Discussion) -> Result<NextStage, TeamError> {
-    if discussion.budget.remaining_non_report_turns() == 0
+pub(super) fn next_stage(
+    discussion: &Discussion,
+    remaining_turns: u32,
+) -> Result<NextStage, TeamError> {
+    if remaining_turns == 0
         && discussion
             .stages
             .last()
@@ -172,7 +174,7 @@ pub(super) fn build_intent(
             .map(|member| json!({"id": member.id(), "name": member.name()}))
             .collect();
 
-        instructions.push_str(&format!("Application scheduling context: {}\n", json!({"operation": operation, "stage": stage.map(|(id, _)| id), "eligible_members": members, "remaining_non_report_turns": discussion.budget().remaining_non_report_turns()})));
+        instructions.push_str(&format!("Application scheduling context: {}\n", json!({"operation": operation, "stage": stage.map(|(id, _)| id), "eligible_members": members, "remaining_non_report_turns": discussion.remaining_non_report_turns(room.attempts())})));
     }
 
     let body_limits = ContextLimits {
@@ -190,14 +192,13 @@ pub(super) fn build_intent(
     Ok(DispatchIntent {
         invocation: Invocation::MemberConversation,
         recipient,
-        ownership: member.ownership,
+
         backend_generation,
         operation,
         stage: stage.map(|(id, _)| id),
         budget,
         purpose,
         input,
-        attachments: prepared.attachments,
         prepared_text: instructions,
         snapshot: snapshot.clone(),
         coverage: prepared.coverage,

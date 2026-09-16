@@ -1,8 +1,14 @@
 use nmt_agent::session::lifecycle::Status;
-use nmt_agent::team::execution_slots::WorkStatus;
 use nmt_agent::team::model::ContextLimits;
 
 use crate::agent_tab::execution::AgentSession;
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct WorkStatus {
+    pub(super) foreground: bool,
+    pub(super) background: usize,
+    pub(super) interaction: bool,
+}
 
 pub(super) const CONTEXT_LIMITS: ContextLimits = ContextLimits {
     max_bytes: 96_000,
@@ -20,6 +26,5 @@ pub(super) fn work_status(session: &AgentSession) -> WorkStatus {
                 .is_some_and(|backend| backend.has_active_operation()),
         background: state.background_activity().1,
         interaction: state.input.waiting(),
-        uncertain: false,
     }
 }
