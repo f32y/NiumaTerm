@@ -5,13 +5,13 @@ use futures::executor::block_on;
 use crate::block_store::{BlockStore, SegmentMeta};
 use crate::event::{BlockEvent, Msg};
 use crate::ghostty::{BlockHandle, GhosttyTerminal};
-use crate::pty_pipe::requests::answer_query;
 use crate::render_buffer::RenderBuffer;
 use crate::selection::SelectionType;
 use crate::session::request::Request;
 use crate::session::selection::frozen_selection_pieces;
 use crate::session::state_tests::session_from_engine;
 use crate::session::{BlockPoint, TerminalSession};
+use crate::termio::requests::answer_query;
 
 /// `frozen_selection_pieces` produces one per-block range with block-edge
 /// endpoints resolved per item.

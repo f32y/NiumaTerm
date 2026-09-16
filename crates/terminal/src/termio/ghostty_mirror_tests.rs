@@ -9,13 +9,13 @@ use parking_lot::Mutex;
 
 use crate::event::{self, VoidListener};
 use crate::ghostty;
-use crate::pty_pipe::powershell_compatibility::RESIZE_INPUT_DELAY;
-use crate::pty_pipe::{
-    Interest, Poll, PtyPipe, PtyState, READ_BUFFER_SIZE, SNAPSHOT_MIN_INTERVAL,
-    SYNC_OUTPUT_TIMEOUT, SessionOptions, Token, Waker, mode, publish_render_buffer,
-    scrollback_bytes, start_session,
-};
 use crate::render_buffer::{FrameStore, RenderBuffer};
+use crate::termio::powershell_compatibility::RESIZE_INPUT_DELAY;
+use crate::termio::{
+    Interest, Poll, PtyState, READ_BUFFER_SIZE, SNAPSHOT_MIN_INTERVAL, SYNC_OUTPUT_TIMEOUT,
+    SessionOptions, Termio, Token, Waker, mode, publish_render_buffer, scrollback_bytes,
+    start_session,
+};
 
 #[test]
 fn failed_capture_does_not_publish_back_buffer() {
@@ -63,8 +63,8 @@ fn render_buffer_row_text(buffer: &RenderBuffer, y: usize) -> String {
         .to_string()
 }
 
-fn resized_pipe(initial: &[u8]) -> PtyPipe<FakePty, VoidListener> {
-    let mut machine = PtyPipe::new(
+fn resized_pipe(initial: &[u8]) -> Termio<FakePty, VoidListener> {
+    let mut machine = Termio::new(
         Arc::new(FrameStore::new(RenderBuffer::new(80, 24))),
         Arc::new(AtomicU32::new(0)),
         FakePty {
@@ -713,7 +713,7 @@ fn terminal_replies_resume_after_partial_writes_in_input_order() {
         },
     };
 
-    let mut machine = PtyPipe::new(
+    let mut machine = Termio::new(
         Arc::new(FrameStore::new(RenderBuffer::new(20, 3))),
         Arc::new(AtomicU32::new(0)),
         pty,
@@ -808,7 +808,7 @@ fn disabled_terminal_responses_are_forwarded_without_replying() {
         writer: FakeWriter::default(),
     };
 
-    let mut machine = PtyPipe::new(
+    let mut machine = Termio::new(
         Arc::new(FrameStore::new(RenderBuffer::new(20, 3))),
         Arc::new(AtomicU32::new(0)),
         pty,
@@ -852,7 +852,7 @@ fn resize_message_publishes_snapshot_to_render_buffer() {
         writer: FakeWriter::default(),
     };
 
-    let mut machine = PtyPipe::new(
+    let mut machine = Termio::new(
         Arc::clone(&render_buffer),
         vt_modes,
         pty,
@@ -908,7 +908,7 @@ fn theme_refresh_preserves_synchronized_output_until_commit() {
         writer: FakeWriter::default(),
     };
 
-    let mut machine = PtyPipe::new(
+    let mut machine = Termio::new(
         Arc::clone(&render_buffer),
         Arc::new(AtomicU32::new(0)),
         pty,
@@ -1056,7 +1056,7 @@ fn theme_refresh_preserves_progress_cursor_suppression() {
         writer: FakeWriter::default(),
     };
 
-    let mut machine = PtyPipe::new(
+    let mut machine = Termio::new(
         Arc::clone(&render_buffer),
         Arc::new(AtomicU32::new(0)),
         pty,
@@ -1147,7 +1147,7 @@ fn conpty_echo_after_resize_preserves_addressed_row() {
         writer: FakeWriter::default(),
     };
 
-    let mut machine = PtyPipe::new(
+    let mut machine = Termio::new(
         render_buffer,
         vt_modes,
         pty,
@@ -1211,7 +1211,7 @@ fn conpty_repaint_after_resize_uses_active_screen_when_scrolled() {
         writer: FakeWriter::default(),
     };
 
-    let mut machine = PtyPipe::new(
+    let mut machine = Termio::new(
         render_buffer,
         vt_modes,
         pty,
@@ -1296,7 +1296,7 @@ fn pty_read_events(
     stream: &[u8],
 ) -> (
     Vec<event::TerminalEvent>,
-    PtyPipe<FakePty, CollectingListener>,
+    Termio<FakePty, CollectingListener>,
 ) {
     let events = Arc::new(Mutex::new(Vec::new()));
 
@@ -1307,7 +1307,7 @@ fn pty_read_events(
         writer: FakeWriter::default(),
     };
 
-    let mut machine = PtyPipe::new(
+    let mut machine = Termio::new(
         Arc::new(FrameStore::new(RenderBuffer::new(80, 24))),
         Arc::new(AtomicU32::new(0)),
         pty,

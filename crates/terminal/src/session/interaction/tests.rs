@@ -8,13 +8,13 @@ use crate::block_store::SegmentMeta;
 use crate::event::{BlockEvent, Msg};
 use crate::ghostty::GhosttyTerminal;
 use crate::input::{KeyPhase, TerminalKey};
-use crate::pty_pipe::requests::answer_query;
 use crate::selection::SelectionType;
 use crate::session::interaction::{
     InputOutcome, TerminalInteraction, block_selection_span, selection_type_for_click_count,
 };
 use crate::session::state_tests::{session_from_engine, test_session};
 use crate::session::{BlockPoint, TerminalSession};
+use crate::termio::requests::answer_query;
 
 fn frozen_session() -> (TerminalSession, GhosttyTerminal, mpsc::Receiver<Msg>) {
     let mut engine = GhosttyTerminal::new(24, 4, 100).unwrap();

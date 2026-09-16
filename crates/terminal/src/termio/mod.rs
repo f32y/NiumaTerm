@@ -1,7 +1,7 @@
-pub use crate::pty_pipe::session::{
+pub use crate::termio::session::{
     OutputSink, SessionHandles, SessionOptions, SessionWorker, start_session,
 };
-pub use crate::pty_pipe::write_queue::PtyState;
+pub use crate::termio::write_queue::PtyState;
 
 pub(crate) mod requests;
 
@@ -28,12 +28,12 @@ use tracing::{error, warn};
 
 use crate::event::{self, EventListener, Msg, MsgSender, TerminalEvent};
 use crate::ghostty::{self, GhosttyTerminal, mode};
-use crate::pty_pipe::marks::{apply_sniffer_mark, engine_blocks_live_list};
-use crate::pty_pipe::powershell_compatibility::PowerShellCompatibility;
-use crate::pty_pipe::prompt_sniffer::PromptSniffer;
-use crate::pty_pipe::requests::answer_query;
 use crate::render_buffer::{FrameStore, RenderBuffer};
 use crate::session::request::{Checkpoint, RequestError};
+use crate::termio::marks::{apply_sniffer_mark, engine_blocks_live_list};
+use crate::termio::powershell_compatibility::PowerShellCompatibility;
+use crate::termio::prompt_sniffer::PromptSniffer;
+use crate::termio::requests::answer_query;
 use crate::vt_modes;
 
 /// Reserved `Poll` token for the loop's `Waker`. PTY source tokens start above it.
@@ -62,7 +62,12 @@ enum FlushReason {
     Exit,
 }
 
-pub struct PtyPipe<T: EventedPty, U: EventListener> {
+/// The PTY thread's state and the engine's single owner. It reads PTY output
+/// into the engine, forwards input and resizes to the PTY, tracks the shell
+/// lifecycle marks, publishes captured frames on a bounded cadence, and
+/// answers the session's asynchronous reads. Named after Ghostty's `Termio`,
+/// which holds the same role.
+pub struct Termio<T: EventedPty, U: EventListener> {
     sender: MsgSender,
     receiver: mpsc::Receiver<Msg>,
 
@@ -94,7 +99,7 @@ pub struct PtyPipe<T: EventedPty, U: EventListener> {
 
     capture_failed: bool,
 
-    /// VT modes published to the frontend. This `PtyPipe` is the sole writer;
+    /// VT modes published to the frontend. This `Termio` is the sole writer;
     /// the input path reads it lock-free. `Mode` is `u32`.
     vt_modes: Arc<AtomicU32>,
 
@@ -240,7 +245,7 @@ fn scrollback_bytes(lines: usize, cols: u16) -> usize {
         .saturating_mul(BYTES_PER_CELL)
 }
 
-impl<T, U> PtyPipe<T, U>
+impl<T, U> Termio<T, U>
 where
     T: EventedPty + Send + 'static,
     U: EventListener + Send + 'static,
@@ -251,7 +256,7 @@ where
         pty: T,
         event_proxy: U,
         options: &SessionOptions,
-    ) -> Result<PtyPipe<T, U>, Box<dyn error::Error>> {
+    ) -> Result<Termio<T, U>, Box<dyn error::Error>> {
         let poll = Poll::new()?;
 
         // The `Waker` is registered on a reserved token; the worker threads (Windows)
@@ -288,7 +293,7 @@ where
             sync::atomic::Ordering::Relaxed,
         );
 
-        Ok(PtyPipe {
+        Ok(Termio {
             sender,
             receiver: rx,
             pending_commands: VecDeque::new(),

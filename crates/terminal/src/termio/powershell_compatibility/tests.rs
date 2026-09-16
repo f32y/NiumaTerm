@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use crate::pty_pipe::powershell_compatibility::{PowerShellCompatibility, RESIZE_INPUT_DELAY};
+use crate::termio::powershell_compatibility::{PowerShellCompatibility, RESIZE_INPUT_DELAY};
 
 #[test]
 fn resize_pauses_expire_and_interleaved_input_has_a_fixed_wait_limit() {

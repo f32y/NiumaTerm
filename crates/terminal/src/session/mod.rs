@@ -61,7 +61,6 @@ use crate::ghostty::{BlockHandle, ScreenRowRead};
 use crate::graphics::{GraphicData, UpdateQueues};
 use crate::grid::{Column, Line, Pos};
 use crate::input::{TerminalKey, key_encode_flags, should_defer_to_ime};
-use crate::pty_pipe::{SessionOptions, SessionWorker, start_session};
 use crate::render_buffer::{FrameStore, RenderBuffer};
 use crate::selection::{SelectionRange, SelectionType, WORD_DELIMITERS};
 use crate::session::config::{default_shell, is_windows_powershell};
@@ -72,6 +71,7 @@ use crate::session::request::{BlockRange, Query, Request, TextPiece, TextSource}
 use crate::session::selection::{
     SurfaceSelection, frozen_selection_pieces, selection_screen_range,
 };
+use crate::termio::{SessionOptions, SessionWorker, start_session};
 use crate::vt_modes::Mode;
 
 type SessionBuffer = Arc<FrameStore>;

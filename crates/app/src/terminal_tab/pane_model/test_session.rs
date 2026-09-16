@@ -10,8 +10,8 @@ use nmt_config::appearance::InputStyle;
 use nmt_config::colors::Colors;
 use nmt_config::system::NewlineShortcut;
 use nmt_platform::{EventedPty, Interest, Poll, ProcessReadWrite, Token, Waker, WinsizeBuilder};
-use nmt_terminal::pty_pipe::SessionOptions;
 use nmt_terminal::session::TerminalSession;
+use nmt_terminal::termio::SessionOptions;
 use parking_lot::Mutex;
 
 use crate::terminal_tab::block_list::chrome::DurationLabels;

@@ -8,13 +8,13 @@ use nmt_platform::{Poll, Token, Waker};
 use crate::block_store::SegmentMeta;
 use crate::event::{BlockEvent, CommandCapture, EventListener, Msg, MsgSender, TerminalEvent};
 use crate::ghostty::{BlockHandle, GhosttyTerminal};
-use crate::pty_pipe::SessionWorker;
 use crate::render_buffer::{FrameStore, RenderBuffer};
 use crate::selection::SelectionType;
 use crate::session::mouse::{SurfaceCellSide, SurfaceMouseEventKind, SurfaceScreenCell};
 use crate::session::page::PageCache;
 use crate::session::proxy::TerminalEventProxy;
 use crate::session::{SessionSharedState, TerminalSession};
+use crate::termio::SessionWorker;
 use crate::vt_modes::Mode;
 
 #[test]

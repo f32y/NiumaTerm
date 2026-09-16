@@ -5,7 +5,7 @@ use tracing::warn;
 use crate::block_store::SegmentMeta;
 use crate::event::{self, EventListener, TerminalEvent};
 use crate::ghostty::{self, GhosttyTerminal, mode};
-use crate::pty_pipe::prompt_sniffer::SnifferMark;
+use crate::termio::prompt_sniffer::SnifferMark;
 
 const BLOCK_BOUNDARY_CLEAR: &[u8] = b"\x1b[2J\x1b[3J\x1b[H";
 

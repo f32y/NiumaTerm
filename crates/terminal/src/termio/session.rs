@@ -8,8 +8,8 @@ use nmt_config::colors::Colors;
 use nmt_platform::EventedPty;
 
 use crate::event::{EventListener, Msg, MsgSender};
-use crate::pty_pipe::PtyPipe;
 use crate::render_buffer::{FrameStore, RenderBuffer};
+use crate::termio::Termio;
 
 /// Observes the exact VT bytes accepted by the engine, on the owner thread.
 /// Returning before the next command preserves checkpoint and output ordering;
@@ -107,7 +107,7 @@ where
 
     let vt_modes = Arc::new(AtomicU32::new(0));
 
-    let mut pipe = PtyPipe::new(
+    let mut pipe = Termio::new(
         Arc::clone(&render_buffer),
         Arc::clone(&vt_modes),
         pty,
