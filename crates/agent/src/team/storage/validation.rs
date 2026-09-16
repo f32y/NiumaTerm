@@ -244,3 +244,61 @@ pub(super) fn validate(room: &Room) -> Result<(), StorageError> {
 
     Ok(())
 }
+
+pub(super) fn validate_update(previous: &Room, next: &Room) -> Result<(), StorageError> {
+    if previous.id != next.id || previous.workspace != next.workspace {
+        return Err(StorageError::Invalid("room identity or workspace changed"));
+    }
+
+    if !next.messages.starts_with(&previous.messages)
+        || !next.summaries.starts_with(&previous.summaries)
+        || !next.input_history.starts_with(&previous.input_history)
+        || previous
+            .members
+            .iter()
+            .any(|old| next.member(old.id).is_none())
+        || previous
+            .discussions
+            .iter()
+            .any(|old| !next.discussions.iter().any(|new| new.id == old.id))
+        || previous
+            .attempts
+            .iter()
+            .any(|old| !next.attempts.iter().any(|new| new.id == old.id))
+    {
+        return Err(StorageError::Invalid(
+            "retained history was removed or replaced",
+        ));
+    }
+
+    for member in &previous.members {
+        let new = next
+            .member(member.id)
+            .ok_or(StorageError::Invalid("member is missing"))?;
+
+        if member.roots != new.roots {
+            return Err(StorageError::Invalid("existing conversation roots changed"));
+        }
+    }
+
+    for old in &previous.attempts {
+        let new = next
+            .attempts
+            .iter()
+            .find(|attempt| attempt.id == old.id)
+            .ok_or(StorageError::Invalid("attempt is missing"))?;
+
+        if old.intent != new.intent
+            || old
+                .provider_turn
+                .as_ref()
+                .is_some_and(|id| new.provider_turn.as_ref() != Some(id))
+        {
+            return Err(StorageError::Invalid(
+                "attempt input or accepted provider identity changed",
+            ));
+        }
+    }
+
+    Ok(())
+}

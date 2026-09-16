@@ -196,7 +196,7 @@ async fn reopened_request(cx: &mut TestAppContext, completed: bool) {
 
     drop(saved);
 
-    let (saved, _) = TeamSession::open(directory.path(), room_id).unwrap();
+    let saved = TeamSession::open(directory.path(), room_id).unwrap();
 
     let (runtime, pane, host, window) = cx.update(|cx| {
         gpui_component::init(cx);

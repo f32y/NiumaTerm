@@ -171,7 +171,7 @@ fn live_dispatch_requires_a_ready_member_and_reopen_rejects_uncertain_retry() {
 
     drop(session);
 
-    let (mut session, _) = TeamSession::open(directory.path(), room_id).unwrap();
+    let mut session = TeamSession::open(directory.path(), room_id).unwrap();
 
     session
         .member_ready(alice, 2, ModeratorAdmission::unverified(AgentKind::Codex))
@@ -200,7 +200,7 @@ fn live_dispatch_requires_a_ready_member_and_reopen_rejects_uncertain_retry() {
 
     drop(session);
 
-    let (session, _) = TeamSession::open(directory.path(), room_id).unwrap();
+    let session = TeamSession::open(directory.path(), room_id).unwrap();
 
     assert!(session.pending_recovery().next().is_none());
     assert_eq!(
@@ -363,7 +363,7 @@ fn accepted_coverage_and_root_reply_commit_once_and_survive_reopening() {
 
     drop(session);
 
-    let (session, _) = TeamSession::open(directory.path(), room_id).unwrap();
+    let session = TeamSession::open(directory.path(), room_id).unwrap();
 
     assert_eq!(
         session.store.room().attempts()[0].provider_turn.as_deref(),

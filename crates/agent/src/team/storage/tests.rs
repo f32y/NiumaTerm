@@ -1,9 +1,5 @@
-use std::fs::File;
-use std::io::Write as _;
-use std::path::Path;
-use std::{fs, mem};
+use std::fs;
 
-use serde_json::Value;
 use tempfile::tempdir;
 
 use crate::AgentWorkspace;
@@ -17,7 +13,7 @@ use crate::team::discussion::{
 use crate::team::model::AttachmentId;
 use crate::team::model::{
     AttachmentReference, AttemptId, Author, MessageId, OperationId, OwnershipGeneration,
-    PublicMessage, Publication, StageId, Summary, SummaryId, UserInput,
+    PublicMessage, Publication, RoomId, StageId, Summary, SummaryId, UserInput,
 };
 use crate::team::room::Room;
 use crate::team::session::dispatch::{dispatch, reserve_dispatches};
@@ -114,17 +110,15 @@ fn restart_retains_sources_scopes_controls_pending_work_and_budget() {
 
     store.commit(room.clone()).unwrap();
 
-    store.checkpoint().unwrap();
-
     room.rename_member(alice, "Alice frontend").unwrap();
 
     store.commit(room.clone()).unwrap();
 
     drop(store);
 
-    let (store, truncated) = RoomStore::open(directory.path(), id).unwrap();
+    let store = RoomStore::open(directory.path(), id).unwrap();
 
-    assert!(!truncated);
+    assert_eq!(store.revision(), 2);
     assert_eq!(store.room(), &room);
     assert_eq!(
         read_attachment(store.directory(), &attachment).unwrap(),
@@ -132,7 +126,7 @@ fn restart_retains_sources_scopes_controls_pending_work_and_budget() {
     );
     assert!(RoomStore::open(directory.path(), id).is_err());
 
-    let metadata = fs::read_to_string(store.directory.join("checkpoint.json")).unwrap();
+    let metadata = fs::read_to_string(store.directory.join("room.json")).unwrap();
 
     for forbidden_field in ["api_key", "api_base_url", "executable", "env"] {
         assert!(!metadata.contains(&format!("\"{forbidden_field}\"")));
@@ -140,71 +134,58 @@ fn restart_retains_sources_scopes_controls_pending_work_and_budget() {
 }
 
 #[test]
-fn incomplete_final_record_recovers_prefix_and_prior_corruption_blocks_only_that_room() {
+fn invalid_or_unsupported_snapshot_preserves_saved_bytes_and_other_rooms() {
     let directory = tempdir().unwrap();
-
-    let mut room = Room::new(AgentWorkspace::default());
-
+    let room = Room::new(AgentWorkspace::default());
     let id = room.id();
-
-    let mut store = RoomStore::create(directory.path(), room.clone()).unwrap();
-
-    room.controls.automatic_summaries = false;
-
-    store.commit(room.clone()).unwrap();
-
-    store.journal.write_all(b"{\"payload\":").unwrap();
-
-    store.journal.sync_all().unwrap();
-
-    let journal_path = store.directory.join("journal.jsonl");
+    let store = RoomStore::create(directory.path(), room).unwrap();
+    let path = store.directory.join("room.json");
+    let original = fs::read(&path).unwrap();
 
     drop(store);
-
-    let (store, truncated) = RoomStore::open(directory.path(), id).unwrap();
-
-    assert!(truncated);
-    assert_eq!(store.room(), &room);
-
-    drop(store);
-
-    let mut bytes = fs::read(&journal_path).unwrap();
-
-    bytes[0] = b'!';
-
-    fs::write(&journal_path, bytes).unwrap();
-
-    assert!(RoomStore::open(directory.path(), id).is_err());
 
     let other = Room::new(AgentWorkspace::default());
     let other_id = other.id();
 
     drop(RoomStore::create(directory.path(), other).unwrap());
 
-    assert!(RoomStore::open(directory.path(), other_id).is_ok());
+    for invalid in [b"{\"version\":2,".to_vec(), b"{\"version\":999}".to_vec()] {
+        fs::write(&path, &invalid).unwrap();
+
+        assert!(RoomStore::open(directory.path(), id).is_err());
+        assert_eq!(fs::read(&path).unwrap(), invalid);
+        assert!(RoomStore::open(directory.path(), other_id).is_ok());
+    }
+
+    fs::write(&path, original).unwrap();
+
+    assert!(RoomStore::open(directory.path(), id).is_ok());
 }
 
 #[test]
-fn unsupported_version_preserves_saved_bytes() {
+fn legacy_room_is_rejected_without_modifying_saved_files() {
     let directory = tempdir().unwrap();
-    let room = Room::new(AgentWorkspace::default());
-    let id = room.id();
-    let store = RoomStore::create(directory.path(), room).unwrap();
-    let path = store.directory.join("checkpoint.json");
+    let id = RoomId::new();
+    let room_directory = directory.path().join("agent-teams").join(id.to_string());
 
-    drop(store);
+    fs::create_dir_all(&room_directory).unwrap();
 
-    let newer = fs::read_to_string(&path)
-        .unwrap()
-        .replacen("\"version\":1", "\"version\":9000", 1);
-
-    fs::write(&path, &newer).unwrap();
+    for filename in ["checkpoint.json", "journal.jsonl"] {
+        fs::write(room_directory.join(filename), b"legacy bytes").unwrap();
+    }
 
     assert!(matches!(
         RoomStore::open(directory.path(), id),
-        Err(StorageError::UnsupportedVersion(9000))
+        Err(StorageError::LegacyFormat)
     ));
-    assert_eq!(fs::read_to_string(path).unwrap(), newer);
+    assert!(!room_directory.join("room.json").exists());
+
+    for filename in ["checkpoint.json", "journal.jsonl"] {
+        assert_eq!(
+            fs::read(room_directory.join(filename)).unwrap(),
+            b"legacy bytes"
+        );
+    }
 }
 
 #[test]
@@ -241,7 +222,9 @@ fn storage_failures_preserve_input_and_reservations_without_backend_dispatch() {
         snapshot: PublicSnapshot::default(),
     };
 
-    store.journal = File::open(store.directory.join("journal.jsonl")).unwrap();
+    let directory_before_failure = store.directory.clone();
+
+    store.directory = store.directory.join("missing-directory");
 
     let mut sends = 0;
 
@@ -259,13 +242,22 @@ fn storage_failures_preserve_input_and_reservations_without_backend_dispatch() {
     assert!(store.room.direct_allowances.is_empty());
     assert_eq!(input.text, "Keep this draft");
 
+    assert!(matches!(
+        store.commit(store.room().clone()),
+        Err(StorageError::ReopenRequired)
+    ));
+
+    store.directory = directory_before_failure;
+
     drop(store);
 
-    let (mut store, _) = RoomStore::open(directory.path(), room_id).unwrap();
+    let mut store = RoomStore::open(directory.path(), room_id).unwrap();
 
     let ids = reserve_dispatches(&mut store, vec![intent.clone()]).unwrap();
 
-    store.journal = File::open(store.directory.join("journal.jsonl")).unwrap();
+    let directory_before_failure = store.directory.clone();
+
+    store.directory = store.directory.join("missing-directory");
 
     assert!(
         dispatch(&mut store, ids[0], |_| {
@@ -278,9 +270,16 @@ fn storage_failures_preserve_input_and_reservations_without_backend_dispatch() {
     assert_eq!(store.room().attempts()[0].state, AttemptState::Reserved);
     assert_eq!(store.room().attempts()[0].intent.input, input);
 
+    assert!(matches!(
+        store.commit(store.room().clone()),
+        Err(StorageError::ReopenRequired)
+    ));
+
+    store.directory = directory_before_failure;
+
     drop(store);
 
-    let (mut store, _) = RoomStore::open(directory.path(), room_id).unwrap();
+    let mut store = RoomStore::open(directory.path(), room_id).unwrap();
 
     assert_eq!(
         store.room.direct_allowances[&operation]
@@ -313,7 +312,7 @@ fn storage_failures_preserve_input_and_reservations_without_backend_dispatch() {
 
     drop(store);
 
-    let (mut store, _) = RoomStore::open(directory.path(), room_id).unwrap();
+    let mut store = RoomStore::open(directory.path(), room_id).unwrap();
 
     assert!(
         dispatch(&mut store, ids[0], |_| {
@@ -325,139 +324,23 @@ fn storage_failures_preserve_input_and_reservations_without_backend_dispatch() {
     assert_eq!(sends, 1);
 }
 
-#[test]
-fn legacy_member_columns_survive_checkpoint_and_journal_replay() {
-    let directory = tempdir().unwrap();
-
-    let mut room = Room::new(AgentWorkspace::single(Some("C:/room".into())));
-
-    let alice = room.add_member(config("Alice", "C:/frontend")).unwrap();
-    let id = room.id();
-
-    let mut store = RoomStore::create(directory.path(), room).unwrap();
-    let mut next = store.room().clone();
-
-    next.add_member(config("Bob", "C:/backend")).unwrap();
-
-    store.commit(next).unwrap();
-
-    drop(store);
-
-    let room_directory = directory.path().join("agent-teams").join(id.to_string());
-    let checkpoint = room_directory.join("checkpoint.json");
-    let journal = room_directory.join("journal.jsonl");
-
-    restore_legacy_member_columns(&checkpoint, "/payload/room/members");
-
-    restore_legacy_member_columns(&journal, "/payload/changes/members");
-
-    let (mut store, truncated) = RoomStore::open(directory.path(), id).unwrap();
-
-    assert!(!truncated);
-    assert_eq!(store.room().members().len(), 2);
-    assert_eq!(store.room().member(alice).unwrap().name(), "Alice");
-
-    let mut next = store.room().clone();
-
-    next.members[0].role = "Updated after reopening".into();
-
-    store.commit(next).unwrap();
-
-    drop(store);
-
-    let (store, truncated) = RoomStore::open(directory.path(), id).unwrap();
-
-    assert!(!truncated);
-    assert_eq!(store.room().members().len(), 2);
-    assert_eq!(
-        store.room().member(alice).unwrap().role(),
-        "Updated after reopening"
-    );
-
-    drop(store);
-
-    let mut stored: Vec<Value> = fs::read_to_string(&journal)
-        .unwrap()
-        .lines()
-        .map(|line| serde_json::from_str(line).unwrap())
-        .collect();
-
-    stored[0]["payload"]["changes"]["members"][0]["conversation"] =
-        Value::String("00000000-0000-4000-8000-000000000099".into());
-
-    let modified: String = stored
-        .iter()
-        .map(|record| serde_json::to_string(record).unwrap() + "\n")
-        .collect();
-
-    fs::write(journal, modified).unwrap();
-
-    assert!(matches!(
-        RoomStore::open(directory.path(), id),
-        Err(StorageError::Invalid("record checksum mismatch"))
-    ));
-}
-
-fn restore_legacy_member_columns(path: &Path, pointer: &str) {
-    let mut record: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
-
-    for member in record.pointer_mut(pointer).unwrap().as_array_mut().unwrap() {
-        let object = member.as_object_mut().unwrap();
-        let conversation = object["id"].clone();
-        let fields = mem::take(object);
-
-        for (key, value) in fields {
-            if key == "conversation" {
-                continue;
-            }
-
-            let profile = key == "profile";
-
-            object.insert(key, value);
-
-            if profile {
-                object.insert("conversation".into(), conversation.clone());
-            }
-        }
-    }
-
-    record["digest"] = Value::String(digest(&serde_json::to_vec(&record["payload"]).unwrap()));
-
-    let mut bytes = serde_json::to_vec(&record).unwrap();
-
-    bytes.push(b'\n');
-
-    fs::write(path, bytes).unwrap();
-}
-
 impl RoomStore {
-    #[cfg(test)]
-    pub(crate) fn save_attachment(
+    fn save_attachment(
         &self,
         media_type: &str,
         bytes: &[u8],
     ) -> Result<AttachmentReference, StorageError> {
-        if self.failed {
-            return Err(StorageError::ReopenRequired);
-        }
-
-        if bytes.is_empty() {
-            return Err(StorageError::Invalid("empty attachment"));
-        }
-
+        let id = AttachmentId::new();
         let directory = self.directory.join("attachments");
 
         fs::create_dir_all(&directory)?;
+        atomic_write(&directory.join(id.to_string()), bytes)?;
 
-        let reference = AttachmentReference {
-            id: AttachmentId::new(),
+        Ok(AttachmentReference {
+            id,
             media_type: media_type.into(),
             bytes: bytes.len() as u64,
             digest: digest(bytes),
-        };
-
-        atomic_write(&directory.join(reference.id.to_string()), bytes)?;
-
-        Ok(reference)
+        })
     }
 }
