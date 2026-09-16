@@ -1,9 +1,8 @@
 //! Bounded background execution of interactive control calls.
 
-mod results;
-
 #[cfg(test)]
-mod tests;
+#[path = "controls_tests.rs"]
+mod controls_tests;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};

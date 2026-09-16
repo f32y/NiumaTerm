@@ -2,13 +2,12 @@
 
 use gpui::{App, Subscription};
 use nmt_agent::chat::{SendOutcome, TeamDecisionRequest, ThreadSettings};
-use nmt_agent::session::ImageAttachment;
-use nmt_agent::session::RecoveryIdentity;
 use nmt_agent::session::delivery::Submission;
 use nmt_agent::session::lifecycle::Status;
+use nmt_agent::session::{ImageAttachment, RecoveryIdentity};
 use nmt_agent::team::attempt::DispatchIntent;
 use nmt_agent::team::execution_slots::WorkStatus;
-use nmt_agent::team::identity::{AttemptId, InteractionId};
+use nmt_agent::team::model::{AttemptId, InteractionId};
 
 use crate::agent_tab::composer::attachments::scratch_dir;
 use crate::agent_tab::execution::SessionOwner;

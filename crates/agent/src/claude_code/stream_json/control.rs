@@ -1,5 +1,6 @@
 #[cfg(test)]
-mod effort_tests;
+#[path = "control_tests.rs"]
+mod control_tests;
 
 use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
@@ -10,10 +11,8 @@ use tracing::debug;
 use crate::chat::{
     ContextComposition, ContextSegment, Event, Question, QuestionOption, QuestionResolution,
 };
-use crate::deadline_timer::DeadlineTimer;
-use crate::request_policy::RequestClass;
 use crate::subprocess::InputTicket;
-use crate::subprocess::pending_requests::PendingRequests;
+use crate::subprocess::requests::{DeadlineTimer, PendingRequests, RequestClass};
 
 struct Deadline {
     at: Instant,

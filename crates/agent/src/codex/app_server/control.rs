@@ -1,7 +1,7 @@
 use serde_json::Value;
 
 use crate::codex::app_server::FIRST_TURN_RPC_ID;
-use crate::subprocess::pending_requests::PendingRequests;
+use crate::subprocess::requests::PendingRequests;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum QueryKind {

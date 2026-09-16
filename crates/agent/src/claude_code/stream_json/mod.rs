@@ -12,20 +12,16 @@
 //! switching into `bypassPermissions` mode).
 
 mod control;
-mod launch;
 mod parse;
 mod transcript;
-mod turn;
 
 #[cfg(test)]
 mod tests;
 
-#[cfg(all(test, windows))]
-use std::fs;
-#[cfg(test)]
 use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use std::{env, fs};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
@@ -40,9 +36,10 @@ use crate::chat::{
     SendOutcome, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome,
     SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
 };
+#[cfg(test)]
+use crate::claude_code::records::{edit_diff, input_detail, tool_item};
 use crate::claude_code::sessions::progress::{PROGRESS_METHOD, ProgressMonitor, ProgressSnapshot};
 use crate::claude_code::sessions::{RestoredTask, load_child_transcript};
-use crate::claude_code::shell_output::shell_items;
 use crate::claude_code::stream_json::control::{
     ControlState, PendingApproval, PendingControlOperation, PendingQuestions,
     merge_question_answers, parse_questions,
@@ -51,38 +48,23 @@ use crate::claude_code::stream_json::control::{
 use crate::claude_code::stream_json::control::{
     fail_pending_control_operations, resolve_pending_control_operation,
 };
-#[cfg(test)]
-use crate::claude_code::stream_json::launch::{
-    ANTHROPIC_MODEL_ENV, FILE_CHECKPOINTING_ENV, enable_file_checkpointing,
-};
-use crate::claude_code::stream_json::launch::{
-    claude_command, configured_permission_mode, file_rewind_request, initial_ready_model,
-    launch_model,
-};
-#[cfg(test)]
-use crate::claude_code::stream_json::parse::parse_claude_usage;
 use crate::claude_code::stream_json::parse::{
     approval_description, claude_result_error, compaction_progress, initialize_command_catalog,
     legacy_command_catalog, parse_models, slash_command_text, ui_owns_slash_command,
 };
 #[cfg(test)]
 use crate::claude_code::stream_json::parse::{
-    context_window_usage, parse_slash_commands, update_claude_output,
+    context_window_usage, parse_claude_usage, parse_slash_commands, update_claude_output,
 };
 use crate::claude_code::stream_json::transcript::TranscriptState;
 #[cfg(test)]
 use crate::claude_code::stream_json::transcript::{TurnOutputUsage, window_from_composition};
-#[cfg(test)]
-use crate::claude_code::stream_json::turn::TurnState;
-use crate::claude_code::stream_json::turn::TurnTracker;
-use crate::claude_code::tasks::ClaudeTasks;
-#[cfg(test)]
-use crate::claude_code::tool_items::{edit_diff, input_detail, tool_item};
+use crate::claude_code::tasks::{ClaudeTasks, shell_items};
 use crate::claude_code::workflows::{ClaudeWorkflowSource, ClaudeWorkflows};
-use crate::deadline_timer::DeadlineTimer;
+use crate::hook_store::home_dir;
 use crate::launcher::AgentCli;
-use crate::request_policy::RequestClass;
 use crate::subprocess::JsonLineProcess;
+use crate::subprocess::requests::{DeadlineTimer, RequestClass};
 use crate::workflow::{WorkflowRefreshRequest, WorkflowRefreshResult, WorkflowRun, WorkflowSource};
 use crate::workspace::AgentWorkspace;
 
@@ -1379,4 +1361,296 @@ impl Session {
 
         Vec::new()
     }
+}
+
+const ANTHROPIC_MODEL_ENV: &str = "ANTHROPIC_MODEL";
+const FILE_CHECKPOINTING_ENV: &str = "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING";
+
+/// The model the CLI must start on. `ANTHROPIC_MODEL` comes first because it
+/// is exported into the child environment and would win there anyway; the
+/// launch config's own field carries the model the tab asked for otherwise.
+fn launch_model(launch: &LaunchConfig) -> Option<String> {
+    // Command environment overrides are last-value-wins, so the adapter must
+    // resolve duplicate entries the same way as the spawned Claude process.
+    launch
+        .env
+        .iter()
+        .rev()
+        .find(|(name, _)| name.trim().eq_ignore_ascii_case(ANTHROPIC_MODEL_ENV))
+        .map(|(_, value)| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            launch
+                .model
+                .as_deref()
+                .map(str::trim)
+                .filter(|model| !model.is_empty())
+                .map(str::to_owned)
+        })
+}
+
+fn initial_ready_model(model: Option<&str>) -> String {
+    model.unwrap_or("default").to_string()
+}
+
+fn enable_file_checkpointing(command: &mut Command) {
+    command.env(FILE_CHECKPOINTING_ENV, "true");
+}
+
+/// Assemble the CLI invocation for one conversation. Kept apart from the spawn
+/// so the exact argument boundaries can be inspected without starting a
+/// process: a path pushed as its own argument is never re-parsed, which is what
+/// keeps a directory containing spaces or shell metacharacters intact.
+fn claude_command(
+    launcher: &AgentCli,
+    launch: &LaunchConfig,
+    workspace: &AgentWorkspace,
+    resume: Option<&str>,
+    initial_model: &Option<String>,
+) -> Command {
+    let mut command = launcher.command([
+        "-p",
+        "--output-format",
+        "stream-json",
+        "--input-format",
+        "stream-json",
+        "--verbose",
+        "--include-partial-messages",
+        "--permission-prompt-tool",
+        "stdio",
+        "--allow-dangerously-skip-permissions",
+    ]);
+
+    // File snapshots are opt-in for stream-json SDK clients. This is
+    // applied after profile overrides so every NiumaTerm Claude session
+    // can create checkpoints for subsequent `/rewind` operations.
+    enable_file_checkpointing(&mut command);
+
+    // Recent models omit checklist tools unless the client opts in. Keep an
+    // explicit profile or inherited choice while enabling progress by default.
+    if !launch
+        .env
+        .iter()
+        .any(|(name, _)| name.eq_ignore_ascii_case("CLAUDE_CODE_ENABLE_TODO_TOOLS"))
+        && env::var_os("CLAUDE_CODE_ENABLE_TODO_TOOLS").is_none()
+    {
+        command.env("CLAUDE_CODE_ENABLE_TODO_TOOLS", "1");
+    }
+
+    // Recent models omit thinking text by default and emit signature-only
+    // thinking blocks, which would leave the chat's reasoning sections
+    // permanently empty. Asking for the summarized form at launch is the only
+    // way to get that text for the whole session; the per-session control
+    // request only overrides a mode that was already chosen here.
+    command.args(["--thinking-display", "summarized"]);
+
+    // The CLI takes effort as a launch flag; its `/effort` command is the
+    // only other way in, and that costs a visible turn on every new
+    // conversation.
+    if let Some(effort) = &launch.effort {
+        command.args(["--effort", effort]);
+    }
+
+    // The CLI resolves the model once during its handshake and builds the
+    // system prompt from it, including the identity it states to the model
+    // itself. A later `set_model` reroutes the requests while that prompt
+    // keeps describing the startup model, so a model the tab already knows
+    // about has to arrive as a launch flag. Without one the CLI starts on
+    // the model from its own configuration.
+    if let Some(model) = initial_model {
+        command.args(["--model", model]);
+    }
+
+    if let Some(session_id) = resume {
+        command.args(["--resume", session_id]);
+    }
+
+    // Additional workspace directories reach the CLI through its own
+    // `--add-dir` flag, applied to new and resumed conversations alike. The
+    // primary directory is not repeated because the process already starts
+    // there, and Claude keeps its session storage and configuration discovery
+    // anchored on that directory.
+    if workspace.is_multi_root() {
+        command.arg("--add-dir");
+
+        command.args(workspace.additional());
+    }
+
+    if let Some(cwd) = workspace.primary() {
+        command.current_dir(cwd);
+    }
+
+    command
+}
+
+fn file_rewind_request(user_message_id: &str) -> Value {
+    json!({
+        "subtype": "rewind_files",
+        "user_message_id": user_message_id,
+    })
+}
+
+/// The permission mode the CLI will start in, from `~/.claude/settings.json`
+/// (`permissions.defaultMode`). The protocol has no way to query the mode
+/// before the first turn, so this mirrors the CLI's own config resolution;
+/// project-level overrides are not consulted (rare, and the first turn's
+/// `init` message corrects any mismatch).
+fn configured_permission_mode() -> Option<String> {
+    let path = home_dir()?.join(".claude").join("settings.json");
+    let settings: Value = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
+
+    settings["permissions"]["defaultMode"]
+        .as_str()
+        .map(str::to_owned)
+}
+
+// Where the CLI is in a turn, as far as its output lines say.
+//
+// The CLI announces a turn's completion with a `result` line but has no start
+// notification, so a sent turn is pending until its first output arrives, and
+// a turn the CLI opens on its own is only visible through that output.
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TurnState {
+    Idle,
+    Pending,
+    Running,
+}
+
+/// The running turn and the provider identity it was accepted under.
+struct TurnTracker {
+    state: TurnState,
+    accepted: Option<String>,
+}
+
+/// What one CLI line said about the turn.
+struct TurnObservation {
+    /// The line opened the turn, which has not been reported as started yet.
+    started: bool,
+
+    /// The turn it opened was queued by the CLI rather than sent from this
+    /// side, so nothing has begun its transcript.
+    adopted: bool,
+
+    /// The provider identity the turn was accepted under, first stated by
+    /// this line.
+    accepted: Option<String>,
+}
+
+impl Default for TurnTracker {
+    fn default() -> Self {
+        Self {
+            state: TurnState::Idle,
+            accepted: None,
+        }
+    }
+}
+
+impl TurnTracker {
+    fn is_idle(&self) -> bool {
+        self.state == TurnState::Idle
+    }
+
+    #[cfg(test)]
+    fn state(&self) -> TurnState {
+        self.state
+    }
+
+    /// Read one line from the CLI.
+    ///
+    /// A message written while a turn was still running is queued by the CLI
+    /// and then run as a turn of its own, opened with no send from this side.
+    /// Model output is the only announcement that turn makes, so it has to be
+    /// adopted here; otherwise it is never reported as started, and everything
+    /// it produces is filed under the turn that preceded it.
+    fn observe(&mut self, message: &Value) -> TurnObservation {
+        let adopted = self.state == TurnState::Idle && carries_model_output(message);
+
+        if adopted {
+            self.accepted = None;
+        }
+
+        let started = adopted || self.state == TurnState::Pending;
+
+        if started {
+            self.state = TurnState::Running;
+        }
+
+        TurnObservation {
+            started,
+            adopted,
+            accepted: self.accept(message),
+        }
+    }
+
+    /// The provider identity of the turn, when `message` is the first line of
+    /// it to state one. Child-agent lines carry their own identities, so only
+    /// the parent's own lines count.
+    fn accept(&mut self, message: &Value) -> Option<String> {
+        if self.state == TurnState::Idle
+            || self.accepted.is_some()
+            || !message["parent_tool_use_id"].is_null()
+        {
+            return None;
+        }
+
+        let provider_id = match message["type"].as_str() {
+            Some("stream_event") if message["event"]["type"] == "message_start" => {
+                message["event"]["message"]["id"].as_str()
+            }
+            Some("assistant") => message["message"]["id"].as_str(),
+            Some("result") if message["is_error"].as_bool() == Some(false) => {
+                message["uuid"].as_str()
+            }
+            _ => None,
+        }?;
+
+        if provider_id.is_empty() {
+            return None;
+        }
+
+        let id = format!("response:{provider_id}");
+
+        self.accepted = Some(id.clone());
+
+        Some(id)
+    }
+
+    /// Open a turn for a user message just written. Returns `false` when a
+    /// turn is already running, which the message then steers instead.
+    fn begin_message_turn(&mut self) -> bool {
+        if !self.is_idle() {
+            return false;
+        }
+
+        self.state = TurnState::Pending;
+        self.accepted = None;
+
+        true
+    }
+
+    /// Open a turn for a slash command just written. Only called while idle.
+    fn begin_command_turn(&mut self) {
+        self.state = TurnState::Pending;
+    }
+
+    /// Close the turn on its `result` line, returning the identity it was
+    /// accepted under.
+    fn finish(&mut self) -> Option<String> {
+        self.state = TurnState::Idle;
+
+        self.accepted.take()
+    }
+
+    /// Close the turn because the process exited.
+    fn exit(&mut self) {
+        self.state = TurnState::Idle;
+    }
+}
+
+/// Whether a line is model output, which the CLI only emits inside a turn.
+/// The turn's `system`/`init` line arrives first but is also emitted on
+/// startup and on resume, where no turn has opened yet.
+fn carries_model_output(message: &Value) -> bool {
+    matches!(message["type"].as_str(), Some("assistant" | "stream_event"))
 }

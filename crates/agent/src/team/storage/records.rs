@@ -7,10 +7,9 @@ use sha2::{Digest as _, Sha256};
 
 use crate::team::attempt::Attempt;
 use crate::team::budget::Budget;
-use crate::team::content::{PublicMessage, Summary, UserInput};
 use crate::team::discussion::Discussion;
-use crate::team::identity::OperationId;
 use crate::team::member::Member;
+use crate::team::model::{OperationId, PublicMessage, Summary, UserInput};
 use crate::team::room::{Room, RoomControls};
 use crate::team::storage::{StorageError, VERSION};
 

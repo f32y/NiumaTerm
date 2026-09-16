@@ -4,9 +4,8 @@ use std::time::Instant;
 
 use crate::chat::{ContextComposition, Item, TokenUsageBreakdown};
 use crate::claude_code::stream_json::*;
-use crate::request_policy::RequestClass;
 use crate::subprocess::InputTicket;
-use crate::subprocess::pending_requests::PendingRequests;
+use crate::subprocess::requests::{PendingRequests, RequestClass};
 use crate::workspace::AgentWorkspace;
 
 #[test]
@@ -64,7 +63,7 @@ fn retiring_control_state_cancels_pending_writes_but_preserves_cleanup() {
 fn request_deadlines_wake_without_output_and_release_the_delivery_on_close() {
     use std::sync::mpsc::{RecvTimeoutError, channel};
 
-    use crate::deadline_timer::DeadlineTimer;
+    use crate::subprocess::requests::DeadlineTimer;
 
     let (tx, rx) = channel();
 

@@ -1,14 +1,12 @@
 use serde::{Deserialize, Serialize};
 
 use crate::team::budget::TurnPurpose;
-use crate::team::content::{AttachmentReference, UserInput};
-use crate::team::context::SummaryChunk;
 use crate::team::discussion::PublicSnapshot;
-use crate::team::identity::{
-    AttemptId, DiscussionId, MemberId, MessageId, OperationId, OwnershipGeneration, StageId,
-    SummaryId,
-};
 use crate::team::member::AcceptedCoverage;
+use crate::team::model::{
+    AttachmentReference, AttemptId, DiscussionId, MemberId, MessageId, OperationId,
+    OwnershipGeneration, StageId, SummaryChunk, SummaryId, UserInput,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "id", rename_all = "snake_case")]

@@ -18,9 +18,8 @@ use gpui_component::{
 };
 use nmt_agent::session::AgentKind;
 use nmt_agent::session::lifecycle::Status;
-use nmt_agent::team::content::UserInput;
 use nmt_agent::team::discussion::{DiscussionState, PauseReason};
-use nmt_agent::team::identity::{MemberId, RoomId};
+use nmt_agent::team::model::{MemberId, RoomId, UserInput};
 use nmt_agent::team::session::TeamError;
 use rust_i18n::t;
 

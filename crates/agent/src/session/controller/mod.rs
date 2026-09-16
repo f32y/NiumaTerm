@@ -3,16 +3,6 @@
 //! The host schedules blocking work and displays returned outcomes. Runtime,
 //! delivery, recovery, and interactions advance together under one owner.
 
-pub use crate::session::controller::events::SessionEffect;
-pub use crate::session::controller::input::{QuestionSubmission, UserInterruption};
-pub use crate::session::controller::readiness::{SessionBranch, SessionReady, SessionReplay};
-pub use crate::session::controller::transitions::{SessionFailure, SessionStart};
-
-mod events;
-mod input;
-mod readiness;
-mod transitions;
-
 #[cfg(test)]
 mod tests;
 
@@ -26,19 +16,23 @@ use chrono::Utc;
 
 use crate::background_task::{BackgroundTaskKey, BackgroundTaskSnapshot};
 use crate::chat::{
-    Event, GoalStatus, Item, ReplayTurn, SendOutcome, SkillCatalog, SlashCommandInfo,
-    SlashCommandOutcome, ThreadSettings,
+    ContextComposition, ContextWindowUsage, Event, ForkCheckpoint, GoalStatus, Item, ReplayTurn,
+    SendOutcome, SessionStats, SessionSummary, SkillCatalog, SlashCommandInfo, SlashCommandOutcome,
+    TeamDecisionRequest, ThreadSettings, TurnRetry,
 };
 use crate::progress::TaskList;
-use crate::session::branch::{BranchCompletion, BranchReplay, ConversationBranch};
+use crate::session::branch::{
+    BranchCompletion, BranchFailure, BranchReplay, BranchUpdate, ConversationBranch, FileProgress,
+};
 use crate::session::capabilities::AgentCapabilities as _;
 use crate::session::children::{ChildAgents, ChildTranscript};
 use crate::session::commands::{CommandQueue, PendingSlashCommand};
 use crate::session::delivery::{MessageDelivery, RecoverablePrompt, Submission};
 use crate::session::input::{
-    ApprovalOutcome, QuestionAction, QuestionKey, SessionInput, Submission as InputSubmission,
+    ApprovalOutcome, QuestionAction, QuestionCompletion, QuestionKey, SessionInput,
+    Submission as InputSubmission,
 };
-use crate::session::lifecycle::{SessionRuntime, StartOutcome, Status};
+use crate::session::lifecycle::{InterruptOutcome, SessionRuntime, StartOutcome, Status};
 use crate::session::naming::ConversationNaming;
 use crate::session::restore::{ConversationRestore, ReadyAction, ReplayAction, SettingsSeed};
 use crate::session::settings::ConversationSettings;
@@ -1040,4 +1034,124 @@ impl SessionController {
 
         self.workflows.clear();
     }
+}
+
+pub struct SessionStart {
+    pub epoch: u64,
+    pub reset_branch: bool,
+}
+
+pub struct SessionFailure {
+    pub branch: Option<BranchFailure>,
+    pub resume_failed: bool,
+    pub cancelled_commands: bool,
+}
+
+pub struct UserInterruption {
+    pub prompt: Option<(u64, RecoverablePrompt)>,
+    pub outcome: InterruptOutcome,
+}
+
+pub enum QuestionSubmission {
+    Ignored,
+    Settled { waiting_finished: bool },
+    Waiting,
+    Failed,
+}
+
+pub struct SessionBranch {
+    pub prompt: String,
+    pub files: FileProgress,
+    pub replayed: bool,
+}
+
+pub struct SessionReady {
+    pub branch: Option<SessionBranch>,
+    pub replaced: bool,
+    pub selection: Option<Result<(), String>>,
+
+    /// The outcome of sending a remembered permission preset to a harness
+    /// that pinned its own default into the new conversation.
+    pub approval: Option<Result<(), String>>,
+}
+
+pub struct SessionReplay {
+    pub branch: Option<SessionBranch>,
+    pub replace: bool,
+}
+
+/// What the host must present after the conversation has applied a provider event.
+/// Payloads move through this result once; no transcript snapshot is constructed.
+pub enum SessionEffect {
+    Unchanged,
+    Changed,
+    Ready(SessionReady),
+    Commands(Vec<SlashCommandInfo>),
+    Skills(SkillCatalog),
+    CommandResult {
+        name: String,
+        outcome: SlashCommandOutcome,
+        advance: bool,
+    },
+    TurnStarted {
+        opened: bool,
+    },
+    ProviderTurnAccepted {
+        id: String,
+    },
+    TeamDecision(TeamDecisionRequest),
+    ProviderTurnFinished {
+        id: String,
+        error: Option<String>,
+    },
+    TurnCompleted {
+        error: Option<String>,
+        interrupted: bool,
+    },
+    OutputTokens(u64),
+    ContextWindow(ContextWindowUsage),
+    ContextComposition(ContextComposition),
+    CompactionStarted,
+    CompactionFinished {
+        error: Option<String>,
+    },
+    Branch(BranchUpdate),
+    ItemStarted(Item),
+    ItemCompleted(Item),
+    TextDelta {
+        item_id: String,
+        delta: String,
+        field: TextField,
+    },
+    ApprovalRequested,
+    ApprovalResolved,
+    InputRequested {
+        index: usize,
+    },
+    InputResolved(QuestionCompletion),
+    BackgroundActivity,
+    Workflows {
+        activity_changed: bool,
+    },
+    History(Vec<SessionSummary>),
+    SearchResults(Vec<SessionSummary>),
+    ConfirmedPrompts(Vec<String>),
+    Goal(Option<GoalStatus>),
+    PlanMode(bool),
+    Title(String),
+    Stats(SessionStats),
+    Replay(SessionReplay),
+    StatusDetail(Option<TurnRetry>),
+    ForkCheckpoints(Result<Vec<ForkCheckpoint>, String>),
+    HostExited {
+        message: String,
+    },
+    Error {
+        message: String,
+        fatal: bool,
+        failure: SessionFailure,
+    },
+    EffortRejected {
+        message: String,
+    },
 }

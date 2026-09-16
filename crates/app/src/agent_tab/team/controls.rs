@@ -1,7 +1,6 @@
 use nmt_agent::chat::ThreadSettings;
-use nmt_agent::team::content::UserInput;
 use nmt_agent::team::discussion::DiscussionMode;
-use nmt_agent::team::identity::{AttemptId, DiscussionId, MemberId, OperationId};
+use nmt_agent::team::model::{AttemptId, DiscussionId, MemberId, OperationId, UserInput};
 
 pub enum TeamCommand {
     Direct {

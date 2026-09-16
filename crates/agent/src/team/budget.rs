@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::team::identity::AttemptId;
+use crate::team::model::AttemptId;
 
 pub const DEFAULT_TURN_LIMIT: u32 = 12;
 

@@ -7,14 +7,14 @@ use serde_json::Value;
 use tracing::warn;
 
 use crate::chat::{Compaction, Item, ReplayItem, ReplayTurn};
-use crate::claude_code::compaction::{compaction_metadata, parse_compaction};
-use crate::claude_code::sessions::ClaudeCheckpoint;
+use crate::claude_code::records::{
+    compaction_metadata, complete_tool_item, parse_compaction, tool_item,
+};
 use crate::claude_code::sessions::index::TranscriptIndex;
-use crate::claude_code::sessions::paths::session_path;
 use crate::claude_code::sessions::titles::{
     clean_prompt, compaction_summary_text, conversation_user_text, is_interruption,
 };
-use crate::claude_code::tool_items::{complete_tool_item, tool_item};
+use crate::claude_code::sessions::{ClaudeCheckpoint, session_path};
 
 /// Opening a selected conversation must distinguish unreadable history from an
 /// empty transcript, so a failed read cannot replace the visible conversation.

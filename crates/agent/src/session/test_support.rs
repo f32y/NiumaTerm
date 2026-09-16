@@ -6,7 +6,7 @@ use crate::chat::{
     ForkAnchor, QuestionRequest, QuestionResponse, SendOutcome, SlashCommandInfo,
     SlashCommandOutcome,
 };
-use crate::session::team_recovery::RecoveredTeamTurn;
+use crate::session::team_capabilities::RecoveredTeamTurn;
 use crate::session::{AgentKind, RecoveryIdentity, RenameOutcome};
 use crate::workflow::{WorkflowRefreshRequest, WorkflowSource};
 

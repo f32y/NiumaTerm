@@ -1,17 +1,13 @@
 //! Branch and rewind operations independent of picker widgets and executors.
 
-pub use crate::session::branch::local::{CheckpointRead, ForkRequest};
-
-mod local;
-
 #[cfg(test)]
 mod tests;
 
 use std::mem::replace;
 
 use crate::chat::{ForkCheckpoint, ReplayTurn, SlashCommandOutcome};
+use crate::claude_code::sessions;
 use crate::claude_code::sessions::{ClaudeCheckpoint, ClaudeFork, FileRestoreAvailability};
-use crate::session::branch::local::{failure, fork_request};
 use crate::session::lifecycle::{SessionRuntime, Status};
 use crate::session::{AgentKind, Backend, OperationError, RecoveryIdentity};
 
@@ -795,4 +791,57 @@ impl<'a> From<&'a ConversationBranch> for BranchView<'a> {
             },
         }
     }
+}
+
+pub struct CheckpointRead {
+    operation: Operation,
+    source: Source,
+}
+
+impl CheckpointRead {
+    /// Synchronous disk work for the caller's existing background executor.
+    pub fn load(&self) -> Result<Vec<ClaudeCheckpoint>, String> {
+        sessions::load_checkpoints(self.source.cwd.as_deref(), &self.source.id)
+    }
+}
+
+pub struct ForkRequest {
+    operation: Operation,
+    source: Source,
+    user_message_id: String,
+}
+
+impl ForkRequest {
+    /// Uses the existing transcript algorithm and leaves the source file intact.
+    pub fn run(&self) -> Result<ClaudeFork, String> {
+        sessions::fork_session_before(
+            self.source.cwd.as_deref(),
+            &self.source.id,
+            &self.user_message_id,
+        )
+    }
+}
+
+fn failure(stage: FailureStage, files: FileProgress, error: BranchError) -> BranchUpdate {
+    BranchUpdate::Failed(BranchFailure {
+        stage,
+        files,
+        error,
+    })
+}
+
+fn fork_request(
+    local: &mut LocalOperation,
+    checkpoint: ClaudeCheckpoint,
+    files: FileProgress,
+) -> ForkRequest {
+    let request = ForkRequest {
+        operation: local.operation,
+        source: local.source.clone(),
+        user_message_id: checkpoint.user_message_id.clone(),
+    };
+
+    local.phase = LocalPhase::Forking { checkpoint, files };
+
+    request
 }

@@ -1,5 +1,5 @@
-use nmt_agent::team::identity::{MemberId, OperationId, StageId};
-use nmt_agent::team::moderation::ModeratorAction;
+use nmt_agent::team::discussion::ModeratorAction;
+use nmt_agent::team::model::{MemberId, OperationId, StageId};
 use serde::Deserialize;
 
 #[derive(Deserialize)]

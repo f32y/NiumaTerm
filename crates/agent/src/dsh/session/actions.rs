@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::chat::{ForkAnchor, MessageImage, QuestionResponse, SendOutcome, SlashCommandOutcome};
 use crate::dsh::api::{ApiClient, CallError};
-use crate::dsh::commands;
+use crate::dsh::catalogs;
 use crate::dsh::session::Session;
 use crate::dsh::session::controls::{Operation, question_id};
 use crate::dsh::session::loads::{
@@ -392,10 +392,10 @@ impl Session {
             arguments => format!("/{name} {arguments}"),
         };
 
-        let answer = commands::execute(&self.client, &self.session_id, &line);
+        let answer = catalogs::execute_command(&self.client, &self.session_id, &line);
 
         match answer {
-            Ok(value) => commands::outcome(name, &value),
+            Ok(value) => catalogs::command_outcome(name, &value),
             Err(error) => SlashCommandOutcome::Rejected {
                 message: error.message().to_string(),
             },

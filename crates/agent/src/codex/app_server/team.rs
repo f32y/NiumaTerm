@@ -1,5 +1,6 @@
 #[cfg(test)]
-mod tests;
+#[path = "team_tests.rs"]
+mod team_tests;
 
 use std::collections::BTreeMap;
 
@@ -10,8 +11,7 @@ use crate::codex::app_server::control::QueryKind;
 use crate::codex::app_server::protocol::initial_thread_request;
 use crate::codex::app_server::{ConversationStart, Event, Session};
 use crate::session::AgentKind;
-use crate::session::team_capabilities::{ModeratorAdmission, TeamLaunch};
-use crate::session::team_recovery::RecoveredTeamTurn;
+use crate::session::team_capabilities::{ModeratorAdmission, RecoveredTeamTurn, TeamLaunch};
 use crate::{AgentWorkspace, LaunchConfig};
 
 pub(super) struct TeamState {

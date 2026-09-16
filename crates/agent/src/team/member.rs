@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::AgentWorkspace;
 use crate::chat::ThreadSettings;
 use crate::session::AgentKind;
-use crate::team::identity::{MemberId, MessageId, OwnershipGeneration, SummaryId};
+use crate::team::model::{MemberId, MessageId, OwnershipGeneration, SummaryId};
 
 /// A lookup into protected profile storage, without resolved launch credentials.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

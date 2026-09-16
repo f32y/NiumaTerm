@@ -6,9 +6,6 @@
 //! claimed it is held until the claim arrives, because the two orders are both
 //! legal and dropping the early traffic would lose the opening of a turn.
 
-#[cfg(test)]
-mod early_tests;
-
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
@@ -21,10 +18,8 @@ use crate::codex::app_server::host::{
     Delivery, FIRST_HOST_RPC_ID, HOST_EXIT_METHOD, HOST_INIT_RPC_ID, RegistrationId,
     message_thread_id,
 };
-use crate::deadline_timer::DeadlineTimer;
-use crate::message_memory::OUTPUT_FAILURE_METHOD;
-use crate::request_policy::RequestClass;
-use crate::subprocess::InputTicket;
+use crate::subprocess::requests::{DeadlineTimer, RequestClass};
+use crate::subprocess::{InputTicket, OUTPUT_FAILURE_METHOD};
 
 fn request_class(message: &Value) -> RequestClass {
     match message["method"].as_str() {
@@ -721,5 +716,83 @@ impl EarlyMessages {
 
     fn clear(&mut self) {
         self.threads.clear();
+    }
+}
+
+// These tests reach into the retention table directly, so they stay a child
+// of this module rather than joining the host tests.
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use crate::codex::app_server::host::router::EarlyMessages;
+
+    #[test]
+    fn delayed_ownership_retains_every_thread_and_message_in_order() {
+        let mut early = EarlyMessages::default();
+
+        for thread in 0..80 {
+            for id in 0..80 {
+                early.hold(&thread.to_string(), json!({"id": id}));
+            }
+        }
+
+        for thread in 0..80 {
+            let messages = early.take(&thread.to_string());
+
+            assert_eq!(messages.len(), 80);
+
+            for (id, message) in messages.iter().enumerate() {
+                assert_eq!(message["id"], id);
+            }
+
+            assert!(early.take(&thread.to_string()).is_empty());
+        }
+
+        assert!(early.threads.is_empty());
+    }
+
+    #[test]
+    fn large_payloads_survive_previous_per_thread_and_shared_byte_limits() {
+        let mut early = EarlyMessages::default();
+
+        for thread in 0..9 {
+            early.hold(
+                &thread.to_string(),
+                json!({"text": "x".repeat(3 * 1024 * 1024)}),
+            );
+        }
+
+        for thread in 0..9 {
+            let messages = early.take(&thread.to_string());
+
+            assert_eq!(messages.len(), 1);
+            assert_eq!(
+                messages[0]["text"].as_str().unwrap(),
+                "x".repeat(3 * 1024 * 1024)
+            );
+        }
+
+        assert!(early.threads.is_empty());
+    }
+
+    #[test]
+    fn explicit_thread_and_host_cleanup_release_retained_messages() {
+        let mut early = EarlyMessages::default();
+
+        early.hold("closed", json!({"id": 1}));
+
+        early.hold("live", json!({"id": 2}));
+
+        early.forget("closed");
+
+        assert!(early.take("closed").is_empty());
+        assert_eq!(early.take("live"), vec![json!({"id": 2})]);
+
+        early.hold("shutdown", json!({"id": 3}));
+
+        early.clear();
+
+        assert!(early.threads.is_empty());
     }
 }

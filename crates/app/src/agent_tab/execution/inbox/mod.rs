@@ -6,8 +6,8 @@ mod output_tests;
 use std::time::Duration;
 
 use futures::channel::mpsc;
+use nmt_agent::OUTPUT_FAILURE_METHOD;
 use nmt_agent::chat::Event;
-use nmt_agent::message_memory::OUTPUT_FAILURE_METHOD;
 use parking_lot::Mutex;
 use serde_json::Value;
 

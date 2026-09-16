@@ -4,11 +4,10 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::team::budget::{Budget, TurnPurpose};
-use crate::team::content::UserInput;
-use crate::team::identity::{
+use crate::team::model::{
     AttemptId, DiscussionId, InteractionId, MemberId, MessageId, OperationId, StageId, SummaryId,
+    UserInput,
 };
-use crate::team::moderation::ModeratorDecision;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -304,4 +303,19 @@ impl Discussion {
                 )
             })
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "action", deny_unknown_fields, rename_all = "snake_case")]
+pub enum ModeratorAction {
+    Invite { recipients: Vec<MemberId> },
+    Report,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModeratorDecision {
+    pub operation: OperationId,
+    pub attempt: AttemptId,
+    pub actor: MemberId,
+    pub action: ModeratorAction,
 }

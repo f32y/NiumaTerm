@@ -8,15 +8,14 @@ use crate::AgentWorkspace;
 use crate::chat::ThreadSettings;
 use crate::team::attempt::Attempt;
 use crate::team::budget::Budget;
-use crate::team::content::{PublicMessage, Summary, UserInput};
-use crate::team::context::{ContextError, ContextLimits, PreparedContext};
 use crate::team::discussion::{
     Discussion, DiscussionError, DiscussionMode, DiscussionState, PublicSnapshot,
 };
-use crate::team::identity::{
-    DiscussionId, MemberId, MessageId, OperationId, OwnershipGeneration, RoomId, SummaryId,
-};
 use crate::team::member::{AcceptedCoverage, HistoryScope, Member, MemberConfig};
+use crate::team::model::{
+    ContextError, ContextLimits, DiscussionId, MemberId, MessageId, OperationId,
+    OwnershipGeneration, PreparedContext, PublicMessage, RoomId, Summary, SummaryId, UserInput,
+};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Room {

@@ -12,8 +12,7 @@ use parking_lot::Mutex;
 use serde_json::{Value, json};
 
 use crate::launcher::AgentCli;
-use crate::message_memory::OUTPUT_FAILURE_METHOD;
-use crate::subprocess::JsonLineProcess;
+use crate::subprocess::{JsonLineProcess, OUTPUT_FAILURE_METHOD};
 use crate::usage::{
     FIVE_HOUR_WINDOW_MINUTES, UsageResetCredits, UsageSnapshot, UsageWindow, WEEKLY_WINDOW_MINUTES,
     parse_timestamp_millis,

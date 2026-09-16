@@ -15,9 +15,6 @@ pub use crate::chat::{
     SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
     TokenUsageBreakdown,
 };
-pub use crate::codex::app_server::options::{
-    APPROVAL_OPTIONS, APPROVAL_REVIEWER_OPTIONS, SANDBOX_OPTIONS,
-};
 
 pub(crate) use crate::codex::app_server::title_generation::provisional_title_from_prompt;
 
@@ -26,7 +23,6 @@ mod compaction;
 mod control;
 mod conversation;
 mod host;
-mod options;
 mod progress;
 mod protocol;
 mod questions;
@@ -1251,3 +1247,18 @@ impl Drop for Session {
         let _ = self.shutdown(Duration::from_millis(250), true);
     }
 }
+
+/// Serialized values for approval-policy selection (`AskForApproval` serializes
+/// kebab-case).
+pub const APPROVAL_OPTIONS: [&str; 3] = ["untrusted", "on-request", "never"];
+
+/// Serialized values for choosing who handles eligible approval requests.
+pub const APPROVAL_REVIEWER_OPTIONS: [&str; 2] = ["user", "auto_review"];
+
+/// `(serialized value, display label)` for sandbox selection (`SandboxPolicy` uses a
+/// camelCase `type` tag).
+pub const SANDBOX_OPTIONS: [(&str, &str); 3] = [
+    ("readOnly", "read-only"),
+    ("workspaceWrite", "workspace-write"),
+    ("dangerFullAccess", "full-access"),
+];

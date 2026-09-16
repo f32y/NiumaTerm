@@ -1,6 +1,6 @@
 use nmt_agent::session::lifecycle::Status;
-use nmt_agent::team::context::ContextLimits;
 use nmt_agent::team::execution_slots::WorkStatus;
+use nmt_agent::team::model::ContextLimits;
 
 use crate::agent_tab::execution::AgentSession;
 

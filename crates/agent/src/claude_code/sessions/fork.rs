@@ -10,8 +10,8 @@ use uuid::Uuid;
 
 use crate::chat::ReplayTurn;
 use crate::claude_code::sessions::index::TranscriptIndex;
-use crate::claude_code::sessions::paths::session_path;
 use crate::claude_code::sessions::replay::parse_replay;
+use crate::claude_code::sessions::session_path;
 use crate::claude_code::sessions::titles::{provisional_title_from_prompt, user_prompt_text};
 
 /// A conversation rewind either starts a fresh process before the first

@@ -18,17 +18,15 @@ pub(crate) use crate::dsh::host::{
 };
 
 mod api;
-mod commands;
+mod catalogs;
 mod events;
 mod frames;
 mod history;
 mod host;
 mod mapping;
 mod models;
-mod presets;
 mod projections;
 mod session;
-mod subagents;
 mod workflows;
 
 #[cfg(test)]

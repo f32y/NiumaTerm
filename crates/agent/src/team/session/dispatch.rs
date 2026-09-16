@@ -4,7 +4,7 @@ use crate::chat::SendOutcome;
 use crate::team::attempt::{Attempt, AttemptState, BudgetScope, DispatchIntent};
 use crate::team::budget::{Budget, BudgetError, TurnPurpose};
 use crate::team::discussion::{ArrangementState, PauseReason};
-use crate::team::identity::AttemptId;
+use crate::team::model::AttemptId;
 use crate::team::room::Room;
 use crate::team::storage::{RoomStore, StorageError};
 

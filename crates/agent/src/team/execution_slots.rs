@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::team::identity::{AttemptId, MemberId, OwnershipGeneration};
+use crate::team::model::{AttemptId, MemberId, OwnershipGeneration};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ExecutionKey {

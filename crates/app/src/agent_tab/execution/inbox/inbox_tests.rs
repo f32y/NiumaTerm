@@ -1,6 +1,6 @@
 use futures::StreamExt as _;
 use futures::executor::block_on;
-use nmt_agent::message_memory::OUTPUT_FAILURE_METHOD;
+use nmt_agent::OUTPUT_FAILURE_METHOD;
 use serde_json::json;
 
 use crate::agent_tab::execution::inbox::channel;

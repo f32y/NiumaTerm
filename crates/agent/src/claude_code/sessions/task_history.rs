@@ -19,11 +19,11 @@ use serde_json::Value;
 
 use crate::background_task::{BackgroundTaskRefs, BackgroundTaskState, BackgroundTaskUpdate};
 use crate::chat::Item;
+use crate::claude_code::records::{complete_tool_item, tool_item};
 use crate::claude_code::sessions::index::TranscriptIndex;
-use crate::claude_code::sessions::paths::project_dir;
+use crate::claude_code::sessions::project_dir;
 use crate::claude_code::sessions::replay::parse_child_replay;
 use crate::claude_code::sessions::titles::conversation_user_text;
-use crate::claude_code::tool_items::{complete_tool_item, tool_item};
 use crate::json::{condense, text_field};
 
 /// Tool names whose launch creates a child agent.

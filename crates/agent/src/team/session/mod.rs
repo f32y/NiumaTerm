@@ -3,13 +3,10 @@
 pub use crate::team::session::dispatch::DispatchError;
 pub use crate::team::session::outcomes::AttemptEventKey;
 
-pub(super) mod attachments;
 pub(super) mod dispatch;
 
-mod controls;
 mod outcomes;
 mod planning;
-mod prompt;
 
 #[cfg(test)]
 mod planning_tests;
@@ -17,6 +14,7 @@ mod planning_tests;
 mod tests;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
 use std::path::Path;
 
 use thiserror::Error;
@@ -25,29 +23,24 @@ use crate::chat::{SendOutcome, ThreadSettings};
 use crate::session::team_capabilities::ModeratorAdmission;
 use crate::team::attempt::{Attempt, AttemptState, BudgetScope, DispatchIntent, Invocation};
 use crate::team::budget::{BudgetError, TurnPurpose};
-use crate::team::content::{AttachmentReference, UserInput};
-use crate::team::context::{ContextError, ContextLimits};
 use crate::team::discussion::{
-    ArrangementState, DiscussionError, DiscussionMode, DiscussionState, PauseReason,
-    PublicSnapshot, Stage, StageKind,
+    ArrangementState, DiscussionError, DiscussionMode, DiscussionState, ModeratorAction,
+    ModeratorDecision, PauseReason, PublicSnapshot, Stage, StageKind,
 };
 use crate::team::execution_slots::{ExecutionKey, ExecutionSlots, WorkStatus};
-use crate::team::identity::{
-    AttemptId, DiscussionId, MemberId, MessageId, OperationId, OwnershipGeneration, RoomId, StageId,
-};
 use crate::team::member::MemberConfig;
-use crate::team::moderation::{ModeratorAction, ModeratorDecision};
+use crate::team::model::{
+    AttachmentReference, AttemptId, ContextError, ContextLimits, DiscussionId, MemberId, MessageId,
+    OperationId, OwnershipGeneration, RoomId, StageId, UserInput,
+};
 use crate::team::room::{MemberError, Room};
-use crate::team::session::attachments::read_attachment;
-use crate::team::session::controls::cancel_pending_reservations;
 use crate::team::session::outcomes::{
     abandon, accept, accepts, complete, completes, event_attempt, fail, in_flight,
 };
 use crate::team::session::planning::{
-    DispatchPlan, NextStage, next_stage, public_request, stage_purpose,
+    DispatchPlan, NextStage, build_intent, next_stage, public_request, stage_purpose,
 };
-use crate::team::session::prompt::build_intent;
-use crate::team::storage::{RoomStore, StorageError};
+use crate::team::storage::{RoomStore, StorageError, digest};
 
 pub struct TeamSession {
     store: RoomStore,
@@ -1241,4 +1234,37 @@ impl TeamSession {
 
         Ok(true)
     }
+}
+
+pub(super) fn read_attachment(
+    directory: &Path,
+    reference: &AttachmentReference,
+) -> Result<Vec<u8>, StorageError> {
+    let bytes = fs::read(directory.join("attachments").join(reference.id.to_string()))?;
+
+    if bytes.len() as u64 != reference.bytes || digest(&bytes) != reference.digest {
+        return Err(StorageError::Invalid("attachment contents changed"));
+    }
+
+    Ok(bytes)
+}
+
+fn cancel_pending_reservations(room: &mut Room, id: DiscussionId) -> Result<(), TeamError> {
+    let discussion = room
+        .discussions
+        .iter_mut()
+        .find(|run| run.id == id)
+        .ok_or(TeamError::Unavailable)?;
+
+    for attempt in &mut room.attempts {
+        if attempt.intent.budget == BudgetScope::Discussion(id)
+            && attempt.state == AttemptState::Reserved
+        {
+            discussion.budget.cancel_unsent(attempt.id)?;
+
+            attempt.state = AttemptState::Rejected;
+        }
+    }
+
+    Ok(())
 }

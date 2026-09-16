@@ -20,7 +20,6 @@ pub mod naming;
 pub mod restore;
 pub mod settings;
 pub mod team_capabilities;
-pub mod team_recovery;
 pub mod update_readiness;
 pub mod workflows;
 

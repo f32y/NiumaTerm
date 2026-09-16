@@ -1,4 +1,4 @@
-use crate::claude_code::compaction::*;
+use crate::claude_code::records::*;
 
 #[test]
 fn live_and_persisted_metadata_parse_to_the_same_record() {

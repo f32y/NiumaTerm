@@ -4,8 +4,7 @@ use std::io::Write;
 use serde_json::{Value, json};
 use tempfile::tempdir;
 
-use crate::claude_code::sessions::progress::ProgressReader;
-use crate::claude_code::sessions::progress::tracker::ProgressTracker;
+use crate::claude_code::sessions::progress::{ProgressReader, ProgressTracker};
 use crate::progress::TaskStatus;
 
 fn call(tracker: &mut ProgressTracker, name: &str, input: Value, output: Value, failed: bool) {

@@ -1,10 +1,67 @@
-//! Pure Claude tool-item mapping shared by live stream events and persisted
-//! session replay. Keeping protocol interpretation here prevents restored
-//! cards from losing fields when the live path learns a new tool shape.
+//! Readers of Claude records shared by the live stream-json protocol and
+//! persisted session replay: compaction-boundary metadata and tool-call
+//! items. Keeping both here means a resumed conversation decodes exactly what
+//! a live one did.
+//!
+//! The two carry the same record under different key conventions: the SDK
+//! output message uses `compact_metadata` with snake_case fields, while the
+//! transcript file keeps the CLI's internal `compactMetadata` with camelCase
+//! fields. Reading both spellings from one parser keeps a resumed boundary as
+//! detailed as a live one.
+
+#[cfg(test)]
+#[path = "records_tests.rs"]
+mod records_tests;
 
 use serde_json::Value;
 
-use crate::chat::Item;
+use crate::chat::{Compaction, CompactionTrigger, Item};
+
+/// The metadata object of a `compact_boundary` record, whichever key
+/// convention produced it.
+pub(super) fn compaction_metadata(record: &Value) -> &Value {
+    let snake = &record["compact_metadata"];
+
+    if snake.is_object() {
+        snake
+    } else {
+        &record["compactMetadata"]
+    }
+}
+
+pub(super) fn parse_compaction(metadata: &Value) -> Compaction {
+    Compaction {
+        trigger: match metadata["trigger"].as_str() {
+            Some("auto") => Some(CompactionTrigger::Automatic),
+            Some("manual") => Some(CompactionTrigger::Manual),
+            _ => None,
+        },
+        pre_tokens: token_count(metadata, "pre_tokens", "preTokens"),
+        post_tokens: token_count(metadata, "post_tokens", "postTokens"),
+        messages_summarized: token_count(metadata, "messages_summarized", "messagesSummarized"),
+        user_context: text(metadata, "user_context", "userContext"),
+        summary: None,
+    }
+}
+
+fn token_count(metadata: &Value, snake: &str, camel: &str) -> Option<u64> {
+    metadata[snake]
+        .as_u64()
+        .or_else(|| metadata[camel].as_u64())
+}
+
+fn text(metadata: &Value, snake: &str, camel: &str) -> Option<String> {
+    metadata[snake]
+        .as_str()
+        .or_else(|| metadata[camel].as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+}
+
+// Pure Claude tool-item mapping shared by live stream events and persisted
+// session replay. Keeping protocol interpretation here prevents restored
+// cards from losing fields when the live path learns a new tool shape.
 
 /// Map a tool-use block to a transcript item: Bash becomes a command card,
 /// file-editing tools become file-change cards, everything else a titled tool

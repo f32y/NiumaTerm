@@ -4,12 +4,10 @@
 
 pub(crate) use crate::subprocess::input::{InputClosed, InputTicket};
 
-pub(crate) mod pending_requests;
+pub(crate) mod requests;
 
 mod input;
 
-#[cfg(test)]
-mod output_tests;
 #[cfg(test)]
 mod tests;
 
@@ -25,8 +23,10 @@ use parking_lot::Mutex;
 use serde_json::{Value, json};
 use tracing::warn;
 
-use crate::message_memory::OUTPUT_FAILURE_METHOD;
 use crate::subprocess::input::InputQueue;
+
+/// Local notification used when a subprocess cannot safely continue reading.
+pub const OUTPUT_FAILURE_METHOD: &str = "nmt/outputFailure";
 
 /// A spawned agent CLI with piped stdio, kill-on-close containment, and
 /// newline-delimited JSON output. Stdout lines that parse as JSON are handed

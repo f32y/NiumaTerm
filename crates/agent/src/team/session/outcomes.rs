@@ -2,9 +2,10 @@
 
 use crate::team::attempt::{Attempt, AttemptState, BudgetScope};
 use crate::team::budget::TurnPurpose;
-use crate::team::content::{Author, PublicMessage, Publication};
 use crate::team::discussion::{ArrangementState, DiscussionState, PauseReason};
-use crate::team::identity::{AttemptId, MemberId, MessageId, OwnershipGeneration};
+use crate::team::model::{
+    AttemptId, Author, MemberId, MessageId, OwnershipGeneration, PublicMessage, Publication,
+};
 use crate::team::room::Room;
 use crate::team::session::TeamError;
 

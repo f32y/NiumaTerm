@@ -3,7 +3,8 @@
 //! would pay the Node start cost again for nothing.
 
 #[cfg(test)]
-mod tests;
+#[path = "host_tests.rs"]
+mod host_tests;
 
 use std::io::{BufRead as _, BufReader};
 use std::process::{Child, ExitStatus, Stdio};

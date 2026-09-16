@@ -6,11 +6,11 @@ use crate::session::AgentKind;
 use crate::session::team_capabilities::ModeratorAdmission;
 use crate::team::attempt::{AttemptState, BudgetScope, DispatchIntent};
 use crate::team::budget::TurnPurpose;
-use crate::team::content::{Author, PublicMessage, Publication, UserInput};
-use crate::team::context::ContextLimits;
 use crate::team::discussion::{DiscussionMode, DiscussionState, PublicSnapshot};
 use crate::team::execution_slots::WorkStatus;
-use crate::team::identity::{MessageId, OperationId};
+use crate::team::model::{
+    Author, ContextLimits, MessageId, OperationId, PublicMessage, Publication, UserInput,
+};
 use crate::team::room::Room;
 use crate::team::session::{AttemptEventKey, TeamError, TeamSession};
 use crate::team::tests::config;
