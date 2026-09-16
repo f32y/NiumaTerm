@@ -26,10 +26,9 @@ use nmt_platform::{EventedPty, Events, Interest, Poll, Token, Waker, WinsizeBuil
 use nmt_profiling::pty::{BatchEnd, PtyProfiler, Stage};
 use tracing::{error, warn};
 
-use crate::event::{self, EventListener, Msg, MsgSender, TerminalEvent};
+use crate::event::{self, Checkpoint, EventListener, Msg, MsgSender, RequestError, TerminalEvent};
 use crate::ghostty::{self, GhosttyTerminal, mode};
 use crate::render_buffer::{FrameStore, RenderBuffer};
-use crate::session::request::{Checkpoint, RequestError};
 use crate::termio::marks::{apply_sniffer_mark, engine_blocks_live_list};
 use crate::termio::powershell_compatibility::PowerShellCompatibility;
 use crate::termio::prompt_sniffer::PromptSniffer;

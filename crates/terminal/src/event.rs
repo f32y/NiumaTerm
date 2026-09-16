@@ -3,15 +3,17 @@ use std::fmt::{self, Debug, Formatter};
 use std::sync::{self, Arc};
 use std::{path, time};
 
+use futures::channel::oneshot;
 use nmt_config::CursorShape;
 use nmt_config::colors::Colors;
 use nmt_platform::{Waker, WinsizeBuilder};
 
 use crate::block_store::SegmentMeta;
 use crate::clipboard::ClipboardType;
-use crate::ghostty;
-use crate::graphics::UpdateQueues;
-use crate::session::request::{CheckpointRequest, Query, Reply};
+use crate::ghostty::{self, BlockHandle};
+use crate::graphics::{GraphicData, UpdateQueues};
+use crate::selection::SelectionType;
+use crate::session::page::{PageSource, RowPage};
 
 /// One PTY-thread block event: a trusted
 /// `;D` freezes the whole command into a finished engine block
@@ -271,4 +273,92 @@ pub struct ProgressReport {
 
     /// Optional progress percentage (0-100), only used with Set, Error, and Pause states
     pub progress: Option<u8>,
+}
+
+// ---------------------------------------------------------------------------
+// Requests the session sends to the PTY thread
+//
+// The engine lives on the PTY thread, so every read of engine state from the
+// UI side travels as a `Msg::Query` or `Msg::Checkpoint` carrying a oneshot
+// reply. The PTY thread answers between output batches and marks a reply
+// `Stale` when the frame or block it referred to has since moved on.
+// ---------------------------------------------------------------------------
+
+pub type Request<T> = oneshot::Receiver<Result<T, RequestError>>;
+
+pub type Reply<T> = oneshot::Sender<Result<T, RequestError>>;
+
+pub type BlockRange = ((usize, u32), (usize, u32));
+
+#[derive(Debug, Clone)]
+pub enum RequestError {
+    Stale,
+    Unavailable,
+    Engine(String),
+}
+
+#[derive(Debug)]
+pub struct TextPiece {
+    pub handle: BlockHandle,
+    pub start: Option<(usize, u32)>,
+    pub end: Option<(usize, u32)>,
+}
+
+#[derive(Debug)]
+pub enum TextSource {
+    Screen {
+        revision: u64,
+        start: (u16, u32),
+        end: (u16, u32),
+        rectangle: bool,
+    },
+    Blocks(Vec<TextPiece>),
+    BlockSelection {
+        handle: BlockHandle,
+        line: usize,
+        col: u32,
+        kind: SelectionType,
+    },
+}
+
+#[derive(Debug)]
+pub enum Query {
+    Image {
+        handle: BlockHandle,
+        image_id: u32,
+        reply: Reply<GraphicData>,
+    },
+    Rows {
+        source: PageSource,
+        start: usize,
+        reply: Reply<RowPage>,
+    },
+    Text {
+        source: TextSource,
+        reply: Reply<String>,
+    },
+    ExpandSelection {
+        handle: BlockHandle,
+        line: usize,
+        col: u32,
+        kind: SelectionType,
+        reply: Reply<BlockRange>,
+    },
+}
+
+#[derive(Debug)]
+pub struct Checkpoint {
+    pub vt: Vec<u8>,
+    pub cols: u16,
+    pub rows: u16,
+}
+
+/// Completion runs on the owner thread before any later output is parsed.
+/// It may register a stream subscriber but must not wait for another thread.
+pub struct CheckpointRequest(pub Box<dyn FnOnce(Result<Checkpoint, RequestError>) + Send>);
+
+impl fmt::Debug for CheckpointRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("CheckpointRequest")
+    }
 }

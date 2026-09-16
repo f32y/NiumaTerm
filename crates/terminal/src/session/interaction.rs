@@ -10,11 +10,11 @@ use std::collections::HashSet;
 use futures::channel::oneshot;
 use nmt_config::system::NewlineShortcut;
 
+use crate::event::{BlockRange, Request};
 use crate::ghostty::BlockHandle;
 use crate::input::{KeyPhase, TerminalKey, TerminalKeyAction, key_action};
 use crate::render_buffer::RenderBuffer;
 use crate::selection::{SelectionRange, SelectionType};
-use crate::session::request::{BlockRange, Request};
 use crate::session::{BlockPoint, TerminalSession};
 use crate::vt_modes::Mode;
 

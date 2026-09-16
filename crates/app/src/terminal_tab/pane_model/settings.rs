@@ -5,7 +5,7 @@ mod settings_tests;
 use nmt_config::CursorShape;
 use nmt_config::colors::Colors;
 use nmt_config::colors::term::List;
-use nmt_terminal::session::request::Request;
+use nmt_terminal::event::Request;
 
 use crate::terminal_tab::frame::TerminalColor;
 
