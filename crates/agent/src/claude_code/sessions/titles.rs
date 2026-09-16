@@ -1,11 +1,13 @@
 use std::io::{BufRead, BufReader, Read as _, Seek as _, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::{cmp, fs, iter};
+use std::{cmp, fs};
 
 use serde_json::Value;
 
 use crate::chat::SessionSummary;
 use crate::claude_code::sessions::{project_dir, projects_root};
+use crate::json::block_text;
+use crate::session::naming::provisional_title;
 
 /// Head window scanned for the first user prompt. Sessions can open with
 /// kilobytes of hook output and queue records before the first prompt, but
@@ -18,7 +20,6 @@ const TITLE_SCAN_BYTES: u64 = 64 * 1024;
 /// and the listing then falls back to the prompt the session opened with.
 const RECORDED_TITLE_SCAN_BYTES: u64 = 64 * 1024;
 
-const PROVISIONAL_TITLE_CHARS: usize = 60;
 const PROVISIONAL_TITLE_WORDS: usize = 6;
 
 /// Cheap first pass for the history UI: how many sessions exist, so the list
@@ -69,7 +70,7 @@ fn project_dirs() -> Vec<PathBuf> {
 /// Sessions resumable from `cwd`, newest first. Title extraction reads bounded
 /// head and tail windows, so listing multi-megabyte transcripts stays cheap;
 /// still meant for a background thread.
-pub fn list_sessions(cwd: Option<&str>) -> Vec<SessionSummary> {
+pub(crate) fn list_sessions(cwd: Option<&str>) -> Vec<SessionSummary> {
     let Some(dir) = project_dir(cwd) else {
         return Vec::new();
     };
@@ -311,21 +312,7 @@ pub(super) fn compaction_summary_text(record: &Value) -> Option<String> {
 /// array of typed blocks; `None` covers both an unknown shape and a record
 /// whose text is blank.
 fn record_text(record: &Value) -> Option<String> {
-    let text = match &record["message"]["content"] {
-        Value::String(text) => text.clone(),
-        Value::Array(blocks) => {
-            let parts: Vec<&str> = blocks
-                .iter()
-                .filter(|block| block["type"].as_str() == Some("text"))
-                .filter_map(|block| block["text"].as_str())
-                .collect();
-
-            parts.join("\n")
-        }
-        _ => return None,
-    };
-
-    (!text.trim().is_empty()).then_some(text)
+    block_text(&record["message"]["content"], true)
 }
 
 /// Strip the wrappers the CLI stores around prompts (injected
@@ -365,32 +352,5 @@ pub(super) fn clean_prompt(text: &str) -> String {
 /// The compact opening-prompt title shown while Claude generates a model title.
 /// It is also the history fallback when no persisted title metadata exists.
 pub(crate) fn provisional_title_from_prompt(text: &str) -> Option<String> {
-    let cleaned = clean_prompt(text);
-
-    let mut words = cleaned.split_whitespace();
-
-    let first = words.next()?;
-
-    if first.starts_with('/') {
-        return None;
-    }
-
-    let normalized = iter::once(first)
-        .chain(words.take(PROVISIONAL_TITLE_WORDS - 1))
-        .collect::<Vec<_>>()
-        .join(" ");
-
-    let mut chars = normalized.chars();
-
-    let prefix: String = chars.by_ref().take(PROVISIONAL_TITLE_CHARS).collect();
-
-    if chars.next().is_none() {
-        return Some(prefix);
-    }
-
-    let mut truncated: String = prefix.chars().take(PROVISIONAL_TITLE_CHARS - 1).collect();
-
-    truncated.push('…');
-
-    Some(truncated)
+    provisional_title(&clean_prompt(text), Some(PROVISIONAL_TITLE_WORDS))
 }

@@ -257,14 +257,11 @@ fn todo_list(value: &Value) -> TaskList {
             .flatten()
             .enumerate()
             .filter_map(|(index, item)| {
-                Some(Task {
-                    id: index.to_string(),
-                    title: item["content"].as_str()?.to_owned(),
-                    status: TaskStatus::parse(item["status"].as_str()?)?,
-                    description: None,
-                    owner: None,
-                    blocked_by: Vec::new(),
-                })
+                Some(Task::indexed(
+                    index,
+                    item["content"].as_str()?,
+                    TaskStatus::parse(item["status"].as_str()?)?,
+                ))
             })
             .collect(),
         ..TaskList::default()

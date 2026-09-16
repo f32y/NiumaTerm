@@ -14,7 +14,6 @@ use std::io::{BufRead, BufReader, ErrorKind};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use chrono::DateTime;
 use serde_json::Value;
 
 use crate::background_task::{BackgroundTaskRefs, BackgroundTaskState, BackgroundTaskUpdate};
@@ -24,23 +23,11 @@ use crate::claude_code::sessions::index::TranscriptIndex;
 use crate::claude_code::sessions::project_dir;
 use crate::claude_code::sessions::replay::parse_child_replay;
 use crate::claude_code::sessions::titles::conversation_user_text;
-use crate::json::{condense, text_field};
-
-/// Tool names whose launch creates a child agent.
-const LAUNCH_TOOLS: [&str; 2] = ["Task", "Agent"];
-
-/// System subtypes that report a task's lifecycle. A stopped task reports
-/// `killed` only in a `task_updated` patch, so both terminal records matter.
-const LIFECYCLE_RECORDS: [&str; 4] = [
-    "task_started",
-    "task_progress",
-    "task_notification",
-    "task_updated",
-];
-
-/// The task type of delegated agent work; shells, monitors, and workflows share
-/// these records and must not become rows.
-const AGENT_TASK_TYPE: &str = "local_agent";
+use crate::claude_code::tasks::{
+    AGENT_TASK_TYPE, LAUNCH_TOOLS, LIFECYCLE_RECORDS, lifecycle_state, record_identifiers,
+    sidechain_preview,
+};
+use crate::json::{text_field, unix_seconds_from_rfc3339};
 
 /// One child agent rebuilt from history, keyed by the identity the live
 /// reducer uses so the two merge into a single row.
@@ -472,62 +459,11 @@ fn linked_parent(record: &Value) -> Option<&str> {
         .filter(|id| !id.is_empty())
 }
 
-fn record_identifiers(record: &Value) -> Vec<String> {
-    ["task_id", "tool_use_id", "agent_id"]
-        .iter()
-        .filter_map(|key| record[*key].as_str().filter(|id| !id.is_empty()))
-        .map(str::to_owned)
-        .collect()
-}
-
-fn lifecycle_state(kind: &str, record: &Value) -> Option<BackgroundTaskState> {
-    let status = match kind {
-        "task_started" | "task_progress" => return Some(BackgroundTaskState::Working),
-        "task_notification" => record["status"].as_str()?,
-        "task_updated" => record["patch"]["status"]
-            .as_str()
-            .or_else(|| record["status"].as_str())?,
-        _ => return None,
-    };
-
-    Some(match status {
-        "pending" => BackgroundTaskState::Starting,
-        "running" => BackgroundTaskState::Working,
-        "paused" => BackgroundTaskState::NeedsInput,
-        "completed" => BackgroundTaskState::Done,
-        "failed" => BackgroundTaskState::Failed,
-        "stopped" | "killed" => BackgroundTaskState::Stopped,
-        _ => return None,
-    })
-}
-
-fn sidechain_preview(record: &Value) -> Option<String> {
-    for block in record["message"]["content"]
-        .as_array()
-        .into_iter()
-        .flatten()
-    {
-        let text = match block["type"].as_str() {
-            Some("text") => block["text"].as_str(),
-            Some("thinking") => block["thinking"].as_str(),
-            Some("tool_use") => block["name"].as_str(),
-            _ => None,
-        };
-
-        if let Some(condensed) = text.and_then(condense) {
-            return Some(condensed);
-        }
-    }
-
-    None
-}
-
 /// Transcript records carry RFC 3339 timestamps. A record without a usable one
 /// still restores its row; only the elapsed and completion labels are lost.
 fn timestamp(record: &Value) -> Option<SystemTime> {
-    let raw = record["timestamp"].as_str()?;
-    let parsed = DateTime::parse_from_rfc3339(raw).ok()?;
-    let seconds = u64::try_from(parsed.timestamp()).ok()?;
+    let seconds = unix_seconds_from_rfc3339(record["timestamp"].as_str()?)?;
+    let seconds = u64::try_from(seconds).ok()?;
 
     Some(UNIX_EPOCH + Duration::from_secs(seconds))
 }

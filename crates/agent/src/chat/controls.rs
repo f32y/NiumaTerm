@@ -61,6 +61,28 @@ pub struct AgentPreset {
     pub description: Option<String>,
 }
 
+/// Put `selected` at the head of a catalog that does not list it. A
+/// conversation can run on a model its provider stopped advertising, or on
+/// one named by hand, and the picker has to show the value in use rather
+/// than a blank; a bare entry with no tiers or efforts is what such a model
+/// has to offer.
+pub(crate) fn list_selected_model(models: &mut Vec<ModelInfo>, selected: Option<&str>) {
+    if let Some(model) = selected.map(str::trim).filter(|model| !model.is_empty())
+        && !models.iter().any(|entry| entry.model == model)
+    {
+        models.insert(
+            0,
+            ModelInfo {
+                model: model.to_string(),
+                display: model.to_string(),
+                tiers: Vec::new(),
+                default_tier: None,
+                efforts: Vec::new(),
+            },
+        );
+    }
+}
+
 /// One entry of a backend's model catalog.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ModelInfo {
