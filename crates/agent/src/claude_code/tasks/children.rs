@@ -13,7 +13,7 @@ use serde_json::Value;
 
 use crate::background_task::{BackgroundTaskKey, BackgroundTaskTranscriptUpdate};
 use crate::chat::Item;
-use crate::claude_code::records::{complete_tool_item, tool_item};
+use crate::claude_code::records::child_content_items;
 
 #[derive(Default)]
 pub(super) struct ChildTranscripts {
@@ -110,52 +110,7 @@ impl ChildTranscripts {
             }
         }
 
-        for block in message["message"]["content"]
-            .as_array()
-            .into_iter()
-            .flatten()
-        {
-            let Some(id) = block["id"]
-                .as_str()
-                .or_else(|| block["tool_use_id"].as_str())
-                .map(str::to_owned)
-                .or_else(|| message["uuid"].as_str().map(str::to_owned))
-            else {
-                continue;
-            };
-
-            match block["type"].as_str() {
-                Some("text") if message["type"].as_str() != Some("user") => {
-                    items.push(Item::AgentMessage {
-                        id,
-                        text: block["text"].as_str().map(str::to_owned),
-                        questions: None,
-                    })
-                }
-                Some("text") => {}
-                Some("thinking") => items.push(Item::Reasoning {
-                    id,
-                    summary: block["thinking"].as_str().map(str::to_owned),
-                }),
-                Some("tool_use") => {
-                    let item = tool_item(
-                        &id,
-                        block["name"].as_str().unwrap_or("tool"),
-                        &block["input"],
-                    );
-
-                    self.open_tool(id, item.clone());
-
-                    items.push(item);
-                }
-                Some("tool_result") => {
-                    if let Some(started) = self.close_tool(&id) {
-                        items.push(complete_tool_item(started, block));
-                    }
-                }
-                _ => {}
-            }
-        }
+        items.extend(child_content_items(message, &mut self.open_tools));
 
         items
     }
@@ -166,13 +121,5 @@ impl ChildTranscripts {
         self.launch_prompts
             .get(canonical)
             .is_some_and(|prompt| prompt.trim() == text.trim())
-    }
-
-    fn open_tool(&mut self, id: String, item: Item) {
-        self.open_tools.insert(id, item);
-    }
-
-    fn close_tool(&mut self, id: &str) -> Option<Item> {
-        self.open_tools.remove(id)
     }
 }

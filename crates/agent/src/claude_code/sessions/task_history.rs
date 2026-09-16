@@ -18,7 +18,7 @@ use serde_json::Value;
 
 use crate::background_task::{BackgroundTaskRefs, BackgroundTaskState, BackgroundTaskUpdate};
 use crate::chat::Item;
-use crate::claude_code::records::{complete_tool_item, tool_item};
+use crate::claude_code::records::child_content_items;
 use crate::claude_code::sessions::index::TranscriptIndex;
 use crate::claude_code::sessions::project_dir;
 use crate::claude_code::sessions::replay::parse_child_replay;
@@ -351,52 +351,7 @@ fn child_items(record: &Value, open_tools: &mut HashMap<String, Item>) -> Vec<It
         items.push(Item::UserMessage { text: Some(text) });
     }
 
-    for block in record["message"]["content"]
-        .as_array()
-        .into_iter()
-        .flatten()
-    {
-        let Some(id) = block["id"]
-            .as_str()
-            .or_else(|| block["tool_use_id"].as_str())
-            .map(str::to_owned)
-            .or_else(|| record["uuid"].as_str().map(str::to_owned))
-        else {
-            continue;
-        };
-
-        match block["type"].as_str() {
-            Some("text") if record["type"].as_str() != Some("user") => {
-                items.push(Item::AgentMessage {
-                    id,
-                    text: block["text"].as_str().map(str::to_owned),
-                    questions: None,
-                })
-            }
-            Some("text") => {}
-            Some("thinking") => items.push(Item::Reasoning {
-                id,
-                summary: block["thinking"].as_str().map(str::to_owned),
-            }),
-            Some("tool_use") => {
-                let item = tool_item(
-                    &id,
-                    block["name"].as_str().unwrap_or("tool"),
-                    &block["input"],
-                );
-
-                open_tools.insert(id, item.clone());
-
-                items.push(item);
-            }
-            Some("tool_result") => {
-                if let Some(started) = open_tools.remove(&id) {
-                    items.push(complete_tool_item(started, block));
-                }
-            }
-            _ => {}
-        }
-    }
+    items.extend(child_content_items(record, open_tools));
 
     items
 }

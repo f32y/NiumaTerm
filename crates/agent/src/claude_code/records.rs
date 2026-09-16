@@ -13,6 +13,8 @@
 #[path = "records_tests.rs"]
 mod records_tests;
 
+use std::collections::HashMap;
+
 use serde_json::Value;
 
 use crate::chat::{Compaction, CompactionTrigger, Item};
@@ -213,4 +215,61 @@ pub(super) fn tool_title(input: &Value) -> String {
     }
 
     String::new()
+}
+
+/// Decode child content while retaining tool starts until their results arrive.
+pub(crate) fn child_content_items(
+    record: &Value,
+    open_tools: &mut HashMap<String, Item>,
+) -> Vec<Item> {
+    let mut items = Vec::new();
+
+    for block in record["message"]["content"]
+        .as_array()
+        .into_iter()
+        .flatten()
+    {
+        let Some(id) = block["id"]
+            .as_str()
+            .or_else(|| block["tool_use_id"].as_str())
+            .map(str::to_owned)
+            .or_else(|| record["uuid"].as_str().map(str::to_owned))
+        else {
+            continue;
+        };
+
+        match block["type"].as_str() {
+            Some("text") if record["type"].as_str() != Some("user") => {
+                items.push(Item::AgentMessage {
+                    id,
+                    text: block["text"].as_str().map(str::to_owned),
+                    questions: None,
+                })
+            }
+            Some("text") => {}
+            Some("thinking") => items.push(Item::Reasoning {
+                id,
+                summary: block["thinking"].as_str().map(str::to_owned),
+            }),
+            Some("tool_use") => {
+                let item = tool_item(
+                    &id,
+                    block["name"].as_str().unwrap_or("tool"),
+                    &block["input"],
+                );
+
+                open_tools.insert(id, item.clone());
+
+                items.push(item);
+            }
+            Some("tool_result") => {
+                if let Some(started) = open_tools.remove(&id) {
+                    items.push(complete_tool_item(started, block));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    items
 }
