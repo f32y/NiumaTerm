@@ -2,6 +2,10 @@
 //! images) and the kitty Unicode placeholder decoder. These are pure data
 //! the terminal engine produces from the PTY, carrying no renderer/GPU state.
 
+#[cfg(test)]
+#[path = "graphics_tests.rs"]
+mod graphics_tests;
+
 use std::time;
 
 use nmt_config::colors::AnsiColor;

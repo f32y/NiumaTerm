@@ -1,6 +1,6 @@
-use nmt_terminal::ghostty::GhosttyTerminal;
-use nmt_terminal::grid::{Column, Line, Pos, StyleFlags, Wide};
-use nmt_terminal::render_buffer::*;
+use crate::ghostty::GhosttyTerminal;
+use crate::grid::{Column, Line, Pos, StyleFlags, Wide};
+use crate::render_buffer::*;
 
 #[test]
 fn populates_text_styles_and_cursor() {
