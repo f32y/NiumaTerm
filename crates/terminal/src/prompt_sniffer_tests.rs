@@ -5,9 +5,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 
 use crate::event::{CommandCapture, CommandStart};
-use crate::prompt_sniffer::{
-    ProgressReport, ProgressState, PromptRegion, PromptSniffer, SniffedOsc, parse_sniffed_osc,
-};
+use crate::prompt_sniffer::{PromptRegion, PromptSniffer};
 
 /// Collect every forwarded (region, bytes) segment from feeding `chunks` in order,
 /// reusing one sniffer across chunks (so carry-over across reads is exercised).
@@ -645,65 +643,6 @@ fn command_started_only_for_trusted_nonempty_commands() {
     );
 
     assert_eq!(starts.borrow().len(), 1);
-}
-
-/// The parsed state/percentage is what the tab strip draws, so a report
-/// that only resolves to "active" is not enough.
-#[test]
-fn osc_progress_carries_state_and_percentage() {
-    let report = |stream: &[u8]| match parse_sniffed_osc(stream) {
-        SniffedOsc::Progress { report, .. } => report,
-        _ => panic!("expected a progress report"),
-    };
-
-    assert_eq!(
-        report(b"\x1b]9;4;1;40\x07"),
-        ProgressReport {
-            state: ProgressState::Set,
-            progress: Some(40),
-        }
-    );
-
-    // ST-terminated, and a percentage past 100 clamps.
-    assert_eq!(
-        report(b"\x1b]9;4;2;250\x1b\\"),
-        ProgressReport {
-            state: ProgressState::Error,
-            progress: Some(100),
-        }
-    );
-
-    // Indeterminate carries no meaningful percentage.
-    assert_eq!(
-        report(b"\x1b]9;4;3;0\x07"),
-        ProgressReport {
-            state: ProgressState::Indeterminate,
-            progress: Some(0),
-        }
-    );
-    assert_eq!(
-        report(b"\x1b]9;4;0;\x07"),
-        ProgressReport {
-            state: ProgressState::Remove,
-            progress: None,
-        }
-    );
-
-    // PowerShell's progress host ends its indicator with no percentage field.
-    for stream in [b"\x1b]9;4;0\x1b\\".as_slice(), b"\x1b]9;4;0\x07"] {
-        assert_eq!(
-            report(stream),
-            ProgressReport {
-                state: ProgressState::Remove,
-                progress: None,
-            }
-        );
-    }
-
-    assert!(matches!(
-        parse_sniffed_osc(b"\x1b]9;4;7;10\x07"),
-        SniffedOsc::ProgressMalformed
-    ));
 }
 
 #[test]

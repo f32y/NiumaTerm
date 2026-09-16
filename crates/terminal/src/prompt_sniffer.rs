@@ -1,4 +1,4 @@
-//! Tracks OSC 133 shell lifecycle metadata and OSC 9;4 progress reports.
+//! Tracks OSC 133 shell lifecycle metadata.
 
 #[cfg(test)]
 #[path = "prompt_sniffer_tests.rs"]
@@ -10,7 +10,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use memchr::memchr;
 
-use crate::event::{CommandCapture, CommandStart, ProgressReport, ProgressState};
+use crate::event::{CommandCapture, CommandStart};
 
 // ---- OSC 133 shell-integration prompt sniffer ----
 //
@@ -55,10 +55,6 @@ enum ShellLifecycleProgress {
 pub(crate) struct PromptSniffer {
     region: PromptRegion,
 
-    /// Active OSC 9;4 progress suppresses only the published cursor, leaving the
-    /// engine's DECTCEM state intact for exact restoration on removal.
-    progress_active: bool,
-
     boundary_trust: ShellBoundaryTrust,
     boundary_trust_changed: Option<bool>,
     lifecycle: ShellLifecycleProgress,
@@ -81,9 +77,6 @@ pub(crate) struct PromptSniffer {
 
     command_started_edge: bool,
     command_finished: Option<CommandCapture>,
-
-    /// The OSC 9;4 report just parsed, surfaced so the tab strip can draw it.
-    progress_edge: Option<ProgressReport>,
 
     /// `;K` — our private "history cleared" mark, emitted by the integration
     /// script's Clear-Host wrapper (the boundary protocol keeps the engine's
@@ -111,9 +104,6 @@ pub(crate) struct SnifferMark<'a> {
     /// A trusted command completed (`;D`): the capture missing `cwd`, which the caller
     /// fills from its latch.
     pub command_finished: Option<CommandCapture>,
-
-    /// An OSC 9;4 progress report (`ESC ] 9 ; 4 ; <state> ; <percent>`).
-    pub progress: Option<ProgressReport>,
 
     /// The user cleared the terminal (`;K` from the Clear-Host wrapper): the
     /// frozen history must drop with the screen.
@@ -170,21 +160,12 @@ impl PromptSniffer {
 
                     pos = len - cl; // skip the input portion of the mark
                 }
-                SniffedOsc::Progress { len, report } => {
-                    self.note_progress(report);
-
-                    let mark = self.drain_mark(&buf[..len]);
-
-                    on_mark(mark);
-
-                    pos = len - cl;
-                }
                 SniffedOsc::Incomplete if cl + take < OSC133_MAX => {
                     self.carry = buf;
 
                     return; // still incomplete — wait for the next read
                 }
-                SniffedOsc::NotMark | SniffedOsc::ProgressMalformed => {
+                SniffedOsc::NotMark => {
                     // The carried ESC resolved to an ordinary escape split across
                     // reads (any chunk ending in "\x1b" or "\x1b]…" lands here —
                     // constant under ESC-dense output like vtebench). Forward the
@@ -252,27 +233,6 @@ impl PromptSniffer {
 
                             seg_start = pos;
                         }
-                        SniffedOsc::Progress { len, report } => {
-                            if esc > seg_start {
-                                self.pre_forward(&input[seg_start..esc]);
-
-                                forward(
-                                    self.region,
-                                    self.boundary_trusted(),
-                                    &input[seg_start..esc],
-                                );
-                            }
-
-                            self.note_progress(report);
-
-                            let mark = self.drain_mark(&input[esc..esc + len]);
-
-                            on_mark(mark);
-
-                            pos = esc + len;
-
-                            seg_start = pos;
-                        }
                         SniffedOsc::Incomplete => {
                             if esc > seg_start {
                                 self.pre_forward(&input[seg_start..esc]);
@@ -291,7 +251,7 @@ impl PromptSniffer {
 
                             return;
                         }
-                        SniffedOsc::NotMark | SniffedOsc::ProgressMalformed => pos = esc + 1,
+                        SniffedOsc::NotMark => pos = esc + 1,
                         SniffedOsc::Malformed => {
                             if esc > seg_start {
                                 self.pre_forward(&input[seg_start..esc]);
@@ -337,17 +297,8 @@ impl PromptSniffer {
                     .unwrap_or_else(time::SystemTime::now),
             }),
             command_finished: self.command_finished.take(),
-            progress: self.progress_edge.take(),
             history_cleared: mem::take(&mut self.history_cleared_edge),
         }
-    }
-
-    /// Latch an OSC 9;4 report for the mark being drained. `progress_active`
-    /// gates cursor publication; the report itself rides out to the tab strip.
-    fn note_progress(&mut self, report: ProgressReport) {
-        self.progress_active = report.state != ProgressState::Remove;
-
-        self.progress_edge = Some(report);
     }
 
     /// Region-tagged bookkeeping done just before a segment is forwarded.
@@ -524,10 +475,6 @@ impl PromptSniffer {
         self.boundary_trust == ShellBoundaryTrust::Trusted
     }
 
-    pub(crate) fn progress_active(&self) -> bool {
-        self.progress_active
-    }
-
     pub(crate) fn take_boundary_trust_changed(&mut self) -> Option<bool> {
         self.boundary_trust_changed.take()
     }
@@ -671,8 +618,6 @@ fn render_command_echo(bytes: &[u8]) -> String {
 /// `ESC ] 1 3 3 ;` - the OSC 133 introducer.
 const OSC133_PREFIX: &[u8] = b"\x1b]133;";
 
-const OSC_PROGRESS_PREFIX: &[u8] = b"\x1b]9;4;";
-
 /// Max bytes of one `;C` mark, which may carry `;cmdline=<base64>` with the accepted
 /// line; also bounds the carry buffer. A longer `;C` is malformed and costs one trust
 /// cycle, so the integration scripts omit `cmdline` above this size and the title
@@ -683,8 +628,7 @@ const OSC133_MAX: usize = 16 * 1024;
 /// and resyncs as ordinary bytes.
 const SHORT_MARK_MAX: usize = 32;
 
-/// Outcome of scanning an ESC in the PTY stream for sequences the sniffer
-/// cares about: OSC 133 prompt marks and OSC 9;4 progress reports.
+/// Outcome of scanning an ESC in the PTY stream for an OSC 133 prompt mark.
 enum SniffedOsc {
     /// A complete mark: consume `len` bytes; `next` is the region to switch to (`None` =
     /// a recognized 133 mark with no transition, e.g. `;P` right-prompt). `exit` is the
@@ -697,18 +641,12 @@ enum SniffedOsc {
         next: Option<PromptRegion>,
         cmdline: Option<String>,
     },
-    Progress {
-        len: usize,
-        report: ProgressReport,
-    },
     /// Looks like the start of a 133 mark but the slice ends before the terminator — carry.
     Incomplete,
     /// Not a 133 mark; the ESC is an ordinary terminal byte.
     NotMark,
     /// Starts like OSC 133 but is malformed or too long.
     Malformed,
-    /// Starts like OSC 9;4 but is malformed or too long.
-    ProgressMalformed,
 }
 
 fn region_for(sub: u8) -> Option<PromptRegion> {
@@ -723,78 +661,6 @@ fn region_for(sub: u8) -> Option<PromptRegion> {
 
 /// Parse a potential OSC 133 mark at `s` (caller guarantees `s[0] == 0x1b`).
 fn parse_sniffed_osc(s: &[u8]) -> SniffedOsc {
-    let progress_prefix_len = s.len().min(OSC_PROGRESS_PREFIX.len());
-
-    if s[..progress_prefix_len] == OSC_PROGRESS_PREFIX[..progress_prefix_len] {
-        if s.len() <= OSC_PROGRESS_PREFIX.len() + 1 {
-            return SniffedOsc::Incomplete;
-        }
-
-        let state = match s[OSC_PROGRESS_PREFIX.len()] {
-            b'0' => ProgressState::Remove,
-            b'1' => ProgressState::Set,
-            b'2' => ProgressState::Error,
-            b'3' => ProgressState::Indeterminate,
-            b'4' => ProgressState::Pause,
-            _ => return SniffedOsc::ProgressMalformed,
-        };
-
-        // The percentage field is optional: PowerShell's progress host ends its
-        // indicator with `ESC ] 9 ; 4 ; 0 ST`. Rejecting that form would leave the
-        // progress state active and the cursor hidden after the command.
-        let arg_start = match s[OSC_PROGRESS_PREFIX.len() + 1] {
-            b';' => OSC_PROGRESS_PREFIX.len() + 2,
-            0x07 | 0x1b => OSC_PROGRESS_PREFIX.len() + 1,
-            _ => return SniffedOsc::ProgressMalformed,
-        };
-
-        let end = s.len().min(SHORT_MARK_MAX);
-
-        let mut i = arg_start;
-
-        // The percentage argument. Values above 100 are clamped rather than
-        // rejected, so a miscounting emitter still gets a full bar.
-        let percent = |term: usize| {
-            str::from_utf8(&s[arg_start..term])
-                .ok()?
-                .parse::<u32>()
-                .ok()
-                .map(|value| value.min(100) as u8)
-        };
-
-        while i < end {
-            match s[i] {
-                0x07 => {
-                    return SniffedOsc::Progress {
-                        len: i + 1,
-                        report: ProgressReport {
-                            state,
-                            progress: percent(i),
-                        },
-                    };
-                }
-                0x1b if i + 1 < s.len() && s[i + 1] == b'\\' => {
-                    return SniffedOsc::Progress {
-                        len: i + 2,
-                        report: ProgressReport {
-                            state,
-                            progress: percent(i),
-                        },
-                    };
-                }
-                0x1b if i + 1 == s.len() => return SniffedOsc::Incomplete,
-                0x1b => return SniffedOsc::ProgressMalformed,
-                _ => i += 1,
-            }
-        }
-
-        return if s.len() < SHORT_MARK_MAX {
-            SniffedOsc::Incomplete
-        } else {
-            SniffedOsc::ProgressMalformed
-        };
-    }
-
     let pn = s.len().min(OSC133_PREFIX.len());
 
     if s[..pn] != OSC133_PREFIX[..pn] {

@@ -521,11 +521,12 @@ where
         // and frame before delivering events that announce the publication.
         let pwd = self.ghostty.poll_pwd();
 
-        let (bell, clipboard_writes, title, vt_modes, sync_output, capture, image_delta) = {
+        let (bell, clipboard_writes, progress, title, vt_modes, sync_output, capture, image_delta) = {
             let engine = &mut self.ghostty;
 
             let bell = engine.take_bell();
             let clipboard_writes = engine.take_clipboard_writes();
+            let progress = engine.take_progress_report();
             let title = engine.poll_title();
             let vt_modes = ghostty_vt_modes(engine);
 
@@ -577,6 +578,7 @@ where
             (
                 bell,
                 clipboard_writes,
+                progress,
                 title,
                 vt_modes,
                 sync_output,
@@ -616,6 +618,11 @@ where
         for (ty, text) in clipboard_writes {
             self.event_proxy
                 .send_event(TerminalEvent::ClipboardStore(ty, text));
+        }
+
+        if let Some(report) = progress {
+            self.event_proxy
+                .send_event(TerminalEvent::ProgressReport(report));
         }
 
         if let Some(title) = title {
@@ -664,7 +671,7 @@ where
             &self.render_buffer,
             &mut self.back_buffer,
             capture,
-            self.sniffer.progress_active(),
+            self.ghostty.progress_active(),
             &mut self.capture_failed,
         );
 

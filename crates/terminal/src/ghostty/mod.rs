@@ -58,6 +58,7 @@ use libghostty_vt_sys::{
 use nmt_config::colors::ColorRgb;
 use nmt_config::colors::Colors;
 
+use crate::event::ProgressReport;
 use crate::ghostty::callbacks::{
     Callbacks, KITTY_IMAGE_STORAGE_LIMIT_BYTES, install_callbacks, register_png_decoder,
 };
@@ -224,6 +225,16 @@ impl GhosttyTerminal {
     /// Drain clipboard writes decoded from OSC 52 or iTerm2 OSC 1337.
     pub fn take_clipboard_writes(&mut self) -> Vec<(clipboard::ClipboardType, String)> {
         mem::take(&mut self.callbacks.clipboard_writes)
+    }
+
+    /// Drain the latest OSC 9;4 progress report since the last call.
+    pub fn take_progress_report(&mut self) -> Option<ProgressReport> {
+        self.callbacks.progress.take()
+    }
+
+    /// Whether the running program currently shows a progress indicator.
+    pub fn progress_active(&self) -> bool {
+        self.callbacks.progress_active
     }
 
     /// Poll the terminal title; returns `Some(title)` only when it changed
