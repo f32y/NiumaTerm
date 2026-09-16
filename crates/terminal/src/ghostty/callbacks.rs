@@ -5,10 +5,12 @@ use libghostty_vt_sys::{
     Allocator as VtAllocator, ClipboardLocation as VtClipboardLocation,
     ClipboardWrite as VtClipboardWrite, ClipboardWriteResult as VtClipboardWriteResult,
     String as VtString, SysImage as VtSysImage, SysOption as VtSysOption, Terminal as VtTerminal,
-    TerminalOption as VtTerminalOption, ghostty_alloc, ghostty_sys_set, ghostty_terminal_set,
+    TerminalOption as VtTerminalOption, TerminalProgressReport as VtProgressReport,
+    TerminalProgressState as VtProgressState, ghostty_alloc, ghostty_sys_set, ghostty_terminal_set,
 };
 
 use crate::clipboard;
+use crate::event::{ProgressReport, ProgressState};
 
 /// State the terminal's synchronous callbacks write into during `write_vt`.
 /// Owned behind a `Box` so its address is stable for the FFI userdata pointer.
@@ -22,6 +24,17 @@ pub(super) struct Callbacks {
 
     /// Owned text copied from clipboard requests before the FFI callback returns.
     pub(super) clipboard_writes: Vec<(clipboard::ClipboardType, String)>,
+
+    /// The latest OSC 9;4 report since last drained. Later reports in one
+    /// batch supersede earlier ones because the tab strip only shows the
+    /// current state.
+    pub(super) progress: Option<ProgressReport>,
+
+    /// A progress indicator is showing (last report was anything but
+    /// `Remove`). Published frames hide their cursor while this holds, and
+    /// the engine's DECTCEM state stays untouched so removal restores the
+    /// exact cursor the program left.
+    pub(super) progress_active: bool,
 }
 
 /// Register the terminal's synchronous callbacks, which write into the
@@ -57,9 +70,54 @@ pub(super) unsafe fn install_callbacks(terminal: VtTerminal) -> Box<Callbacks> {
             VtTerminalOption::CLIPBOARD_WRITE,
             clipboard_write_cb as *const os::raw::c_void,
         );
+
+        ghostty_terminal_set(
+            terminal,
+            VtTerminalOption::PROGRESS_REPORT,
+            progress_report_cb as *const os::raw::c_void,
+        );
     }
 
     callbacks
+}
+
+unsafe extern "C" fn progress_report_cb(
+    _terminal: VtTerminal,
+    userdata: *mut os::raw::c_void,
+    report: *const VtProgressReport,
+) {
+    if userdata.is_null() || report.is_null() {
+        return;
+    }
+
+    let size = unsafe { report.cast::<usize>().read() };
+
+    if size < mem::size_of::<VtProgressReport>() {
+        return;
+    }
+
+    let report = unsafe { &*report };
+
+    let state = match report.state {
+        VtProgressState::REMOVE => ProgressState::Remove,
+        VtProgressState::SET => ProgressState::Set,
+        VtProgressState::ERROR => ProgressState::Error,
+        VtProgressState::INDETERMINATE => ProgressState::Indeterminate,
+        VtProgressState::PAUSE => ProgressState::Pause,
+        _ => return,
+    };
+
+    // `-1` marks an omitted percentage (PowerShell ends its indicator with
+    // `ESC ] 9 ; 4 ; 0 ST`). Values past 100 clamp rather than drop so a
+    // miscounting emitter still gets a full bar.
+    let progress = u8::try_from(report.progress)
+        .ok()
+        .map(|value| value.min(100));
+
+    let cb = unsafe { &mut *(userdata as *mut Callbacks) };
+
+    cb.progress_active = state != ProgressState::Remove;
+    cb.progress = Some(ProgressReport { state, progress });
 }
 
 unsafe extern "C" fn write_pty_cb(

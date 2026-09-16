@@ -50,10 +50,6 @@ pub(super) fn apply_sniffer_mark(
         event_proxy.send_event(TerminalEvent::PromptStarted);
     }
 
-    if let Some(report) = mark.progress.take() {
-        event_proxy.send_event(TerminalEvent::ProgressReport(report));
-    }
-
     if let Some(mut start) = mark.command_started.take() {
         // ;C — latch the launch cwd while the engine still
         // holds THIS prompt's OSC 7, and surface the in-flight block.

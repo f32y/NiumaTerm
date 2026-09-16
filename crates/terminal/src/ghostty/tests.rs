@@ -1621,6 +1621,94 @@ fn bell_callback_counts() {
     assert_eq!(terminal.take_bell(), 0);
 }
 
+/// The tab strip draws the parsed state and percentage, and the published
+/// cursor hides while an indicator shows, so both must come out of the
+/// engine's OSC 9;4 decode exactly as the byte parser used to produce them.
+#[test]
+fn progress_report_callback_tracks_state_and_percentage() {
+    use crate::event::{ProgressReport, ProgressState};
+
+    let mut terminal = GhosttyTerminal::new(8, 1, 100).unwrap();
+
+    assert!(!terminal.progress_active());
+    assert_eq!(terminal.take_progress_report(), None);
+
+    terminal.write_vt(b"\x1b]9;4;1;40\x07");
+
+    assert!(terminal.progress_active());
+    assert_eq!(
+        terminal.take_progress_report(),
+        Some(ProgressReport {
+            state: ProgressState::Set,
+            progress: Some(40),
+        })
+    );
+    assert_eq!(terminal.take_progress_report(), None);
+
+    // A sequence split across writes decodes once it completes; the ST
+    // terminator and a percentage past 100 both resolve.
+    terminal.write_vt(b"\x1b]9;4;2");
+    terminal.write_vt(b";250\x1b\\");
+
+    assert_eq!(
+        terminal.take_progress_report(),
+        Some(ProgressReport {
+            state: ProgressState::Error,
+            progress: Some(100),
+        })
+    );
+
+    // An indeterminate indicator has no meaningful percentage; the engine
+    // drops the field and the tab strip draws the bar full regardless.
+    terminal.write_vt(b"\x1b]9;4;3;0\x07");
+
+    assert_eq!(
+        terminal.take_progress_report(),
+        Some(ProgressReport {
+            state: ProgressState::Indeterminate,
+            progress: None,
+        })
+    );
+
+    // Only the latest report in a batch survives.
+    terminal.write_vt(b"\x1b]9;4;4;10\x07\x1b]9;4;1;20\x07");
+
+    assert_eq!(
+        terminal.take_progress_report(),
+        Some(ProgressReport {
+            state: ProgressState::Set,
+            progress: Some(20),
+        })
+    );
+
+    // PowerShell's progress host ends its indicator with no percentage field.
+    for stream in [b"\x1b]9;4;0\x1b\\".as_slice(), b"\x1b]9;4;0;\x07"] {
+        terminal.write_vt(b"\x1b]9;4;1;5\x07");
+        terminal.write_vt(stream);
+
+        assert!(!terminal.progress_active());
+        assert_eq!(
+            terminal.take_progress_report(),
+            Some(ProgressReport {
+                state: ProgressState::Remove,
+                progress: None,
+            })
+        );
+    }
+
+    // An unknown state leaves the previous indicator in place.
+    terminal.write_vt(b"\x1b]9;4;1;5\x07\x1b]9;4;7;10\x07");
+
+    assert!(terminal.progress_active());
+    assert_eq!(
+        terminal.take_progress_report(),
+        Some(ProgressReport {
+            state: ProgressState::Set,
+            progress: Some(5),
+        })
+    );
+}
+
 #[test]
 fn title_poll_reports_change_once() {
     let mut terminal = GhosttyTerminal::new(8, 1, 100).unwrap();
