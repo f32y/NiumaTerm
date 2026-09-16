@@ -24,24 +24,16 @@ use crate::terminal::style::StyleId;
 // Bit layout for Square(u64)
 //
 // bits 0..20 (21): codepoint (Unicode scalar value, max 0x10_FFFF)
-// OR low bits of bg color when content_tag != Codepoint
 // bits 21..22 (2): wide (Wide enum)
 // bits 23..29 (7): per-cell flag bits (CellFlags), incl WRAPLINE at bit 0
-// bits 30..31 (2): content_tag (NEW)
-// 0 = Codepoint (text cell, use style_id below)
-// 1 = BgPalette (bg-only cell, palette index in 32..39)
-// 2 = BgRgb (bg-only cell, RGB packed in 32..55)
-// 3 = reserved
-// bits 32..47 (16): style_id (when tag == Codepoint)
-// bg palette idx in low 8 (when tag == BgPalette)
-// bg RGB.r:g in low 16 (when tag == BgRgb)
-// bits 48..63 (16): extras_id (when tag == Codepoint)
-// bg RGB.b in low 8 (when tag == BgRgb)
+// bits 30..31 (2): reserved
+// bits 32..47 (16): style_id
+// bits 48..63 (16): extras_id
 //
-// The bg-only encoding (BgPalette / BgRgb) is the trick: cells that
-// represent a colored background with no text don't need a style table
-// lookup at all, which is the dominant cost for large filled regions
-// (selection, padding, blank lines after `clear`, color blocks).
+// Background-only cells (a colored blank after `clear`, padding, color
+// blocks) carry their background through the style table like any other
+// cell; the engine read resolves the engine's bg-only cell tags into a
+// style before the cell reaches this layout.
 // ---------------------------------------------------------------------------
 
 const CODEPOINT_SHIFT: u64 = 0;
@@ -53,21 +45,11 @@ const WIDE_MASK: u64 = 0b11 << WIDE_SHIFT;
 const CELL_FLAGS_SHIFT: u64 = 23;
 const CELL_FLAGS_MASK: u64 = 0x7F << CELL_FLAGS_SHIFT; // 7 bits incl WRAPLINE
 
-const CONTENT_TAG_SHIFT: u64 = 30;
-
 const STYLE_ID_SHIFT: u64 = 32;
 const STYLE_ID_MASK: u64 = 0xFFFF << STYLE_ID_SHIFT;
 
 const EXTRAS_ID_SHIFT: u64 = 48;
 const EXTRAS_ID_MASK: u64 = 0xFFFF << EXTRAS_ID_SHIFT;
-
-// Bg-color slot reuse (only valid when content_tag != Codepoint).
-const BG_PALETTE_SHIFT: u64 = 32;
-const BG_PALETTE_MASK: u64 = 0xFF << BG_PALETTE_SHIFT;
-
-const BG_RGB_R_SHIFT: u64 = 32;
-const BG_RGB_G_SHIFT: u64 = 40;
-const BG_RGB_B_SHIFT: u64 = 48;
 
 /// Wide-character state for a cell. Encoded in 2 bits.
 #[repr(u8)]
@@ -82,24 +64,6 @@ pub enum Wide {
     /// Trailing spacer at end of a soft-wrapped line indicating a wide
     /// character continues on the next line.
     LeadingSpacer = 3,
-}
-
-/// Discriminator for what the cell's payload represents. Default is
-/// `Codepoint`, the standard text cell. The bg-only variants are an
-/// optimization for cells that carry only a background color (selection,
-/// padding, color rectangles, blank lines after `clear`) — they encode the
-/// color directly in the cell, skipping the style table entirely.
-#[repr(u8)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ContentTag {
-    /// Standard text cell. Codepoint in bits 0..20, style_id in bits 32..47.
-    Codepoint = 0,
-    /// Bg-only cell with a palette-indexed background.
-    /// Palette index in bits 32..39.
-    BgPalette = 1,
-    /// Bg-only cell with an RGB background.
-    /// RGB packed in bits 32..55 (R, G, B).
-    BgRgb = 2,
 }
 
 bitflags! {
@@ -253,13 +217,7 @@ impl Square {
         self.cell_flags().contains(f)
     }
 
-    /// Read the raw style id bits.
-    ///
-    /// **The caller must check `content_tag()` first.** For non-Codepoint
-    /// cells the upper 32 bits hold the bg color encoding, not a style id.
-    /// We deliberately do not branch on the tag here so the renderer hot
-    /// loop stays branchless when it has already established the cell is
-    /// a Codepoint cell.
+    /// Read the style id bits.
     #[inline(always)]
     pub fn style_id(self) -> StyleId {
         ((self.0 & STYLE_ID_MASK) >> STYLE_ID_SHIFT) as StyleId
@@ -271,11 +229,6 @@ impl Square {
     }
 
     /// Read the cell's extras id, if any.
-    ///
-    /// **The caller must check `content_tag()` first** if the cell might be
-    /// a bg-only cell — those reuse the upper 32 bits for the bg color, so
-    /// `extras_id()` would return garbage. For Codepoint cells (the
-    /// overwhelming majority) this is a single bit extract.
     #[inline(always)]
     pub fn extras_id(self) -> Option<ExtrasId> {
         let id = ((self.0 & EXTRAS_ID_MASK) >> EXTRAS_ID_SHIFT) as ExtrasId;
@@ -288,60 +241,6 @@ impl Square {
         let bits = id.unwrap_or(0) as u64;
 
         self.0 = (self.0 & !EXTRAS_ID_MASK) | (bits << EXTRAS_ID_SHIFT);
-    }
-
-    #[inline]
-    pub fn content_tag(self) -> ContentTag {
-        self.0.into()
-    }
-
-    /// Convert this cell into a bg-only cell holding a palette-indexed
-    /// background. Drops codepoint, wide, style_id, and extras_id; preserves
-    /// per-cell flags (so e.g. `WRAPLINE` survives a clear-to-end-of-line).
-    #[inline]
-    pub fn set_bg_palette(&mut self, idx: u8) {
-        let preserved = self.0 & CELL_FLAGS_MASK;
-
-        self.0 = preserved
-            | ((ContentTag::BgPalette as u64) << CONTENT_TAG_SHIFT)
-            | ((idx as u64) << BG_PALETTE_SHIFT);
-    }
-
-    /// Convert this cell into a bg-only cell holding an RGB background.
-    #[inline]
-    pub fn set_bg_rgb(&mut self, r: u8, g: u8, b: u8) {
-        let preserved = self.0 & CELL_FLAGS_MASK;
-
-        self.0 = preserved
-            | ((ContentTag::BgRgb as u64) << CONTENT_TAG_SHIFT)
-            | ((r as u64) << BG_RGB_R_SHIFT)
-            | ((g as u64) << BG_RGB_G_SHIFT)
-            | ((b as u64) << BG_RGB_B_SHIFT);
-    }
-
-    /// Read the inline-encoded palette index. Only meaningful when
-    /// `content_tag() == BgPalette` — call after the tag check.
-    #[inline]
-    pub fn bg_palette_index(self) -> u8 {
-        ((self.0 & BG_PALETTE_MASK) >> BG_PALETTE_SHIFT) as u8
-    }
-
-    /// Read the inline-encoded RGB. Only meaningful when
-    /// `content_tag() == BgRgb`.
-    #[inline]
-    pub fn bg_rgb(self) -> (u8, u8, u8) {
-        (
-            ((self.0 >> BG_RGB_R_SHIFT) & 0xFF) as u8,
-            ((self.0 >> BG_RGB_G_SHIFT) & 0xFF) as u8,
-            ((self.0 >> BG_RGB_B_SHIFT) & 0xFF) as u8,
-        )
-    }
-
-    /// True if this cell encodes its background inline (no text content,
-    /// no style table lookup needed). Used by the renderer hot loop.
-    #[inline]
-    pub fn is_bg_only(self) -> bool {
-        !matches!(self.content_tag(), ContentTag::Codepoint)
     }
 
     /// Clear all per-cell state. Used by `clear_wide` and similar.
@@ -418,21 +317,6 @@ impl From<u64> for Wide {
             1 => Wide::Wide,
             2 => Wide::Spacer,
             _ => Wide::LeadingSpacer,
-        }
-    }
-}
-
-impl From<u64> for ContentTag {
-    /// Decode the content tag from a raw `Square` u64. Public so render
-    /// hot loops can read the cell once and dispatch on the tag without
-    /// going through the `Square::content_tag()` method (which reloads
-    /// the cell from memory if the optimizer can't prove it aliases).
-    #[inline(always)]
-    fn from(bits: u64) -> Self {
-        match (bits >> CONTENT_TAG_SHIFT) & 0b11 {
-            0 => ContentTag::Codepoint,
-            1 => ContentTag::BgPalette,
-            _ => ContentTag::BgRgb,
         }
     }
 }

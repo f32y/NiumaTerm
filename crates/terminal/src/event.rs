@@ -72,12 +72,6 @@ pub struct CommandStart {
     pub started_at: time::SystemTime,
 }
 
-#[derive(Debug, Clone)]
-pub enum TerminalEventType {
-    Terminal(TerminalEvent),
-    Frame,
-}
-
 #[derive(Debug)]
 pub enum Msg {
     /// Data that should be written to the PTY.
@@ -244,12 +238,6 @@ pub trait EventListener {
 
 #[derive(Clone)]
 pub struct VoidListener;
-
-impl From<TerminalEvent> for TerminalEventType {
-    fn from(terminal_event: TerminalEvent) -> Self {
-        Self::Terminal(terminal_event)
-    }
-}
 
 impl EventListener for VoidListener {
     fn send_event(&self, _event: TerminalEvent) {}

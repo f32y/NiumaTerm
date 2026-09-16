@@ -1,7 +1,7 @@
-use nmt_terminal::ghostty::GhosttyTerminal;
-use nmt_terminal::render_buffer::RenderBuffer;
-use nmt_terminal::selection_search::*;
-use nmt_terminal::terminal::{Column, Line, Pos};
+use crate::ghostty::GhosttyTerminal;
+use crate::render_buffer::RenderBuffer;
+use crate::selection_search::VisibleGrid;
+use crate::terminal::{Column, Line, Pos};
 
 fn buffer(cols: usize, rows: usize, bytes: &[u8]) -> RenderBuffer {
     let mut engine = GhosttyTerminal::new(cols as u16, rows as u16, 100).unwrap();

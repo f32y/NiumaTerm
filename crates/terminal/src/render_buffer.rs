@@ -9,8 +9,6 @@
 //! `Arc`. Readers can retain a frame across later writes and resizes. Buffers
 //! return to the capture pool after their last external reader releases them.
 
-use std::mem;
-
 use nmt_config::colors::ColorRgb;
 use nmt_config::colors::term::TermColors;
 use rustc_hash::FxHashMap;
@@ -84,11 +82,6 @@ pub struct RenderBuffer {
     /// Kitty-graphics placements captured from the engine. The current GPUI
     /// frontend keeps this metadata available but does not paint inline images yet.
     placements: Vec<SnapshotPlacement>,
-
-    /// New PTY/render content since the frontend last consumed it. Set by every
-    /// capture, cleared by `take_content_changed()`. Starts true so the first
-    /// frame builds from the freshly initialized buffer.
-    content_changed: bool,
 }
 
 impl RenderBuffer {
@@ -136,15 +129,7 @@ impl RenderBuffer {
             window_bg_override: None,
             scrollbar: ScrollbarInfo::default(),
             placements: Vec::new(),
-            content_changed: true,
         }
-    }
-
-    /// Consume the "new PTY content since last frame" flag.
-    /// Returns whether capture ran since the previous call, then clears it.
-    /// The frontend uses `true` to invalidate its cached terminal frame.
-    pub fn take_content_changed(&mut self) -> bool {
-        mem::replace(&mut self.content_changed, false)
     }
 
     /// Kitty-graphics placements captured this snapshot.
@@ -406,8 +391,6 @@ impl RenderBuffer {
         self.row_versions.clear();
 
         self.row_versions.extend_from_slice(row_versions);
-
-        self.content_changed = true;
     }
 
     pub(crate) fn suppress_progress_cursor(&mut self) {

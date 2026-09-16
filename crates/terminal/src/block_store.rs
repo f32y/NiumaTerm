@@ -9,11 +9,11 @@
 //! Metadata is married to items by the OSC 133 mark sequence number; marks
 //! (`;C` command/cwd, `;D` exit code) fire before the block finishes, so
 //! metadata is stashed in `pending_meta` until the `EngineBlock` event
-//! materializes the item. The metadata itself is written by the embedder's
-//! event handling (`CommandStarted`/`CommandFinished` carry it), not by
-//! this crate. Memory is bounded engine-side (the block byte budget evicts
-//! oldest blocks); `EngineBlocksSync` mirrors those evictions into the
-//! item list.
+//! materializes the item. The session's event proxy writes the metadata as
+//! it translates `CommandStarted`/`CommandFinished`; the block events flush
+//! separately on the read's damage wake. Memory is bounded engine-side (the
+//! block byte budget evicts oldest blocks); `EngineBlocksSync` mirrors those
+//! evictions into the item list.
 
 use std::collections::HashMap;
 use std::time::SystemTime;

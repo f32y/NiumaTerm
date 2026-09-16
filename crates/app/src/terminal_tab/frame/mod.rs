@@ -44,7 +44,7 @@ use nmt_terminal::ghostty::ScrollbarInfo;
 use nmt_terminal::grid_emit::{RowSelection, row_selection_for};
 use nmt_terminal::render_buffer::RenderBuffer;
 use nmt_terminal::selection::SelectionRange;
-use nmt_terminal::terminal::square::{ContentTag, Wide};
+use nmt_terminal::terminal::square::Wide;
 use nmt_terminal::terminal::style::StyleFlags;
 
 use crate::terminal_tab::frame::colors::BackgroundColors;
@@ -211,9 +211,7 @@ fn extract_row_with_colors(
             continue;
         }
 
-        let is_codepoint = cell.content_tag() == ContentTag::Codepoint;
-
-        let source_ch = if is_codepoint { cell.c() } else { '\0' };
+        let source_ch = cell.c();
 
         let cursor_shape = cursor
             .filter(|cursor| cursor.col == col as u16)
@@ -227,36 +225,22 @@ fn extract_row_with_colors(
             colors.cell_background(buf, cell)
         };
 
-        let extras = if is_codepoint {
-            cell.extras_id()
-                .and_then(|extras_id| buf.extras().get(&extras_id))
-                .map(|extras| extras.zerowidth.clone())
-                .unwrap_or_default()
-        } else {
-            Vec::new()
-        };
+        let extras = cell
+            .extras_id()
+            .and_then(|extras_id| buf.extras().get(&extras_id))
+            .map(|extras| extras.zerowidth.clone())
+            .unwrap_or_default();
 
-        let mut style = if is_codepoint {
-            let style = buf.style(cell.style_id());
-            let flags = style.flags;
+        let style = buf.style(cell.style_id());
+        let flags = style.flags;
 
-            StyleRun {
-                len: 0,
-                fg: colors.cell_foreground(style),
-                bold: flags.contains(StyleFlags::BOLD),
-                italic: flags.contains(StyleFlags::ITALIC),
-                underline: flags.intersects(StyleFlags::ALL_UNDERLINES),
-                strikethrough: flags.contains(StyleFlags::STRIKEOUT),
-            }
-        } else {
-            StyleRun {
-                len: 0,
-                fg: colors.default_foreground(),
-                bold: false,
-                italic: false,
-                underline: false,
-                strikethrough: false,
-            }
+        let mut style = StyleRun {
+            len: 0,
+            fg: colors.cell_foreground(style),
+            bold: flags.contains(StyleFlags::BOLD),
+            italic: flags.contains(StyleFlags::ITALIC),
+            underline: flags.intersects(StyleFlags::ALL_UNDERLINES),
+            strikethrough: flags.contains(StyleFlags::STRIKEOUT),
         };
 
         if cursor_shape == Some(CursorShape::Block) {
@@ -274,7 +258,7 @@ fn extract_row_with_colors(
         builder.push_cell(TerminalCell {
             col: col as u16,
             ch: source_ch,
-            style_id: if is_codepoint { cell.style_id() } else { 0 },
+            style_id: cell.style_id(),
             background,
             wide,
             extras,
