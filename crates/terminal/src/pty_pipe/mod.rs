@@ -32,8 +32,7 @@ use crate::prompt_sniffer::PromptSniffer;
 use crate::pty_pipe::marks::{apply_sniffer_mark, engine_blocks_live_list};
 use crate::pty_pipe::powershell_compatibility::PowerShellCompatibility;
 use crate::pty_pipe::requests::answer_query;
-use crate::publication::FrameStore;
-use crate::render_buffer::RenderBuffer;
+use crate::render_buffer::{FrameStore, RenderBuffer};
 use crate::session::request::{Checkpoint, RequestError};
 use crate::{vt_modes, vt_trace};
 

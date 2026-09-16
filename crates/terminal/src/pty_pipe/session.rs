@@ -9,8 +9,7 @@ use nmt_platform::EventedPty;
 
 use crate::event::{EventListener, Msg, MsgSender};
 use crate::pty_pipe::PtyPipe;
-use crate::publication::FrameStore;
-use crate::render_buffer::RenderBuffer;
+use crate::render_buffer::{FrameStore, RenderBuffer};
 
 /// Observes the exact VT bytes accepted by the engine, on the owner thread.
 /// Returning before the next command preserves checkpoint and output ordering;
