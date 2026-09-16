@@ -75,7 +75,7 @@ if ($env:NMT_FAKE_PROVIDER -eq 'claude') {
     exit 0
 }
 
-if ($args.Count -ge 1 -and $args[0] -eq 'app-server') {
+if ($args -contains 'app-server') {
     $threadStartCount = 0
     while (($line = [Console]::In.ReadLine()) -ne $null) {
         [IO.File]::AppendAllText(
@@ -842,7 +842,9 @@ fn one_codex_host_starts_threads_for_two_custom_gateways() {
     assert_eq!(
         lines(&fixture.session_log)
             .iter()
-            .filter(|line| line.as_str() == "app-server")
+            .filter(|line| line
+                .split_whitespace()
+                .any(|argument| argument == "app-server"))
             .count(),
         1
     );
@@ -855,7 +857,9 @@ fn one_codex_host_starts_threads_for_two_custom_gateways() {
     assert_eq!(
         lines(&fixture.session_log)
             .iter()
-            .filter(|line| line.as_str() == "app-server")
+            .filter(|line| line
+                .split_whitespace()
+                .any(|argument| argument == "app-server"))
             .count(),
         1
     );
@@ -923,7 +927,9 @@ fn simultaneous_codex_sessions_join_one_host_start() {
     assert_eq!(
         lines(&fixture.session_log)
             .iter()
-            .filter(|line| line.as_str() == "app-server")
+            .filter(|line| line
+                .split_whitespace()
+                .any(|argument| argument == "app-server"))
             .count(),
         1
     );
@@ -988,7 +994,9 @@ fn simultaneous_codex_sessions_share_one_startup_failure() {
     assert_eq!(
         lines(&fixture.session_log)
             .iter()
-            .filter(|line| line.as_str() == "app-server")
+            .filter(|line| line
+                .split_whitespace()
+                .any(|argument| argument == "app-server"))
             .count(),
         1
     );
@@ -1041,7 +1049,9 @@ fn one_codex_host_rejects_incompatible_live_launch_settings() {
     assert_eq!(
         lines(&fixture.session_log)
             .iter()
-            .filter(|line| line.as_str() == "app-server")
+            .filter(|line| line
+                .split_whitespace()
+                .any(|argument| argument == "app-server"))
             .count(),
         1
     );
@@ -1144,7 +1154,9 @@ fn two_codex_threads_recover_on_one_replacement_host() {
     assert_eq!(
         lines(&fixture.session_log)
             .iter()
-            .filter(|line| line.as_str() == "app-server")
+            .filter(|line| line
+                .split_whitespace()
+                .any(|argument| argument == "app-server"))
             .count(),
         2
     );
@@ -1211,7 +1223,9 @@ fn one_failed_codex_resume_does_not_block_another_session() {
     assert_eq!(
         lines(&fixture.session_log)
             .iter()
-            .filter(|line| line.as_str() == "app-server")
+            .filter(|line| line
+                .split_whitespace()
+                .any(|argument| argument == "app-server"))
             .count(),
         1
     );
