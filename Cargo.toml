@@ -64,6 +64,9 @@ default-members = [
     "crates/tree_sitter_bundle",
 ]
 
+[workspace.lints.cargo]
+non_kebab_case_bins = "allow"
+
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(rust_analyzer)", "cfg(enable_profiling)"] }
 
