@@ -66,12 +66,10 @@ impl TeamRuntime {
         id: RoomId,
         cx: &mut App,
     ) -> Result<Entity<Self>, TeamError> {
-        let (session, truncated) = TeamSession::open(data_directory, id)?;
+        let session = TeamSession::open(data_directory, id)?;
         let entity = cx.new(|_| Self::new(session));
 
         entity.update(cx, |this, cx| {
-            if truncated { this.error = Some("Recovery notices: [TornFinalRecord]".into()); }
-
             let members: Vec<_> = this.room().members().iter().filter(|member| !member.excluded()).cloned().collect();
 
             for member in members {

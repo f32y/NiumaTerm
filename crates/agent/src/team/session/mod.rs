@@ -93,8 +93,8 @@ impl TeamSession {
         })
     }
 
-    pub fn open(data_directory: &Path, id: RoomId) -> Result<(Self, bool), TeamError> {
-        let (mut store, truncated) = RoomStore::open(data_directory, id)?;
+    pub fn open(data_directory: &Path, id: RoomId) -> Result<Self, TeamError> {
+        let mut store = RoomStore::open(data_directory, id)?;
         let mut room = store.room().clone();
 
         for discussion in &mut room.discussions {
@@ -129,15 +129,12 @@ impl TeamSession {
 
         store.commit(room)?;
 
-        Ok((
-            Self {
-                store,
-                readiness: BTreeMap::new(),
-                slots: ExecutionSlots::default(),
-                restored_uncertainty,
-            },
-            truncated,
-        ))
+        Ok(Self {
+            store,
+            readiness: BTreeMap::new(),
+            slots: ExecutionSlots::default(),
+            restored_uncertainty,
+        })
     }
 
     pub fn member_ready(
@@ -1047,8 +1044,6 @@ impl TeamSession {
         }
 
         self.store.commit(room)?;
-
-        self.store.checkpoint()?;
 
         Ok(())
     }

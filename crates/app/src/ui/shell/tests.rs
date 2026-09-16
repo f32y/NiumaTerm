@@ -84,7 +84,7 @@ fn disabling_agent_team_releases_the_runtime_and_keeps_the_saved_room(cx: &mut T
 
     assert!(runtime.upgrade().is_none());
 
-    let (restored, _) = TeamSession::open(directory.path(), room_id).unwrap();
+    let restored = TeamSession::open(directory.path(), room_id).unwrap();
 
     assert_eq!(restored.store().room().id(), room_id);
 }
