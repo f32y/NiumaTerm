@@ -6,28 +6,32 @@ fn handle(id: u64, generation: u64) -> BlockHandle {
     BlockHandle { id, generation }
 }
 
-/// `EngineBlock` items are born complete, carry the handle + cached
-/// rows, and marry stashed metadata by seq.
+/// `EngineBlock` items are born complete: handle, cached rows, and the
+/// command metadata all arrive in the one event.
 #[test]
-fn engine_block_items_marry_meta() {
+fn engine_block_items_carry_meta() {
     let mut store = BlockStore::default();
-
-    store.update_meta(1, |m| m.command = Some("cargo build".into()));
 
     store.apply([
         BlockEvent::EngineBlock {
             seq: 1,
             handle: handle(10, 1),
             rows: 42,
+            meta: SegmentMeta {
+                command: Some("cargo build".into()),
+                ..SegmentMeta::default()
+            },
         },
         BlockEvent::EngineBlock {
             seq: 2,
             handle: handle(11, 1),
             rows: 3,
+            meta: SegmentMeta {
+                exit_code: Some(0),
+                ..SegmentMeta::default()
+            },
         },
     ]);
-
-    store.update_meta(2, |m| m.exit_code = Some(0));
 
     let items = store.items();
 
@@ -35,7 +39,7 @@ fn engine_block_items_marry_meta() {
     assert_eq!(items[0].handle(), Some(handle(10, 1)));
     assert_eq!(items[0].engine_rows(), 42);
     assert_eq!(items[0].meta.command.as_deref(), Some("cargo build"));
-    assert_eq!(items[1].meta.exit_code, Some(0), "late meta hits the item");
+    assert_eq!(items[1].meta.exit_code, Some(0));
 }
 
 /// `EngineBlocksSync` prunes items whose engine block is gone (budget
@@ -50,11 +54,13 @@ fn engine_blocks_sync_prunes_and_refreshes() {
             seq: 1,
             handle: handle(10, 1),
             rows: 5,
+            meta: SegmentMeta::default(),
         },
         BlockEvent::EngineBlock {
             seq: 2,
             handle: handle(11, 1),
             rows: 7,
+            meta: SegmentMeta::default(),
         },
     ]);
 
@@ -81,6 +87,7 @@ fn history_cleared_drops_items() {
             seq: 1,
             handle: handle(10, 1),
             rows: 5,
+            meta: SegmentMeta::default(),
         },
         BlockEvent::HistoryCleared,
     ]);

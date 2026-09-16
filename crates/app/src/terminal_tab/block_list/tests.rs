@@ -257,6 +257,7 @@ fn compact_pad_rows_pack_rows_contiguously() {
             generation: 1,
         },
         rows: 2,
+        meta: SegmentMeta::default(),
     }]);
 
     assert_eq!(item_px(&store.items()[0], 80, 10.0, 0.0), 20.0);
@@ -287,6 +288,7 @@ fn item_geometry_uses_cached_rows() {
             generation: 1,
         },
         rows: 7,
+        meta: SegmentMeta::default(),
     }]);
 
     let item = &store.items()[0];
@@ -380,6 +382,8 @@ fn hit_test_maps_block_list_points() {
 fn chrome_keys_off_metadata() {
     let mut store = BlockStore::default();
 
+    let t0 = time::UNIX_EPOCH;
+
     store.apply([
         BlockEvent::EngineBlock {
             seq: 1,
@@ -388,6 +392,13 @@ fn chrome_keys_off_metadata() {
                 generation: 1,
             },
             rows: 2,
+            meta: SegmentMeta {
+                command: Some("build".into()),
+                exit_code: Some(0),
+                started_at: Some(t0),
+                ended_at: Some(t0 + time::Duration::from_secs(2)),
+                ..SegmentMeta::default()
+            },
         },
         BlockEvent::EngineBlock {
             seq: 2,
@@ -396,23 +407,14 @@ fn chrome_keys_off_metadata() {
                 generation: 1,
             },
             rows: 1,
+            meta: SegmentMeta {
+                command: Some("bad".into()),
+                exit_code: Some(127),
+                ended_at: Some(t0 + time::Duration::from_secs(2)),
+                ..SegmentMeta::default()
+            },
         },
     ]);
-
-    let t0 = time::UNIX_EPOCH;
-
-    store.update_meta(1, |m| {
-        m.command = Some("build".into());
-        m.exit_code = Some(0);
-        m.started_at = Some(t0);
-        m.ended_at = Some(t0 + time::Duration::from_secs(2));
-    });
-
-    store.update_meta(2, |m| {
-        m.command = Some("bad".into());
-        m.exit_code = Some(127);
-        m.ended_at = Some(t0 + time::Duration::from_secs(2));
-    });
 
     let info1 = handle_item_info(&store.items()[0], &DurationLabels::default()).unwrap();
 
@@ -458,6 +460,7 @@ fn nav_item_top_walks_items() {
                 generation: 1,
             },
             rows: 1,
+            meta: SegmentMeta::default(),
         },
         BlockEvent::EngineBlock {
             seq: 2,
@@ -466,6 +469,7 @@ fn nav_item_top_walks_items() {
                 generation: 1,
             },
             rows: 2,
+            meta: SegmentMeta::default(),
         },
         BlockEvent::EngineBlock {
             seq: 3,
@@ -474,6 +478,7 @@ fn nav_item_top_walks_items() {
                 generation: 1,
             },
             rows: 1,
+            meta: SegmentMeta::default(),
         },
     ]);
 

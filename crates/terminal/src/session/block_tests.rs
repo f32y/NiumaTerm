@@ -2,7 +2,7 @@ use std::sync::{Arc, mpsc};
 
 use futures::executor::block_on;
 
-use crate::block_store::BlockStore;
+use crate::block_store::{BlockStore, SegmentMeta};
 use crate::event::{BlockEvent, Msg};
 use crate::ghostty::{BlockHandle, GhosttyTerminal};
 use crate::pty_pipe::requests::answer_query;
@@ -27,6 +27,7 @@ fn selection_pieces_cover_block_ranges() {
                 generation: 1,
             },
             rows: 2,
+            meta: SegmentMeta::default(),
         },
         BlockEvent::EngineBlock {
             seq: 2,
@@ -35,6 +36,7 @@ fn selection_pieces_cover_block_ranges() {
                 generation: 1,
             },
             rows: 5,
+            meta: SegmentMeta::default(),
         },
     ]);
 
@@ -89,12 +91,11 @@ fn session_block_reads_copy_expand_and_preserve_row_metadata() {
             seq: 1,
             handle,
             rows: 2,
+            meta: SegmentMeta {
+                command: Some("echo hello".into()),
+                ..SegmentMeta::default()
+            },
         }]);
-
-    session
-        .block_store()
-        .lock()
-        .update_meta(1, |meta| meta.command = Some("echo hello".into()));
 
     assert_eq!(session.block_command(0).as_deref(), Some("echo hello"));
     assert_eq!(

@@ -12,6 +12,7 @@ use nmt_config::active_colors;
 use nmt_platform::windows::powershell::INTEGRATION_SCRIPT;
 use parking_lot::Mutex;
 
+use crate::block_store::SegmentMeta;
 use crate::event::TerminalEvent;
 use crate::graphics::UpdateQueues;
 use crate::session::config::is_windows_powershell;
@@ -458,9 +459,10 @@ fn block_batches_and_seq_metadata_reach_the_block_store() {
         ended_at: now,
     }));
 
-    // ...the item materializes later, at the block's finish. The batch is
-    // staged and only flushed to the store on the read's damage wake, so
-    // nothing lands until the following `TerminalDamaged`.
+    // ...the item materializes later, at the block's finish, carrying the
+    // complete record. The batch is staged and only flushed to the store on
+    // the read's damage wake, so nothing lands until the following
+    // `TerminalDamaged`.
     proxy.send_event(TerminalEvent::BlockBatch(vec![BlockEvent::EngineBlock {
         seq: 1,
         handle: BlockHandle {
@@ -468,6 +470,13 @@ fn block_batches_and_seq_metadata_reach_the_block_store() {
             generation: 1,
         },
         rows: 3,
+        meta: SegmentMeta {
+            command: Some("cargo build".into()),
+            cwd: Some("C:/w".into()),
+            exit_code: Some(0),
+            started_at: Some(now),
+            ended_at: Some(now),
+        },
     }]));
 
     assert!(
@@ -645,6 +654,7 @@ fn active_and_frozen_state_coherent_at_wake() {
             generation: 1,
         },
         rows: 2,
+        meta: SegmentMeta::default(),
     }]));
 
     proxy.send_event(rgba_update(1, 42, 2, 2));
@@ -710,6 +720,7 @@ fn final_damage_callback_observes_published_blocks_after_graphics() {
             generation: 1,
         },
         rows: 2,
+        meta: SegmentMeta::default(),
     }]));
 
     proxy.send_event(rgba_update(1, 42, 2, 2));

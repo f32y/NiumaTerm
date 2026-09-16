@@ -7,6 +7,7 @@ use nmt_config::CursorShape;
 use nmt_config::colors::Colors;
 use nmt_platform::{Waker, WinsizeBuilder};
 
+use crate::block_store::SegmentMeta;
 use crate::clipboard::ClipboardType;
 use crate::ghostty;
 use crate::graphics::UpdateQueues;
@@ -25,11 +26,15 @@ pub enum BlockEvent {
     /// A trusted `;D` froze the command into a finished engine block. The
     /// store keeps only the handle; rendering reads the block through
     /// `BlockRef`. `rows` is the row count at finish time, cached app-side
-    /// so layout never needs an engine query.
+    /// so layout never needs an engine query. `meta` is the complete command
+    /// record: the PTY thread holds command text, launch directory, timing,
+    /// and exit code when it freezes the block, so the item arrives whole
+    /// and the store never joins metadata by sequence number.
     EngineBlock {
         seq: u64,
         handle: ghostty::BlockHandle,
         rows: usize,
+        meta: SegmentMeta,
     },
     /// The engine's current live block list, oldest first, with per-block
     /// row counts. Emitted after resize (eager reflow bumps generations and
