@@ -82,21 +82,11 @@ impl CommandQueue {
         discarded
     }
 
-    pub fn settle(&mut self, outcome: &SlashCommandOutcome, status: Status) -> bool {
+    pub fn settle(&mut self, outcome: &SlashCommandOutcome, status: Status) {
         match outcome {
-            SlashCommandOutcome::Accepted => false,
-            SlashCommandOutcome::Completed { .. } => {
-                if status == Status::Running {
-                    return false;
-                }
-
-                take(&mut self.awaiting_turn)
-            }
-            SlashCommandOutcome::Rejected { .. } | SlashCommandOutcome::NotReady => {
-                self.awaiting_turn = false;
-
-                true
-            }
+            SlashCommandOutcome::Accepted => {}
+            SlashCommandOutcome::Completed { .. } if status == Status::Running => {}
+            _ => self.awaiting_turn = false,
         }
     }
 

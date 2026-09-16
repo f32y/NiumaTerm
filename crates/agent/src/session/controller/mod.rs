@@ -167,10 +167,6 @@ impl SessionController {
         Some((command.name, outcome))
     }
 
-    fn settle_command(&mut self, outcome: &SlashCommandOutcome) -> bool {
-        self.commands.settle(outcome, self.runtime.status())
-    }
-
     /// Installation failure must retire accepted work from the failed start too.
     pub fn install(&mut self, epoch: u64, spawned: Result<Backend, String>) -> StartOutcome {
         let outcome = self.runtime.install(epoch, spawned);
@@ -197,6 +193,8 @@ impl SessionController {
         }
 
         self.naming.named = recovery.is_some();
+        self.command_catalog = None;
+        self.skill_catalog = None;
 
         epoch
     }
@@ -379,7 +377,7 @@ impl SessionController {
 
                 SessionEffect::InputResolved(completion)
             }
-            SessionEffect::TurnCompleted { error, interrupted } => {
+            SessionEffect::TurnCompleted { error } => {
                 if let Some(text) = &error {
                     let conversation = self.conversation.borrow();
 
@@ -395,7 +393,7 @@ impl SessionController {
                     }
                 }
 
-                SessionEffect::TurnCompleted { error, interrupted }
+                SessionEffect::TurnCompleted { error }
             }
             effect @ (SessionEffect::ApprovalRequested | SessionEffect::InputRequested { .. }) => {
                 self.note_visible_output();
@@ -440,23 +438,19 @@ impl SessionController {
                 SessionEffect::EffortRejected { message }
             }
             Event::Commands(commands) => {
-                self.command_catalog = Some(commands.clone());
+                self.command_catalog = Some(commands);
 
-                SessionEffect::Commands(commands)
+                SessionEffect::Commands
             }
             Event::Skills(catalog) => {
-                self.skill_catalog = Some(catalog.clone());
+                self.skill_catalog = Some(catalog);
 
-                SessionEffect::Skills(catalog)
+                SessionEffect::Skills
             }
             Event::SlashCommandResult { name, outcome } => {
-                let advance = self.settle_command(&outcome);
+                self.commands.settle(&outcome, self.runtime.status());
 
-                SessionEffect::CommandResult {
-                    name,
-                    outcome,
-                    advance,
-                }
+                SessionEffect::CommandResult { name, outcome }
             }
             Event::TurnStarted => SessionEffect::TurnStarted {
                 opened: self.turn_started(),
@@ -466,10 +460,11 @@ impl SessionController {
             Event::ProviderTurnFinished { id, error } => {
                 SessionEffect::ProviderTurnFinished { id, error }
             }
-            Event::TurnCompleted { error } => SessionEffect::TurnCompleted {
-                error,
-                interrupted: self.turn_completed(),
-            },
+            Event::TurnCompleted { error } => {
+                self.turn_completed();
+
+                SessionEffect::TurnCompleted { error }
+            }
             Event::TurnOutputTokensUpdated(tokens) => {
                 let mut conversation = self.conversation.borrow_mut();
 
@@ -645,7 +640,15 @@ impl SessionController {
             Event::ForkCheckpoints(checkpoints) => {
                 SessionEffect::Branch(self.branch.fork_checkpoints(&mut self.runtime, checkpoints))
             }
-            Event::HostExited { message } => SessionEffect::HostExited { message },
+            Event::HostExited { message } => {
+                let failure = self.failed(&message, true);
+
+                SessionEffect::Error {
+                    message,
+                    fatal: true,
+                    failure,
+                }
+            }
             Event::Error { message, fatal } => {
                 let failure = self.failed(&message, fatal);
 
@@ -883,7 +886,7 @@ impl SessionController {
     }
 
     /// Completion consumes the matching interrupt and releases both work queues.
-    fn turn_completed(&mut self) -> bool {
+    fn turn_completed(&mut self) {
         let interrupted = self.runtime.turn_completed(self.delivery.turn());
 
         self.commands.turn_completed();
@@ -901,8 +904,6 @@ impl SessionController {
         }
 
         conversation.settle(turn);
-
-        interrupted
     }
 
     pub fn failed(&mut self, message: &str, fatal: bool) -> SessionFailure {
@@ -1014,12 +1015,11 @@ pub enum SessionEffect {
     Unchanged,
     Changed,
     Ready(SessionReady),
-    Commands(Vec<SlashCommandInfo>),
-    Skills(SkillCatalog),
+    Commands,
+    Skills,
     CommandResult {
         name: String,
         outcome: SlashCommandOutcome,
-        advance: bool,
     },
     TurnStarted {
         opened: bool,
@@ -1034,7 +1034,6 @@ pub enum SessionEffect {
     },
     TurnCompleted {
         error: Option<String>,
-        interrupted: bool,
     },
     Branch(BranchUpdate),
     ApprovalRequested,
@@ -1052,9 +1051,6 @@ pub enum SessionEffect {
     Title(String),
     Replay(SessionReplay),
     StatusDetail(Option<TurnRetry>),
-    HostExited {
-        message: String,
-    },
     Error {
         message: String,
         fatal: bool,

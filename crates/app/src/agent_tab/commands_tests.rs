@@ -216,8 +216,6 @@ fn palette_direction_navigation_wraps_and_handles_catalog_changes() {
 #[test]
 fn clear_resets_discovery_state() {
     let mut palette = SlashPalette {
-        provider_commands: vec![info("review", SlashCommandSource::Provider)],
-        provider_commands_ready: true,
         selected: 3,
         dismissed: true,
         ..SlashPalette::default()
@@ -225,14 +223,13 @@ fn clear_resets_discovery_state() {
 
     palette.catalog = Some(CachedCatalog {
         language: "en".into(),
-        commands: palette.provider_commands.clone().into(),
+        epoch: 1,
+        commands: vec![info("review", SlashCommandSource::Provider)].into(),
     });
 
-    palette.reset_discovery(false);
+    palette.reset_discovery();
 
-    assert!(palette.provider_commands.is_empty());
     assert!(palette.catalog.is_none());
-    assert!(!palette.provider_commands_ready);
     assert_eq!(palette.selected, 0);
     assert!(!palette.dismissed);
 }

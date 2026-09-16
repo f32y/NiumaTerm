@@ -395,6 +395,69 @@ mod conversation_title_tests {
     }
 
     #[gpui::test]
+    fn discovery_cache_drops_commands_and_skills_from_a_retired_session(cx: &mut TestAppContext) {
+        use nmt_agent::chat::{
+            Event, SkillCatalog, SlashCommandArguments, SlashCommandInfo, SlashCommandRunPolicy,
+            SlashCommandSource,
+        };
+
+        let (pane, _) = open_pane(cx, AgentKind::Codex, None);
+
+        deliver_session_event(
+            &pane,
+            Event::Commands(vec![SlashCommandInfo {
+                name: "old-provider-command".into(),
+                description: "A command from the previous session".into(),
+                argument_hint: None,
+                source: SlashCommandSource::Provider,
+                arguments: SlashCommandArguments::None,
+                run_policy: SlashCommandRunPolicy::Immediate,
+            }]),
+            cx,
+        );
+
+        deliver_session_event(
+            &pane,
+            Event::Skills(SkillCatalog {
+                skills: Vec::new(),
+                errors: vec!["previous discovery error".into()],
+            }),
+            cx,
+        );
+
+        cx.update(|cx| {
+            pane.update(cx, |pane, cx| {
+                let before = pane.command_catalog(cx);
+
+                assert!(
+                    before
+                        .iter()
+                        .any(|command| command.name == "old-provider-command")
+                );
+                assert_eq!(
+                    pane.skill_palette_model("").note.as_deref(),
+                    Some("previous discovery error")
+                );
+
+                pane.session.borrow_mut().starting(None);
+
+                let after = pane.command_catalog(cx);
+
+                assert!(
+                    !after
+                        .iter()
+                        .any(|command| command.name == "old-provider-command")
+                );
+                assert!(!Rc::ptr_eq(&before, &after));
+                assert_eq!(
+                    pane.skill_palette_model("").note.as_deref(),
+                    Some(&*rust_i18n::t!("agent-composer-skill-discovery-loading"))
+                );
+            })
+        });
+    }
+
+    #[gpui::test]
     fn output_failure_retires_backend_and_marks_session_exited(cx: &mut TestAppContext) {
         let (pane, window) = open_pane(cx, AgentKind::Codex, None);
 

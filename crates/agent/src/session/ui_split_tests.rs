@@ -43,10 +43,13 @@ fn queued_commands_wait_for_real_turn_and_exit_discards_pending_work() {
         commands.execute(Some(&mut backend), &command),
         SlashCommandOutcome::Accepted
     ));
-    assert!(!commands.settle(
+
+    commands.settle(
         &SlashCommandOutcome::Completed { message: None },
-        Status::Running
-    ));
+        Status::Running,
+    );
+
+    assert!(commands.awaiting_turn);
     assert!(commands.turn_started());
     assert!(!commands.turn_started());
 

@@ -150,7 +150,7 @@ impl Backend {
     /// its own shape: Codex reads files from disk, so the attachments are
     /// written under `scratch` first, while Claude Code and DeepSeek Harness
     /// take the bytes inline. A harness with no image input is sent the text
-    /// alone, which is all a pane without `image_input` can have composed.
+    /// alone when no attachments were supplied.
     pub fn send_user_message<'a>(
         &mut self,
         text: &str,

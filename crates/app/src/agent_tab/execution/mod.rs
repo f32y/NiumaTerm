@@ -690,14 +690,7 @@ impl AgentSession {
 
             let accepted = matches!(outcome, SlashCommandOutcome::Accepted);
 
-            self.publish(
-                SessionEffect::CommandResult {
-                    name,
-                    outcome,
-                    advance: false,
-                },
-                cx,
-            );
+            self.publish(SessionEffect::CommandResult { name, outcome }, cx);
 
             if accepted {
                 break;
