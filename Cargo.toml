@@ -23,6 +23,7 @@ members = [
     "crates/terminal",
     "crates/tree_sitter_bundle",
     "crates/sparkle",
+    "crates/updater",
 
     "third_party/libghostty-vt-sys",
 
@@ -86,6 +87,7 @@ nmt_profile = { path = "crates/profile" }
 nmt_remote_net = { path = "crates/remote_net" }
 nmt_terminal = { path = "crates/terminal" }
 nmt_sparkle = { path = "crates/sparkle" }
+nmt_updater = { path = "crates/updater" }
 
 # Agent profile credential encryption. The aes-gcm `getrandom` default
 # feature provides the operating-system random source used for nonces.

@@ -13,11 +13,8 @@ mod logging;
 mod profiling;
 #[cfg(windows)]
 mod remote;
-#[cfg(target_os = "macos")]
-mod sparkle;
 mod tabs;
 mod ui;
-#[cfg(windows)]
 mod update;
 mod usage_refresh;
 mod usage_sources;
@@ -48,6 +45,9 @@ use nmt_platform::ipc as platform_ipc;
 use nmt_platform::window::show_error_dialog;
 #[cfg(enable_profiling)]
 use nmt_profiling::allocation::ProfilingAllocator;
+use nmt_updater::AWAIT_EXIT_FLAG;
+#[cfg(windows)]
+use nmt_updater::windows::{settle_previous_update, wait_for_previous_instance};
 use rust_i18n::t;
 use tracing::warn;
 
@@ -82,11 +82,6 @@ struct StartupArgs {
     previous_instance_pid: Option<u32>,
 }
 
-/// The flag a freshly installed build is relaunched with, naming the process
-/// it has to outlive. It lives here rather than with the updater because the
-/// command line is parsed on every platform, whether one is built or not.
-pub(crate) const AWAIT_EXIT_FLAG: &str = "--await-exit";
-
 /// The concrete Windows platform, kept as a gpui global so settings toggles
 /// can reach platform-level knobs (UI thread priority). The one knob behind it
 /// is Windows-only, and so is the handle: elsewhere nothing would read it.
@@ -109,8 +104,10 @@ fn main() {
 
     // Only a build that can replace itself has a predecessor to outlive.
     #[cfg(windows)]
-    if let Some(pid) = _previous_instance_pid {
-        update::wait_for_previous_instance(pid);
+    if let Some(pid) = _previous_instance_pid
+        && !wait_for_previous_instance(pid)
+    {
+        warn!("update: the previous instance is still running; starting anyway");
     }
 
     // Builds without performance collection accept these switches through
@@ -289,7 +286,7 @@ fn on_finish_launching(
     // files, which is why this runs before it rather than beside the
     // rest of the update setup below.
     #[cfg(windows)]
-    update::settle_previous_update();
+    settle_previous_update(&nmt_config::config_dir_path(), &utils::get_exe_dir());
 
     if let Err(error) = syntax::register_languages() {
         warn!("syntax highlighting is limited to built-in languages: {error}");
@@ -319,11 +316,8 @@ fn on_finish_launching(
 
     input_history::initialize(is_testing, cx);
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     update::initialize(is_testing, cx);
-
-    #[cfg(target_os = "macos")]
-    sparkle::initialize(is_testing, cx);
 
     // Bring up the remote host service if it was left enabled. Runs on
     // its own runtime thread; failures only log.
@@ -444,11 +438,8 @@ fn on_settings_changed(cx: &mut App) {
 
     agent_updates::reconcile_profiles(&agent_profiles, cx);
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     update::on_settings_changed(cx);
-
-    #[cfg(target_os = "macos")]
-    sparkle::on_settings_changed(cx);
 
     // Terminal and agent scrolling are their own elements carrying
     // their own switch; this one covers every container that scrolls

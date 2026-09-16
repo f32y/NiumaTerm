@@ -1,10 +1,9 @@
+#[cfg(windows)]
+use nmt_updater::windows::{CheckError, InstallError, Status};
 use rust_i18n::t;
 
-#[cfg(target_os = "macos")]
-use crate::sparkle;
 use crate::ui::settings::*;
-#[cfg(windows)]
-use crate::update::{self, CheckError, InstallError, Status};
+use crate::update;
 
 pub(super) fn about_page() -> SettingPage {
     // One untitled group. A page holding a single group drops its subcategory
@@ -90,8 +89,8 @@ fn update_check_item() -> SettingItem {
             Button::new("app-update-check")
                 .outline()
                 .label(t!("settings-about-check-button"))
-                .disabled(options.is_disabled() || !sparkle::can_check(cx))
-                .on_click(|_, _, cx: &mut App| sparkle::check_now(cx))
+                .disabled(options.is_disabled() || !update::can_check(cx))
+                .on_click(|_, _, cx: &mut App| update::check(cx))
         }),
     )
 }

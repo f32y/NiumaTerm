@@ -1,0 +1,33 @@
+[package]
+name = "nmt_updater"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+nmt_config.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+nmt_platform.workspace = true
+nmt_version.workspace = true
+reqwest = { workspace = true, features = [
+    "blocking",
+    "rustls-tls-native-roots",
+    "system-proxy",
+] }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tracing.workspace = true
+zip.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+nmt_sparkle.workspace = true
+
+[dev-dependencies]
+parking_lot.workspace = true
+tempfile.workspace = true

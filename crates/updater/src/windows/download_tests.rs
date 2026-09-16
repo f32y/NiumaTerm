@@ -1,5 +1,5 @@
-use crate::update::download::{expected_digest, flat_name, package_assets};
-use crate::update::releases::Asset;
+use crate::windows::download::{expected_digest, flat_name, package_assets};
+use crate::windows::releases::Asset;
 
 const DIGEST: &str = "9f2fcc7c586c1eba3c4b7b48d0f2a9a6e1c9c1a1b2c3d4e5f60718293a4b5c6d";
 

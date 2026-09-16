@@ -11,7 +11,7 @@
 #[path = "install_tests.rs"]
 mod install_tests;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 use std::{fs, process};
@@ -20,10 +20,78 @@ use nmt_platform::file_version::version_string;
 use nmt_platform::windows::self_update::{ReplaceFilesError, discard_previous, replace_files};
 use tracing::warn;
 
-use crate::update::{AWAIT_EXIT_FLAG, InstallError};
+use crate::AWAIT_EXIT_FLAG;
+use crate::windows::releases::Release;
+
+/// Why an update that was found could not be put in place. Each variant names
+/// the step that refused, because what a user can do about it differs: a
+/// release with nothing attached to it is not the same problem as an
+/// installation directory this account may not write to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InstallError {
+    /// The release has no package, or none published beside a checksum.
+    NoPackage,
+    Unreachable,
+    /// What arrived is not what was published.
+    Checksum,
+    Unpack,
+    NotWritable,
+    Replace,
+    /// The files were replaced, so the update did land; only the restart into
+    /// it did not.
+    Relaunch,
+}
 
 const APP_EXE: &str = "NiumaTerm.exe";
-pub(crate) const SHELL_EXTENSION_DLL: &str = "NmtShellExtension.dll";
+pub(super) const SHELL_EXTENSION_DLL: &str = "NmtShellExtension.dll";
+
+/// A downloaded release and the exact files selected for replacement.
+/// Paths are captured before replacement can rename the running executable.
+pub struct Installation {
+    release: Release,
+    staged: PathBuf,
+    install: PathBuf,
+    plan: InstallPlan,
+    testing: bool,
+}
+
+impl Installation {
+    pub(super) fn new(release: Release, staged: PathBuf, install: PathBuf, testing: bool) -> Self {
+        let plan = plan(&staged, &install);
+
+        if plan.is_empty() {
+            warn!("update: the published package matches what is installed");
+        }
+
+        Self {
+            release,
+            staged,
+            install,
+            plan,
+            testing,
+        }
+    }
+
+    pub(super) fn release(&self) -> &Release {
+        &self.release
+    }
+
+    pub(super) fn changes_shell_extension(&self) -> bool {
+        self.plan.contains(SHELL_EXTENSION_DLL)
+    }
+
+    pub(super) fn shell_extension(&self) -> PathBuf {
+        self.install.join(SHELL_EXTENSION_DLL)
+    }
+
+    pub(super) fn apply(&self) -> Result<(), InstallError> {
+        apply(&self.staged, &self.install, &self.plan)
+    }
+
+    pub(super) fn relaunch(&self) -> Result<(), InstallError> {
+        relaunch(&self.install, self.testing)
+    }
+}
 
 /// Install the files `package` carries and `install` does not have.
 ///
@@ -37,7 +105,7 @@ pub(crate) const SHELL_EXTENSION_DLL: &str = "NmtShellExtension.dll";
 /// skipped, and deciding which installed files a package supersedes belongs to
 /// the swap, which can rename a mapped file aside where a plain copy over one
 /// would be refused.
-pub(crate) fn install_additions(package: &Path, install: &Path) {
+pub(super) fn install_additions(package: &Path, install: &Path) {
     if !carries_installed_app(package, install) {
         return;
     }
@@ -72,19 +140,19 @@ fn carries_installed_app(package: &Path, install: &Path) -> bool {
 /// anyway. Waiting at all is what keeps it from reaching the single-instance
 /// check while the old process still holds the mutex; waiting forever would
 /// hand a shutdown that never finishes the power to prevent the restart.
-pub(crate) const PREDECESSOR_TIMEOUT: Duration = Duration::from_secs(30);
+pub(super) const PREDECESSOR_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct InstallPlan {
+struct InstallPlan {
     names: Vec<String>,
 }
 
 impl InstallPlan {
-    pub(crate) fn is_empty(&self) -> bool {
+    fn is_empty(&self) -> bool {
         self.names.is_empty()
     }
 
-    pub(crate) fn contains(&self, name: &str) -> bool {
+    fn contains(&self, name: &str) -> bool {
         self.names.iter().any(|staged| staged == name)
     }
 }
@@ -93,7 +161,7 @@ impl InstallPlan {
 ///
 /// Capturing this before any file moves keeps later pre-install decisions tied
 /// to the exact set that the swap will consume.
-pub(crate) fn plan(staging: &Path, install: &Path) -> InstallPlan {
+fn plan(staging: &Path, install: &Path) -> InstallPlan {
     let versions = versions(staging, install);
 
     InstallPlan {
@@ -102,11 +170,7 @@ pub(crate) fn plan(staging: &Path, install: &Path) -> InstallPlan {
 }
 
 /// Replace the installed files selected by `plan` with the staged copies.
-pub(crate) fn apply(
-    staging: &Path,
-    install: &Path,
-    plan: &InstallPlan,
-) -> Result<(), InstallError> {
+fn apply(staging: &Path, install: &Path, plan: &InstallPlan) -> Result<(), InstallError> {
     let names: Vec<&str> = plan.names.iter().map(String::as_str).collect();
 
     replace_files(staging, install, &names).map_err(|error| {
@@ -213,7 +277,7 @@ fn differing(versions: &[(String, Option<String>, Option<String>)]) -> Vec<Strin
 /// told which process to wait for instead of being left to race it: reaching
 /// the single-instance check too early makes it forward a request to the
 /// instance on its way out and exit instead of starting.
-pub(crate) fn relaunch(install: &Path, testing: bool) -> Result<(), InstallError> {
+fn relaunch(install: &Path, testing: bool) -> Result<(), InstallError> {
     let mut command = Command::new(install.join(APP_EXE));
 
     command.arg(AWAIT_EXIT_FLAG).arg(process::id().to_string());
