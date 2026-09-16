@@ -5,8 +5,8 @@ use base64::engine::general_purpose::STANDARD;
 use image_rs::{DynamicImage, ImageFormat, Rgba, RgbaImage};
 use nmt_config::colors::AnsiColor;
 
-use crate::cell::Wide;
 use crate::ghostty::*;
+use crate::grid::Wide;
 
 fn line_text(snapshot: &RenderBuffer, row: usize) -> String {
     let mut text = String::new();

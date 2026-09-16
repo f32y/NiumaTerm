@@ -8,7 +8,7 @@ use nmt_terminal::event::BlockEvent;
 use nmt_terminal::ghostty::{
     BlockHandle, BlockRef, GhosttyTerminal, Palette, RowCell, ScreenRowRead,
 };
-use nmt_terminal::pos::{Column, Line, Pos};
+use nmt_terminal::grid::{Column, Line, Pos};
 use nmt_terminal::selection::SelectionRange;
 use nmt_terminal::session::BlockPoint as FrozenPoint;
 use nmt_terminal::session::page::{PageSource, RowPage};

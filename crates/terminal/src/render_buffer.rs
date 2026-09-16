@@ -18,14 +18,11 @@ use nmt_config::colors::term::TermColors;
 use parking_lot::Mutex;
 use rustc_hash::FxHashMap;
 
-use crate::cell::{Extras, Square, Wide};
 use crate::ghostty::{
     CellWide, ScreenRowMeta, ScrollbarInfo, SnapshotColors, SnapshotCursor, SnapshotPlacement,
     SnapshotStyle,
 };
-use crate::pos::{Column, Line, Pos};
-use crate::row::Row;
-use crate::style::{Style, StyleId, StyleSet};
+use crate::grid::{Column, Extras, Line, Pos, Row, Square, Style, StyleId, StyleSet, Wide};
 
 /// A decoupled, renderable copy of the visible viewport.
 pub struct RenderBuffer {

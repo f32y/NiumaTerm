@@ -3,8 +3,7 @@ use std::{collections, ops};
 
 use nmt_terminal::block_store::BlockItem;
 use nmt_terminal::ghostty::BlockHandle;
-use nmt_terminal::grid_emit::row_selection_for;
-use nmt_terminal::selection::SelectionRange;
+use nmt_terminal::selection::{SelectionRange, row_selection_for};
 use nmt_terminal::session::BlockPoint as FrozenPoint;
 use nmt_terminal::session::interaction::block_selection_span;
 use nmt_terminal::session::page::{PageSource, RowPage};

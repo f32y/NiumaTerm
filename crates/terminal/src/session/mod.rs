@@ -1,14 +1,12 @@
 //! One terminal surface's runtime state: libghostty-vt engine, render buffer, and
 //! the ConPTY-backed PTY worker so platform details stay outside the UI layer.
 
-pub use crate::session::blocks::BlockPoint;
 pub use crate::session::config::TerminalSessionConfig;
 pub use crate::session::error::{EngineError, EngineErrorCode};
 pub use crate::session::mouse::{
     SurfaceCell, SurfaceCellSide, SurfaceMouseButton, SurfaceMouseEventKind, SurfaceScreenCell,
 };
-pub use crate::session::observer::{SessionChange, SessionObserver};
-pub use crate::session::rows::RowText;
+pub use crate::session::selection::BlockPoint;
 
 pub mod interaction;
 pub mod page;
@@ -16,13 +14,10 @@ pub mod request;
 
 pub(crate) mod selection;
 
-mod blocks;
 mod config;
 mod error;
 mod mouse;
-mod observer;
 mod proxy;
-mod rows;
 
 #[cfg(test)]
 mod block_tests;
@@ -60,22 +55,23 @@ use parking_lot::Mutex;
 use tracing::error;
 
 use crate::block_store::{BlockItem, BlockStore};
-use crate::event::{Msg, MsgSender, ProgressReport};
-use crate::ghostty::BlockHandle;
-use crate::graphics::GraphicData;
+use crate::clipboard::ClipboardType;
+use crate::event::{BlockEvent, Msg, MsgSender, ProgressReport};
+use crate::ghostty::{BlockHandle, ScreenRowRead};
+use crate::graphics::{GraphicData, UpdateQueues};
+use crate::grid::{Column, Line, Pos};
 use crate::input::{TerminalKey, key_encode_flags, should_defer_to_ime};
-use crate::pos::{Column, Line, Pos};
 use crate::pty_pipe::{SessionOptions, SessionWorker, start_session};
 use crate::render_buffer::{FrameStore, RenderBuffer};
 use crate::selection::{SelectionRange, SelectionType, WORD_DELIMITERS};
-use crate::session::blocks::frozen_selection_pieces;
 use crate::session::config::{default_shell, is_windows_powershell};
 use crate::session::mouse::{mouse_button_code, mouse_motion_code, mouse_report_mods};
 use crate::session::page::{PageCache, PageSource, RowPage, ScreenState};
 use crate::session::proxy::TerminalEventProxy;
 use crate::session::request::{BlockRange, Query, Request, TextPiece, TextSource};
-use crate::session::rows::materialized_pointer_row;
-use crate::session::selection::{SurfaceSelection, selection_screen_range};
+use crate::session::selection::{
+    SurfaceSelection, frozen_selection_pieces, selection_screen_range,
+};
 use crate::vt_modes::Mode;
 
 type SessionBuffer = Arc<FrameStore>;
@@ -832,4 +828,59 @@ fn paste_payload(text: &str, bracketed: bool) -> Option<Vec<u8>> {
     }
 
     Some(bracket_paste(body.as_bytes(), bracketed))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SessionChange {
+    Content,
+    HostEvents,
+}
+
+/// Receives synchronous updates on the PTY worker. Implementations must not
+/// access windows or wait for another thread: a callback can run during a
+/// parse batch, and waiting for an enqueued command would stall its owner.
+pub trait SessionObserver: Send + Sync {
+    fn graphics(&self, _updates: UpdateQueues) {}
+
+    fn blocks(&self, _events: &[BlockEvent]) {}
+
+    fn clipboard(&self, _kind: ClipboardType, _text: String) {}
+
+    fn changed(&self, _change: SessionChange) {}
+}
+
+/// Pointer text preserves grid columns by retaining the first codepoint per cell.
+#[derive(Clone, Debug)]
+pub struct RowText {
+    pub text: String,
+    pub wrapped: bool,
+    pub hyperlinks: Vec<(u16, u16, String)>,
+}
+
+fn materialized_pointer_row(row: &ScreenRowRead, cols: u16) -> RowText {
+    let mut chars = Vec::with_capacity(cols as usize);
+
+    for cell in &row.cells {
+        let x = cell.x as usize;
+
+        if chars.len() < x {
+            chars.resize(x, ' ');
+        }
+
+        if chars.len() == x {
+            chars.push(cell.text.as_str().chars().next().unwrap_or(' '));
+        }
+    }
+
+    let cols = cols as usize;
+
+    if chars.len() < cols {
+        chars.resize(cols, ' ');
+    }
+
+    RowText {
+        text: chars.into_iter().collect(),
+        wrapped: row.meta.wrapped,
+        hyperlinks: row.meta.hyperlinks.clone(),
+    }
 }

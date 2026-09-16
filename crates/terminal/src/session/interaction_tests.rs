@@ -1,7 +1,7 @@
 use nmt_input::keyboard::ModifiersState;
 
 use crate::ghostty::GhosttyTerminal;
-use crate::pos::{Column, Line, Pos, Side};
+use crate::grid::{Column, Line, Pos, Side};
 use crate::render_buffer::RenderBuffer;
 use crate::selection::{Selection, SelectionType};
 use crate::session::mouse::{

@@ -13,7 +13,37 @@ pub use crate::ghostty::types::{
 ///
 /// Values mirror Ghostty's `ModeTag` (packed `u16`): a DEC private mode uses its
 /// raw number; an ANSI mode sets bit 15. See Ghostty `src/terminal/modes.zig`.
-pub mod mode;
+pub mod mode {
+    /// DECCKM — application cursor keys.
+    pub const CURSOR_KEYS: u16 = 1;
+
+    /// IRM — insert/replace (ANSI mode 4).
+    pub const INSERT: u16 = 4 | 0x8000;
+
+    /// DECAWM — autowrap / line wrap.
+    pub const WRAPAROUND: u16 = 7;
+
+    /// DECTCEM — cursor visible.
+    pub const CURSOR_VISIBLE: u16 = 25;
+
+    /// DECKPAM — application keypad.
+    pub const KEYPAD_KEYS: u16 = 66;
+
+    pub const MOUSE_NORMAL: u16 = 1000;
+    pub const MOUSE_BUTTON: u16 = 1002;
+    pub const MOUSE_ANY: u16 = 1003;
+    pub const FOCUS_EVENT: u16 = 1004;
+    pub const MOUSE_UTF8: u16 = 1005;
+    pub const MOUSE_SGR: u16 = 1006;
+    pub const MOUSE_ALTERNATE_SCROLL: u16 = 1007;
+    pub const MOUSE_URXVT: u16 = 1015;
+    pub const MOUSE_SGR_PIXELS: u16 = 1016;
+    pub const ALT_SCREEN: u16 = 1049;
+    pub const BRACKETED_PASTE: u16 = 2004;
+
+    /// DEC synchronized output keeps a TUI frame private until its matching reset.
+    pub const SYNC_OUTPUT: u16 = 2026;
+}
 
 mod block;
 mod callbacks;
@@ -67,7 +97,6 @@ use crate::ghostty::format::format_terminal;
 use crate::ghostty::grid_read::visit_row_cells;
 use crate::ghostty::kitty::{KittyState, kitty_image_graphic_data, set_kitty_storage_limit};
 use crate::ghostty::render_state::RenderStateReader;
-use crate::pwd::pwd_to_path;
 use crate::render_buffer::RenderBuffer;
 use crate::{clipboard, graphics, vt_modes};
 
@@ -1139,4 +1168,25 @@ impl Drop for GhosttyTerminal {
     fn drop(&mut self) {
         unsafe { ghostty_terminal_free(self.terminal) };
     }
+}
+
+/// OSC 7 reports the directory as a `file://host/path` URI.
+fn pwd_to_path(pwd: &str) -> path::PathBuf {
+    if let Some(rest) = pwd.strip_prefix("file://") {
+        // rest = "host/path"; the path starts at the first '/'.
+        if let Some(slash) = rest.find('/') {
+            let path = &rest[slash..];
+
+            // A drive-qualified Windows path is absolute without the URI slash.
+            let path = if path.as_bytes().get(2) == Some(&b':') {
+                &path[1..]
+            } else {
+                path
+            };
+
+            return path.into();
+        }
+    }
+
+    pwd.into()
 }

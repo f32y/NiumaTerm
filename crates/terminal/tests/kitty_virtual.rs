@@ -1,5 +1,5 @@
 use nmt_config::colors::{AnsiColor, ColorRgb, NamedColor};
-use nmt_terminal::kitty_virtual::*;
+use nmt_terminal::graphics::*;
 
 #[test]
 fn rgb_placeholder_id_round_trip() {
