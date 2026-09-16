@@ -57,21 +57,9 @@ pub(super) fn render_claude_row(
         state.settings.model.clone(),
         model_options,
         |this, value, cx| {
-            let Some(session_host) = this.host.upgrade() else {
-                return;
-            };
-
-            let session_kind = session_host.read(cx).kind;
-            let session_profile = session_host.read(cx).profile.clone();
-
-            this.session.borrow_mut().controls.set_model(value);
-
-            remember_defaults(
-                &this.session.borrow().controls,
-                session_kind,
-                &session_profile,
-                cx,
-            );
+            update_settings(this, cx, |settings| {
+                settings.set_model(value);
+            });
         },
     )
     .into_any_element();
@@ -82,19 +70,9 @@ pub(super) fn render_claude_row(
         current: state.settings.approval.clone(),
         options: permission_options,
         set: |this, value, cx| {
-            let Some(session_host) = this.host.upgrade() else {
-                return;
-            };
-            let session_kind = session_host.read(cx).kind;
-            let session_profile = session_host.read(cx).profile.clone();
-
-            this.session.borrow_mut().controls.settings.approval = Some(value);
-            remember_defaults(
-                &this.session.borrow().controls,
-                session_kind,
-                &session_profile,
-                cx,
-            );
+            update_settings(this, cx, |settings| {
+                settings.settings.approval = Some(value);
+            });
         },
     }];
 
@@ -118,21 +96,9 @@ pub(super) fn render_claude_row(
                 .or_else(|| Some("default".to_string())),
             effort_levels(kind),
             |this, value, cx| {
-                let Some(session_host) = this.host.upgrade() else {
-                    return;
-                };
-
-                let session_kind = session_host.read(cx).kind;
-                let session_profile = session_host.read(cx).profile.clone();
-
-                this.session.borrow_mut().controls.settings.effort = Some(value);
-
-                remember_defaults(
-                    &this.session.borrow().controls,
-                    session_kind,
-                    &session_profile,
-                    cx,
-                );
+                update_settings(this, cx, |settings| {
+                    settings.settings.effort = Some(value);
+                });
             },
         )
         .into_any_element();
@@ -178,23 +144,9 @@ pub(super) fn render_deepseek_row(
         state.settings.model.clone(),
         model_options,
         |this, value, cx| {
-            let Some(session_host) = this.host.upgrade() else {
-                return;
-            };
-
-            let session_kind = session_host.read(cx).kind;
-            let session_profile = session_host.read(cx).profile.clone();
-
-            this.session.borrow_mut().controls.set_model(value);
-
-            remember_defaults(
-                &this.session.borrow().controls,
-                session_kind,
-                &session_profile,
-                cx,
-            );
-
-            this.apply_model_selection(cx);
+            if update_settings(this, cx, |settings| settings.set_model(value)) {
+                this.apply_model_selection(cx);
+            }
         },
     )
     .into_any_element();
@@ -249,23 +201,11 @@ pub(super) fn render_deepseek_row(
             state.settings.effort.clone(),
             effort_levels(kind),
             |this, value, cx| {
-                let Some(session_host) = this.host.upgrade() else {
-                    return;
-                };
-
-                let session_kind = session_host.read(cx).kind;
-                let session_profile = session_host.read(cx).profile.clone();
-
-                this.session.borrow_mut().controls.settings.effort = Some(value);
-
-                remember_defaults(
-                    &this.session.borrow().controls,
-                    session_kind,
-                    &session_profile,
-                    cx,
-                );
-
-                this.apply_model_selection(cx);
+                if update_settings(this, cx, |settings| {
+                    settings.settings.effort = Some(value);
+                }) {
+                    this.apply_model_selection(cx);
+                }
             },
         )
         .into_any_element();
@@ -328,21 +268,9 @@ pub(super) fn render_codex_row(
         state.settings.model.clone(),
         model_options,
         |this, value, cx| {
-            let Some(session_host) = this.host.upgrade() else {
-                return;
-            };
-
-            let session_kind = session_host.read(cx).kind;
-            let session_profile = session_host.read(cx).profile.clone();
-
-            this.session.borrow_mut().controls.set_model(value);
-
-            remember_defaults(
-                &this.session.borrow().controls,
-                session_kind,
-                &session_profile,
-                cx,
-            );
+            update_settings(this, cx, |settings| {
+                settings.set_model(value);
+            });
         },
     )
     .into_any_element();
@@ -354,19 +282,9 @@ pub(super) fn render_codex_row(
             current: state.settings.approval.clone(),
             options: approval_options,
             set: |this, value, cx| {
-                let Some(session_host) = this.host.upgrade() else {
-                    return;
-                };
-                let session_kind = session_host.read(cx).kind;
-                let session_profile = session_host.read(cx).profile.clone();
-
-                this.session.borrow_mut().controls.settings.approval = Some(value);
-                remember_defaults(
-                    &this.session.borrow().controls,
-                    session_kind,
-                    &session_profile,
-                    cx,
-                );
+                update_settings(this, cx, |settings| {
+                    settings.settings.approval = Some(value);
+                });
             },
         },
         FoldedSetting {
@@ -375,23 +293,9 @@ pub(super) fn render_codex_row(
             current: state.settings.approvals_reviewer.clone(),
             options: reviewer_options,
             set: |this, value, cx| {
-                let Some(session_host) = this.host.upgrade() else {
-                    return;
-                };
-                let session_kind = session_host.read(cx).kind;
-                let session_profile = session_host.read(cx).profile.clone();
-
-                this.session
-                    .borrow_mut()
-                    .controls
-                    .settings
-                    .approvals_reviewer = Some(value);
-                remember_defaults(
-                    &this.session.borrow().controls,
-                    session_kind,
-                    &session_profile,
-                    cx,
-                );
+                update_settings(this, cx, |settings| {
+                    settings.settings.approvals_reviewer = Some(value);
+                });
             },
         },
         FoldedSetting {
@@ -400,19 +304,9 @@ pub(super) fn render_codex_row(
             current: state.settings.sandbox.clone(),
             options: sandbox_options,
             set: |this, value, cx| {
-                let Some(session_host) = this.host.upgrade() else {
-                    return;
-                };
-                let session_kind = session_host.read(cx).kind;
-                let session_profile = session_host.read(cx).profile.clone();
-
-                this.session.borrow_mut().controls.settings.sandbox = Some(value);
-                remember_defaults(
-                    &this.session.borrow().controls,
-                    session_kind,
-                    &session_profile,
-                    cx,
-                );
+                update_settings(this, cx, |settings| {
+                    settings.settings.sandbox = Some(value);
+                });
             },
         },
         FoldedSetting {
@@ -421,20 +315,9 @@ pub(super) fn render_codex_row(
             current: Some(state.settings.tier.clone().unwrap_or_default()),
             options: tier_options,
             set: |this, value, cx| {
-                let Some(session_host) = this.host.upgrade() else {
-                    return;
-                };
-                let session_kind = session_host.read(cx).kind;
-                let session_profile = session_host.read(cx).profile.clone();
-
-                this.session.borrow_mut().controls.settings.tier =
-                    (!value.is_empty()).then_some(value);
-                remember_defaults(
-                    &this.session.borrow().controls,
-                    session_kind,
-                    &session_profile,
-                    cx,
-                );
+                update_settings(this, cx, |settings| {
+                    settings.settings.tier = (!value.is_empty()).then_some(value);
+                });
             },
         },
     ];
@@ -444,21 +327,9 @@ pub(super) fn render_codex_row(
         state.settings.effort.clone(),
         effort_levels(kind),
         |this, value, cx| {
-            let Some(session_host) = this.host.upgrade() else {
-                return;
-            };
-
-            let session_kind = session_host.read(cx).kind;
-            let session_profile = session_host.read(cx).profile.clone();
-
-            this.session.borrow_mut().controls.settings.effort = Some(value);
-
-            remember_defaults(
-                &this.session.borrow().controls,
-                session_kind,
-                &session_profile,
-                cx,
-            );
+            update_settings(this, cx, |settings| {
+                settings.settings.effort = Some(value);
+            });
         },
     )
     .into_any_element();
@@ -474,4 +345,23 @@ pub(super) fn render_codex_row(
             vec![effort],
         ))
         .children(folded_settings_pill(cx, folded))
+}
+
+fn update_settings(
+    pane: &mut AgentPane,
+    cx: &mut Context<AgentPane>,
+    update: impl FnOnce(&mut ConversationSettings),
+) -> bool {
+    let Some(host) = pane.host.upgrade() else {
+        return false;
+    };
+
+    let kind = host.read(cx).kind;
+    let profile = host.read(cx).profile.clone();
+
+    update(&mut pane.session.borrow_mut().controls);
+
+    remember_defaults(&pane.session.borrow().controls, kind, &profile, cx);
+
+    true
 }
