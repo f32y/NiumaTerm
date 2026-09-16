@@ -4,6 +4,7 @@ use futures::executor::block_on;
 use nmt_config::system::NewlineShortcut;
 use nmt_input::keyboard::ModifiersState;
 
+use crate::block_store::SegmentMeta;
 use crate::event::{BlockEvent, Msg};
 use crate::ghostty::GhosttyTerminal;
 use crate::input::{KeyPhase, TerminalKey};
@@ -30,6 +31,7 @@ fn frozen_session() -> (TerminalSession, GhosttyTerminal, mpsc::Receiver<Msg>) {
             seq: 1,
             handle,
             rows: 1,
+            meta: SegmentMeta::default(),
         }]);
 
     (session, engine, messages)

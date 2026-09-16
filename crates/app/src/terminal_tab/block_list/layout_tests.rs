@@ -1,5 +1,6 @@
 use std::time::SystemTime;
 
+use nmt_terminal::block_store::SegmentMeta;
 use nmt_terminal::event::BlockEvent;
 use nmt_terminal::ghostty::BlockHandle;
 use nmt_terminal::session::InFlightBlock;
@@ -60,6 +61,7 @@ fn block_item(seq: u64, id: u64, rows: usize) -> BlockEvent {
         seq,
         handle: BlockHandle { id, generation: 1 },
         rows,
+        meta: SegmentMeta::default(),
     }
 }
 

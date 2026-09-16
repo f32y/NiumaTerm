@@ -5,6 +5,7 @@ use std::time::SystemTime;
 
 use nmt_platform::{Poll, Token, Waker};
 
+use crate::block_store::SegmentMeta;
 use crate::event::{BlockEvent, CommandCapture, EventListener, Msg, MsgSender, TerminalEvent};
 use crate::ghostty::{BlockHandle, GhosttyTerminal};
 use crate::pty_pipe::SessionWorker;
@@ -42,12 +43,11 @@ fn path_paste_and_block_replay_obey_session_input_rules() {
                 generation: 1,
             },
             rows: 1,
+            meta: SegmentMeta {
+                command: Some("echo hello".into()),
+                ..SegmentMeta::default()
+            },
         }]);
-
-    session
-        .block_store()
-        .lock()
-        .update_meta(1, |meta| meta.command = Some("echo hello".into()));
 
     assert!(session.rerun_block(0));
     assert!(

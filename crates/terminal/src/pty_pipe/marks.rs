@@ -2,6 +2,7 @@ use std::{cell, path};
 
 use tracing::warn;
 
+use crate::block_store::SegmentMeta;
 use crate::event::{self, EventListener, TerminalEvent};
 use crate::ghostty::{self, GhosttyTerminal, mode};
 use crate::prompt_sniffer::SnifferMark;
@@ -93,6 +94,16 @@ pub(super) fn apply_sniffer_mark(
                             seq: *mark_seq,
                             handle,
                             rows,
+                            meta: SegmentMeta {
+                                command: cmd.command.clone(),
+                                cwd: cmd
+                                    .cwd
+                                    .as_ref()
+                                    .map(|cwd| cwd.to_string_lossy().into_owned()),
+                                exit_code: cmd.exit_code,
+                                started_at: Some(cmd.started_at),
+                                ended_at: Some(cmd.ended_at),
+                            },
                         },
                         event::BlockEvent::EngineBlocksSync(engine_blocks_live_list(&engine)),
                     ]

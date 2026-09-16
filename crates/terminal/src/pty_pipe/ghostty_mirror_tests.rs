@@ -1482,7 +1482,9 @@ echo hi\r\n\x1b]133;C\x07hi\r\n\
             for event in batch {
                 match event {
                     BlockEvent::HistoryCleared => shape.push("cleared".into()),
-                    BlockEvent::EngineBlock { seq, rows, handle } => {
+                    BlockEvent::EngineBlock {
+                        seq, rows, handle, ..
+                    } => {
                         handles.push(*handle);
 
                         shape.push(format!("block{seq}:{rows}"))
@@ -1588,7 +1590,7 @@ fn pty_read_emits_no_command_for_untrusted_stream() {
 /// matching split segment sequence numbers.
 #[test]
 fn pty_read_emits_start_and_finish_events_with_seq() {
-    use crate::event::TerminalEvent;
+    use crate::event::{BlockEvent, TerminalEvent};
 
     let stream = b"\x1b]133;A\x07\x1b]133;B\x07\x1b]133;C\x07\
 \x1b]7;file:///C:/w\x07\x1b]133;D;0\x07\x1b]133;A\x07PS> \x1b]133;B\x07\
@@ -1628,6 +1630,36 @@ echo two\r\n\x1b]133;C\x07two\r\n\
     assert_eq!(starts[0].seq, finishes[0].seq);
     assert_eq!(starts[1].seq, finishes[1].seq);
     assert!(starts[0].seq < starts[1].seq);
+
+    // Each frozen block carries the complete command record, so the store
+    // never has to join metadata by sequence number later.
+    let blocks: Vec<_> = events
+        .iter()
+        .filter_map(|e| match e {
+            TerminalEvent::BlockBatch(batch) => Some(batch),
+            _ => None,
+        })
+        .flatten()
+        .filter_map(|b| match b {
+            BlockEvent::EngineBlock { seq, meta, .. } => Some((*seq, meta.clone())),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(blocks.len(), 2, "one frozen block per real command");
+
+    for ((seq, meta), finish) in blocks.iter().zip(&finishes) {
+        assert_eq!(*seq, finish.seq);
+        assert_eq!(meta.command, finish.command);
+        assert_eq!(meta.exit_code, Some(0));
+        assert_eq!(meta.started_at, Some(finish.started_at));
+        assert_eq!(meta.ended_at, Some(finish.ended_at));
+        assert!(
+            meta.cwd.as_deref().is_some_and(|cwd| cwd.ends_with('w')),
+            "launch cwd rides with the block, got {:?}",
+            meta.cwd
+        );
+    }
 
     // Mark forwarding is working when the engine tags the
     // prompt rows — the drift-correction ground truth for the view.
