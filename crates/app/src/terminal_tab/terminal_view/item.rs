@@ -165,7 +165,7 @@ impl Element for BlockListItem {
                     &viewport,
                     *selection,
                     &model.duration_labels,
-                    theme.foreground,
+                    &theme,
                 );
 
                 let record = FrameRecord::from_view(&view, item_top);
@@ -190,7 +190,7 @@ impl Element for BlockListItem {
                     *history_rows,
                     *cols,
                     &viewport,
-                    theme.foreground,
+                    &theme,
                 );
 
                 let live_rows = frame_content_rows(frame);

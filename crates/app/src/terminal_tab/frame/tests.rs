@@ -8,9 +8,9 @@ use nmt_terminal::terminal::pos::{Column, Line, Pos};
 use nmt_terminal::terminal::square::Wide;
 
 use crate::terminal_tab::frame::{
-    BackgroundColors, FrameImageKind, GenerationMap, TerminalColor, TerminalFrame, ZLayer,
-    cursor_for_row, extract_frame_images, extract_row, extract_row_with_colors, frame_cursor,
-    line_from_parts,
+    BackgroundColors, EngineRowBuilder, FrameImageKind, GenerationMap, TerminalColor,
+    TerminalFrame, TerminalLine, ZLayer, cursor_for_row, extract_frame_images, extract_row,
+    extract_row_with_colors, frame_cursor, line_from_parts,
 };
 // --- Kitty image frame extraction ---
 use crate::terminal_tab::graphics;
@@ -793,6 +793,83 @@ fn unmatched_placeholder_is_skipped() {
         extract_frame_images(&buf, &generations).is_empty(),
         "no matching placement/image → no descriptor, no marker"
     );
+}
+
+/// Scrolled-back and frozen rows are built by `EngineRowBuilder` from engine
+/// reads; the viewport by `extract_row_with_colors` from the render buffer.
+/// The same cells must shape and color identically on both paths: the
+/// default foreground under an OSC 10 override, faint text with an explicit
+/// and with the default color, inverse video, and a kitty placeholder cell
+/// that stays out of the shaped text.
+#[test]
+fn engine_rows_render_like_viewport_rows() {
+    let mut engine = GhosttyTerminal::new(12, 1, 100).unwrap();
+
+    engine.write_vt(b"a \x1b[2m\x1b[38;2;200;100;50mdim\x1b[0m \x1b[7minv\x1b[0m \x1b[2mff");
+
+    let mut buf = RenderBuffer::new(12, 1);
+
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
+
+    // The runtime default-color layer that OSC 10 writes into.
+    let mut term_colors = buf.colors();
+
+    term_colors[NamedColor::Foreground] = Some([0.2, 0.4, 0.6, 1.0]);
+
+    let colors = BackgroundColors::new(term_colors, &FrameTheme::default());
+    let viewport = extract_row_with_colors(&buf, 0, None, &colors, None);
+    let history = engine_row(&engine, 0, &colors);
+
+    assert_eq!(viewport.runs()[0].fg, (0x33, 0x66, 0x99).into());
+    assert_eq!(history.text(), viewport.text());
+    assert_eq!(history.runs(), viewport.runs());
+    assert_eq!(
+        cell_backgrounds(&history),
+        cell_backgrounds(&viewport),
+        "inverse video paints the same background on both paths"
+    );
+
+    let placeholder = format!("\x1b[38;2;0;0;7m{}\u{0305}\u{0305}abc", '\u{10EEEE}');
+
+    let (buf, _) = buf_and_generations(
+        4,
+        1,
+        format!("\x1b_Ga=T,U=1,f=32,s=1,v=1,i=7,p=3,c=1,r=1;/wAA/w==\x1b\\{placeholder}")
+            .as_bytes(),
+    );
+
+    let mut engine = GhosttyTerminal::new(4, 1, 100).unwrap();
+
+    engine.resize(4, 1, 10, 20).unwrap();
+    engine.write_vt(b"\x1b_Ga=T,U=1,f=32,s=1,v=1,i=7,p=3,c=1,r=1;/wAA/w==\x1b\\");
+    engine.write_vt(placeholder.as_bytes());
+
+    let colors = BackgroundColors::new(buf.colors(), &FrameTheme::default());
+    let viewport = extract_row_with_colors(&buf, 0, None, &colors, None);
+    let history = engine_row(&engine, 0, &colors);
+
+    assert!(!viewport.text().contains('\u{10EEEE}'));
+    assert_eq!(history.text(), viewport.text());
+}
+
+fn engine_row(engine: &GhosttyTerminal, row: u32, colors: &BackgroundColors) -> TerminalLine {
+    let data = engine.read_screen_row(row).unwrap().unwrap();
+
+    let mut builder = EngineRowBuilder::default();
+
+    for cell in &data.cells {
+        builder.push(cell.x, cell.text.clone(), cell.wide, &cell.style, colors);
+    }
+
+    builder.into()
+}
+
+fn cell_backgrounds(line: &TerminalLine) -> Vec<(u16, Option<TerminalColor>)> {
+    line.cells()
+        .iter()
+        .filter(|cell| cell.ch != ' ' && cell.ch != '\0')
+        .map(|cell| (cell.col, cell.background))
+        .collect()
 }
 
 #[test]

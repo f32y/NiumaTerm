@@ -14,7 +14,7 @@ use crate::terminal_tab::block_list::chrome::{
 };
 use crate::terminal_tab::block_list::selection::expand_wide_span;
 use crate::terminal_tab::block_list::{FrozenRow, FrozenView};
-use crate::terminal_tab::frame::{EngineRowBuilder, TerminalColor, TerminalLine};
+use crate::terminal_tab::frame::{BackgroundColors, EngineRowBuilder, TerminalLine};
 
 /// Metadata determines the item's height even while its visible pages are
 /// still being materialized by the engine owner.
@@ -51,7 +51,7 @@ pub(crate) fn frozen_block_view(
     cell_h: f32,
     pad_rows: f32,
     selection: Option<(FrozenPoint, FrozenPoint)>,
-    default_fg: TerminalColor,
+    colors: &BackgroundColors,
 ) -> FrozenView {
     let selection = selection.map(|(a, b)| if a <= b { (a, b) } else { (b, a) });
     let rows = info.rows;
@@ -109,13 +109,7 @@ pub(crate) fn frozen_block_view(
         };
 
         for cell in &data.cells {
-            builder.push(
-                cell.x,
-                cell.text.clone(),
-                cell.wide,
-                &cell.style,
-                default_fg,
-            );
+            builder.push(cell.x, cell.text.clone(), cell.wide, &cell.style, colors);
         }
 
         let line: TerminalLine = builder.into();
