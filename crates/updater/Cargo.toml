@@ -26,7 +26,8 @@ tracing.workspace = true
 zip.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
-nmt_sparkle.workspace = true
+objc2.workspace = true
+objc2-foundation.workspace = true
 
 [dev-dependencies]
 parking_lot.workspace = true

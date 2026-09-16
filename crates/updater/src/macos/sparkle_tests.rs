@@ -10,7 +10,7 @@ use objc2::runtime::AnyObject;
 use objc2::{DefinedClass, msg_send};
 use objc2_foundation::{NSSet, NSString, ns_string};
 
-use crate::{Channel, UpdaterDelegate};
+use crate::macos::sparkle::{Channel, UpdaterDelegate};
 
 /// Send the selector the way Sparkle does rather than calling the Rust method,
 /// so the registered selector name is part of what is checked.

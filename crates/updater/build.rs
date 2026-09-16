@@ -45,7 +45,7 @@ fn main() {
         source.display()
     );
 
-    // OUT_DIR is <target>/<profile>/build/nmt_sparkle-<hash>/out; walk up to
+    // OUT_DIR is <target>/<profile>/build/nmt_updater-<hash>/out; walk up to
     // <target>/<profile>, which holds the binaries and, in deps/, the test
     // executables.
     let profile_dir = out_dir
