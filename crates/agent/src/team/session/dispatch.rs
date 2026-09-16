@@ -32,11 +32,7 @@ pub(crate) fn reserve_dispatches(
 
         let id = AttemptId::new();
 
-        if let BudgetScope::Direct(operation) = intent.budget {
-            next.direct_allowances
-                .entry(operation)
-                .or_insert_with(Budget::direct);
-        }
+        let direct_budget = Budget::direct();
 
         let budget = match intent.budget {
             BudgetScope::Discussion(discussion) => {
@@ -45,7 +41,7 @@ pub(crate) fn reserve_dispatches(
                     .ok_or(DispatchError::Ineligible)?
                     .budget
             }
-            BudgetScope::Direct(operation) => &next.direct_allowances[&operation],
+            BudgetScope::Direct(_) => &direct_budget,
         };
 
         budget.check_batch(

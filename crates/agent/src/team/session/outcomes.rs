@@ -30,7 +30,7 @@ pub(super) fn event_attempt(room: &Room, key: AttemptEventKey) -> Option<usize> 
 pub(super) fn in_flight(state: &AttemptState) -> bool {
     matches!(
         state,
-        AttemptState::Sending | AttemptState::Accepted { .. } | AttemptState::Uncertain
+        AttemptState::Sending | AttemptState::Accepted | AttemptState::Uncertain
     )
 }
 
@@ -56,9 +56,7 @@ pub(super) fn accept(room: &mut Room, index: usize, provider_turn: &str) -> Resu
 
     attempt.provider_turn = Some(provider_turn.to_owned());
 
-    attempt.state = AttemptState::Accepted {
-        provider_turn: provider_turn.to_owned(),
-    };
+    attempt.state = AttemptState::Accepted;
 
     if attempt.intent.purpose != TurnPurpose::Summary {
         let recipient = attempt.intent.recipient;
@@ -86,7 +84,8 @@ pub(super) fn accept(room: &mut Room, index: usize, provider_turn: &str) -> Resu
 /// Whether `attempt` can be completed by a reply to `provider_turn`: that is
 /// the turn it was accepted as, and it is a turn that publishes a reply.
 pub(super) fn completes(attempt: &Attempt, provider_turn: &str) -> bool {
-    matches!(&attempt.state, AttemptState::Accepted { provider_turn: accepted } if accepted == provider_turn)
+    attempt.state == AttemptState::Accepted
+        && attempt.provider_turn.as_deref() == Some(provider_turn)
         && attempt.intent.purpose != TurnPurpose::Summary
 }
 

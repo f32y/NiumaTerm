@@ -7,14 +7,13 @@ use thiserror::Error;
 use crate::AgentWorkspace;
 use crate::chat::ThreadSettings;
 use crate::team::attempt::{Attempt, AttemptState, BudgetScope};
-use crate::team::budget::Budget;
 use crate::team::discussion::{
     Discussion, DiscussionError, DiscussionMode, DiscussionState, PublicSnapshot,
 };
 use crate::team::member::{AcceptedCoverage, Member, MemberConfig};
 use crate::team::model::{
-    ContextError, ContextLimits, DiscussionId, MemberId, MessageId, OperationId, PreparedContext,
-    PublicMessage, RoomId, Summary, SummaryId, UserInput,
+    ContextError, ContextLimits, DiscussionId, MemberId, MessageId, PreparedContext, PublicMessage,
+    RoomId, Summary, SummaryId, UserInput,
 };
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -28,7 +27,6 @@ pub struct Room {
     pub(super) input_history: Vec<UserInput>,
     pub(super) controls: RoomControls,
     pub(super) attempts: Vec<Attempt>,
-    pub(super) direct_allowances: BTreeMap<OperationId, Budget>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -72,7 +70,6 @@ impl Room {
             input_history: Vec::new(),
             controls: RoomControls::default(),
             attempts: Vec::new(),
-            direct_allowances: BTreeMap::new(),
         }
     }
 

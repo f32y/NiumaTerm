@@ -164,7 +164,8 @@ impl TeamRuntime {
             .insert(id, MemberHost::new(owner, vec![events, changed]));
     }
 
-    pub fn member_session(&self, member: MemberId) -> Option<&Entity<AgentSession>> {
+    #[cfg(test)]
+    fn member_session(&self, member: MemberId) -> Option<&Entity<AgentSession>> {
         self.hosts.get(&member).map(|host| host.owner.session())
     }
 
@@ -389,7 +390,7 @@ impl TeamRuntime {
 
                 let unresolved = matches!(
                     attempt.state,
-                    AttemptState::Sending | AttemptState::Accepted { .. } | AttemptState::Uncertain
+                    AttemptState::Sending | AttemptState::Accepted | AttemptState::Uncertain
                 );
 
                 if !unresolved && work == WorkStatus::default() {
@@ -476,7 +477,7 @@ impl TeamRuntime {
                             .find(|attempt| attempt.id == attempt_id)
                         && matches!(
                             attempt.state,
-                            AttemptState::Sending | AttemptState::Accepted { .. }
+                            AttemptState::Sending | AttemptState::Accepted
                         )
                     {
                         self.session.fail_attempt(

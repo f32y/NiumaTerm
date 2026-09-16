@@ -10,8 +10,8 @@ use crate::team::discussion::{
     Arrangement, ArrangementState, DiscussionMode, PauseReason, PublicSnapshot, Stage, StageKind,
 };
 use crate::team::model::{
-    Author, MessageId, OperationId, PublicMessage, Publication, RoomId, StageId, Summary,
-    SummaryId, UserInput,
+    AttemptId, Author, MessageId, OperationId, PublicMessage, Publication, RoomId, StageId,
+    Summary, SummaryId, UserInput,
 };
 use crate::team::room::Room;
 use crate::team::session::dispatch::{DispatchError, dispatch, reserve_dispatches};
@@ -124,7 +124,11 @@ fn invalid_or_unsupported_snapshot_preserves_saved_bytes_and_other_rooms() {
 
     drop(RoomStore::create(directory.path(), other).unwrap());
 
-    for invalid in [b"{\"version\":2,".to_vec(), b"{\"version\":999}".to_vec()] {
+    for invalid in [
+        b"{\"version\":3,".to_vec(),
+        b"{\"version\":2}".to_vec(),
+        b"{\"version\":999}".to_vec(),
+    ] {
         fs::write(&path, &invalid).unwrap();
 
         assert!(RoomStore::open(directory.path(), id).is_err());
@@ -213,7 +217,6 @@ fn storage_failures_preserve_input_and_reservations_without_backend_dispatch() {
     assert!(result.is_err());
     assert_eq!(sends, 0);
     assert!(store.room().attempts().is_empty());
-    assert!(store.room.direct_allowances.is_empty());
     assert_eq!(input.text, "Keep this draft");
 
     assert!(matches!(
@@ -406,4 +409,59 @@ fn batch_admission_is_atomic_and_only_unsent_or_rejected_work_releases_allowance
             .remaining_non_report_turns(store.room().attempts()),
         0
     );
+}
+
+#[test]
+fn direct_request_budget_stays_scoped_and_bounded_after_reopening() {
+    let directory = tempdir().unwrap();
+
+    let mut room = Room::new(AgentWorkspace::default());
+
+    let member = room.add_member(config("Alice", "C:/a")).unwrap();
+    let room_id = room.id();
+    let operation = OperationId::new();
+
+    let intent = |operation| DispatchIntent {
+        invocation: Default::default(),
+        recipient: member,
+        backend_generation: 1,
+        operation,
+        stage: None,
+        budget: BudgetScope::Direct(operation),
+        purpose: TurnPurpose::Response,
+        input: UserInput::default(),
+        prepared_text: "Review".into(),
+        snapshot: PublicSnapshot::default(),
+        coverage: Default::default(),
+    };
+
+    let mut store = RoomStore::create(directory.path(), room).unwrap();
+
+    reserve_dispatches(&mut store, vec![intent(operation); 12]).unwrap();
+
+    drop(store);
+
+    let mut store = RoomStore::open(directory.path(), room_id).unwrap();
+
+    assert!(matches!(
+        reserve_dispatches(&mut store, vec![intent(operation)]),
+        Err(DispatchError::Budget(BudgetError::InsufficientTurns))
+    ));
+    assert_eq!(store.room().attempts().len(), 12);
+
+    let mut invalid = store.room().clone();
+    let mut extra = invalid.attempts[0].clone();
+
+    extra.id = AttemptId::new();
+
+    invalid.attempts.push(extra);
+
+    assert!(matches!(
+        store.commit(invalid),
+        Err(StorageError::Invalid(_))
+    ));
+
+    reserve_dispatches(&mut store, vec![intent(OperationId::new())]).unwrap();
+
+    assert_eq!(store.room().attempts().len(), 13);
 }
