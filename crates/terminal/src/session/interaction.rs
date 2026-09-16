@@ -1,26 +1,20 @@
 //! Terminal input and selection rules in cell coordinates. Hosts own pointer
 //! geometry, clipboard access, and reactions to completed operations.
 
-pub use crate::session::interaction::copy::{CopyCompletion, PendingCopy};
-pub use crate::session::interaction::selection::{
-    block_selection_span, selection_type_for_click_count,
-};
-
-mod copy;
-mod selection;
-
 #[cfg(test)]
-mod tests;
+#[path = "interaction_tests.rs"]
+mod interaction_tests;
 
 use std::collections::HashSet;
 
+use futures::channel::oneshot;
 use nmt_config::system::NewlineShortcut;
 
+use crate::ghostty::BlockHandle;
 use crate::input::{KeyPhase, TerminalKey, TerminalKeyAction, key_action};
 use crate::render_buffer::RenderBuffer;
-use crate::selection::SelectionType;
-use crate::session::interaction::copy::CopiedSelection;
-use crate::session::interaction::selection::{FrozenSelection, PendingExpansion};
+use crate::selection::{SelectionRange, SelectionType};
+use crate::session::request::{BlockRange, Request};
 use crate::session::{BlockPoint, TerminalSession};
 use crate::vt_modes::Mode;
 
@@ -236,4 +230,162 @@ impl TerminalInteraction {
             _ => {}
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Copy requests
+// ---------------------------------------------------------------------------
+
+#[derive(Debug)]
+enum CopiedSelection {
+    Live(SelectionRange),
+    Frozen(BlockPoint, BlockPoint),
+    FrozenPending,
+    None,
+}
+
+/// Retains the selection that supplied a copy without letting a host mutate it.
+#[derive(Debug)]
+pub struct CopyCompletion {
+    selection: CopiedSelection,
+    generation: u64,
+}
+
+#[derive(Debug)]
+pub struct PendingCopy {
+    pub request: Request<String>,
+    pub completion: CopyCompletion,
+}
+
+impl PendingCopy {
+    pub fn ready(text: String) -> Self {
+        let (reply, request) = oneshot::channel();
+        let _ = reply.send(Ok(text));
+
+        request.into()
+    }
+}
+
+impl From<Request<String>> for PendingCopy {
+    fn from(request: Request<String>) -> Self {
+        Self {
+            request,
+            completion: CopyCompletion {
+                selection: CopiedSelection::None,
+                generation: 0,
+            },
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Frozen-region selection state
+// ---------------------------------------------------------------------------
+
+pub fn selection_type_for_click_count(click_count: usize) -> SelectionType {
+    match click_count {
+        2 => SelectionType::Semantic,
+        3.. => SelectionType::Lines,
+        _ => SelectionType::Simple,
+    }
+}
+
+#[derive(Default)]
+struct FrozenSelection {
+    /// Frozen-region selection: (anchor, head), both inclusive cell points.
+    selection: Option<(BlockPoint, BlockPoint)>,
+
+    /// Anchor of an in-progress frozen-region drag. The selection itself is
+    /// only created on the first mouse-move, so a plain click selects nothing
+    /// (matching the engine's empty-selection-dropped-on-up semantics).
+    anchor: Option<BlockPoint>,
+}
+
+impl FrozenSelection {
+    /// Start a drag from `anchor`, dropping whatever was selected.
+    fn begin(&mut self, anchor: BlockPoint) {
+        self.selection = None;
+        self.anchor = Some(anchor);
+    }
+
+    /// Take a range whole, as a double- or triple-click does. There is nothing
+    /// left to drag from, so the anchor goes with it.
+    fn select(&mut self, selection: Option<(BlockPoint, BlockPoint)>) {
+        self.selection = selection;
+        self.anchor = None;
+    }
+
+    fn anchor(&self) -> Option<BlockPoint> {
+        self.anchor
+    }
+
+    /// Grow the selection to `head`, reporting whether a drag was in progress.
+    fn extend(&mut self, head: BlockPoint) -> bool {
+        let Some(anchor) = self.anchor else {
+            return false;
+        };
+
+        self.selection = Some((anchor, head));
+
+        true
+    }
+
+    /// End a drag without committing it, reporting whether one was open.
+    fn commit(&mut self) -> bool {
+        self.anchor.take().is_some()
+    }
+
+    /// Drop the selection, reporting whether one was showing.
+    fn clear(&mut self) -> bool {
+        self.selection.take().is_some()
+    }
+
+    fn current(&self) -> Option<(BlockPoint, BlockPoint)> {
+        self.selection
+    }
+}
+
+struct PendingExpansion {
+    point: BlockPoint,
+    handle: BlockHandle,
+    request: Request<BlockRange>,
+    kind: SelectionType,
+}
+
+impl PendingExpansion {
+    fn copy_text(&self, session: &TerminalSession) -> Request<String> {
+        session.block_selection_text(self.handle, self.point.line, self.point.col, self.kind)
+    }
+}
+
+/// The selected column span of one block row, row-local and end-exclusive.
+/// The selection covers inclusive cells `[a, b]` in (item, row, col) order.
+pub fn block_selection_span(
+    selection: Option<(BlockPoint, BlockPoint)>,
+    item: usize,
+    row: usize,
+    cols: u32,
+) -> Option<(u16, u16)> {
+    let (a, b) = selection?;
+    let here = (item, row);
+
+    if here < (a.item, a.line) || here > (b.item, b.line) {
+        return None;
+    }
+
+    let lo = if here == (a.item, a.line) { a.col } else { 0 };
+
+    let hi = if here == (b.item, b.line) {
+        b.col.saturating_add(1)
+    } else {
+        cols.max(1)
+    }
+    .min(cols.max(1));
+
+    (lo < hi).then(|| {
+        (
+            lo.min(u16::MAX as u32) as u16,
+            hi.min(u16::MAX as u32) as u16,
+        )
+    })
 }

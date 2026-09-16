@@ -2,10 +2,6 @@
 //! the ConPTY-backed PTY worker so platform details stay outside the UI layer.
 
 pub use crate::session::config::TerminalSessionConfig;
-pub use crate::session::error::{EngineError, EngineErrorCode};
-pub use crate::session::mouse::{
-    SurfaceCell, SurfaceCellSide, SurfaceMouseButton, SurfaceMouseEventKind, SurfaceScreenCell,
-};
 pub use crate::session::selection::BlockPoint;
 
 pub mod interaction;
@@ -15,29 +11,21 @@ pub mod request;
 pub(crate) mod selection;
 
 mod config;
-mod error;
-mod mouse;
 mod proxy;
 
 #[cfg(test)]
-mod block_tests;
+mod engine_tests;
 #[cfg(test)]
-mod interaction_tests;
-#[cfg(test)]
-mod psreadline_tests;
-#[cfg(test)]
-mod state_tests;
+mod shell_integration_tests;
 #[cfg(test)]
 mod tests;
-#[cfg(test)]
-mod vtebench_tests;
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::{io, time};
+use std::{error, fmt, io, time};
 
 use futures::channel::oneshot;
 use nmt_config::CursorShape;
@@ -64,7 +52,6 @@ use crate::input::{TerminalKey, key_encode_flags, should_defer_to_ime};
 use crate::render_buffer::{FrameStore, RenderBuffer};
 use crate::selection::{SelectionRange, SelectionType, WORD_DELIMITERS};
 use crate::session::config::{default_shell, is_windows_powershell};
-use crate::session::mouse::{mouse_button_code, mouse_motion_code, mouse_report_mods};
 use crate::session::page::{PageCache, PageSource, RowPage, ScreenState};
 use crate::session::proxy::TerminalEventProxy;
 use crate::session::request::{BlockRange, Query, Request, TextPiece, TextSource};
@@ -883,4 +870,118 @@ fn materialized_pointer_row(row: &ScreenRowRead, cols: u16) -> RowText {
         wrapped: row.meta.wrapped,
         hyperlinks: row.meta.hyperlinks.clone(),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Engine start-up errors
+// ---------------------------------------------------------------------------
+
+/// Stable error categories for the shell's in-window error panel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EngineErrorCode {
+    /// ConPTY spawn failed (bad shell, working dir, …).
+    PtySpawn,
+    /// libghostty-vt engine init failed.
+    EngineInit,
+}
+
+/// A structured engine failure.
+#[derive(Debug)]
+pub struct EngineError {
+    pub code: EngineErrorCode,
+    pub message: String,
+}
+
+impl EngineError {
+    pub(crate) fn new(code: EngineErrorCode, message: impl Into<String>) -> Self {
+        EngineError {
+            code,
+            message: message.into(),
+        }
+    }
+}
+
+impl fmt::Display for EngineError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl error::Error for EngineError {}
+
+// ---------------------------------------------------------------------------
+// Surface mouse events and their VT report encoding
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SurfaceCell {
+    pub col: u16,
+    pub row: u16,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SurfaceScreenCell {
+    pub col: u16,
+    pub row: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SurfaceCellSide {
+    Left,
+    Right,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SurfaceMouseButton {
+    Left,
+    Middle,
+    Right,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SurfaceMouseEventKind {
+    Down,
+    Up,
+    Move,
+}
+
+fn mouse_button_code(button: SurfaceMouseButton) -> Option<u8> {
+    match button {
+        SurfaceMouseButton::Left => Some(0),
+        SurfaceMouseButton::Middle => Some(1),
+        SurfaceMouseButton::Right => Some(2),
+    }
+}
+
+fn mouse_motion_code(mode: Mode, button: Option<SurfaceMouseButton>) -> Option<u8> {
+    let button = button.and_then(mouse_button_code);
+
+    if mode.contains(Mode::MOUSE_MOTION) {
+        // DECSET 1003 reports every move; no pressed button uses the X10
+        // no-button id 3, while a pressed button keeps its own id.
+        Some(32 + button.unwrap_or(3))
+    } else if mode.contains(Mode::MOUSE_DRAG) {
+        // DECSET 1002 reports moves only while a button is held.
+        button.map(|button| 32 + button)
+    } else {
+        None
+    }
+}
+
+fn mouse_report_mods(modifiers: ModifiersState) -> u8 {
+    let mut mods = 0;
+
+    if modifiers.shift_key() {
+        mods += 4;
+    }
+
+    if modifiers.alt_key() {
+        mods += 8;
+    }
+
+    if modifiers.control_key() {
+        mods += 16;
+    }
+
+    mods
 }

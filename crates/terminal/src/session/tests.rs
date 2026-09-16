@@ -16,10 +16,9 @@ use crate::block_store::SegmentMeta;
 use crate::event::TerminalEvent;
 use crate::graphics::UpdateQueues;
 use crate::session::config::is_windows_powershell;
-use crate::session::error::EngineErrorCode;
 use crate::session::{
-    HostEvent, SessionChange, SessionObserver, SessionSharedState, TerminalEventProxy,
-    TerminalSession, TerminalSessionConfig,
+    EngineErrorCode, HostEvent, SessionChange, SessionObserver, SessionSharedState,
+    TerminalEventProxy, TerminalSession, TerminalSessionConfig,
 };
 
 #[test]
