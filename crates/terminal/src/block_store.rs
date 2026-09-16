@@ -73,11 +73,23 @@ pub struct BlockStore {
     /// Items dropped from the front (engine budget eviction), so a list UI
     /// can splice instead of resetting scroll state.
     pub evicted_items: u64,
+
+    /// Counts the events that remove rows from the screen's scrollback: a
+    /// user clear and a finished command frozen into a block. Screen rows
+    /// are addressed from the top of the scrollback, so either event shifts
+    /// the index of every later row. Readers that reuse an earlier screen
+    /// page compare this counter; the row total alone misses a removal that
+    /// the same batch refilled with new output.
+    history_epoch: u64,
 }
 
 impl BlockStore {
     pub fn items(&self) -> &[BlockItem] {
         &self.items
+    }
+
+    pub fn history_epoch(&self) -> u64 {
+        self.history_epoch
     }
 
     /// Apply one PTY-thread block batch.
@@ -99,6 +111,8 @@ impl BlockStore {
                     }
 
                     self.items.push(item);
+
+                    self.history_epoch += 1;
                 }
                 // Prune items whose engine block is gone (byte-budget
                 // eviction is oldest-first, so removals are a prefix — the
@@ -130,6 +144,8 @@ impl BlockStore {
                 // already cleared the engine blocks).
                 BlockEvent::HistoryCleared => {
                     self.items.clear();
+
+                    self.history_epoch += 1;
                 }
             }
         }

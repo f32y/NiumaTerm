@@ -11,6 +11,11 @@ use crate::session::request::{Query, Request};
 pub const PAGE_ROWS: usize = 64;
 const CACHED_PAGES: usize = 128;
 
+/// Screen pages kept for display after their revision expired: enough for a
+/// viewport plus overscan, small enough that a full-history scroll leaves no
+/// lasting copy of the scrollback behind.
+const RETAINED_SCREEN_PAGES: usize = 8;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PageSource {
     Screen {
@@ -45,6 +50,35 @@ enum Entry {
     Ready(Option<Arc<RowPage>>),
 }
 
+/// Everything besides the row text that a screen page's content depends on.
+/// Rows are addressed from the top of the scrollback, so removing history
+/// shifts later indices (`history_epoch`, and `history_rows` shrinking for
+/// removals the block store never hears about); a width change rewraps rows;
+/// the page carries colors already resolved against the theme.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScreenState {
+    pub revision: u64,
+    pub cols: usize,
+    pub history_rows: u64,
+    pub theme: u64,
+    pub history_epoch: u64,
+}
+
+struct RetainedPage {
+    page: Arc<RowPage>,
+    used: u64,
+    state: ScreenState,
+}
+
+impl RetainedPage {
+    fn still_describes(&self, current: &ScreenState) -> bool {
+        self.state.cols == current.cols
+            && self.state.theme == current.theme
+            && self.state.history_epoch == current.history_epoch
+            && self.state.history_rows <= current.history_rows
+    }
+}
+
 struct ImageRead {
     used: u64,
     pending: Option<Request<GraphicData>>,
@@ -55,6 +89,11 @@ pub(super) struct PageCache {
     clock: u64,
     pages: HashMap<(PageSource, usize), (u64, Entry)>,
     images: HashMap<(u64, u64, u32), ImageRead>,
+
+    /// Last complete screen page per start row. Every output bumps the
+    /// revision and thereby misses `pages`, so without this a repaint during
+    /// the re-read would blank every history row it covers.
+    retained: HashMap<usize, RetainedPage>,
 }
 
 impl PageCache {
@@ -118,6 +157,59 @@ impl PageCache {
         }
 
         None
+    }
+
+    /// The page for `row` at `state.revision`, or, while that read is still
+    /// pending, the last complete page for the same rows if history, width,
+    /// and theme have not changed since. Painting uses this; text extraction
+    /// stays on [`Self::read`] because the retained rows may lag by a frame.
+    pub(super) fn read_screen_for_display(
+        &mut self,
+        state: ScreenState,
+        row: usize,
+        sender: &MsgSender,
+    ) -> Option<Arc<RowPage>> {
+        let start = row / PAGE_ROWS * PAGE_ROWS;
+
+        let source = PageSource::Screen {
+            revision: state.revision,
+        };
+
+        if let Some(page) = self.read(source, row, sender) {
+            if self.retained.len() >= RETAINED_SCREEN_PAGES
+                && !self.retained.contains_key(&start)
+                && let Some(oldest) = self
+                    .retained
+                    .iter()
+                    .min_by_key(|(_, retained)| retained.used)
+                    .map(|(start, _)| *start)
+            {
+                self.retained.remove(&oldest);
+            }
+
+            self.retained.insert(
+                start,
+                RetainedPage {
+                    page: page.clone(),
+                    used: self.clock,
+                    state,
+                },
+            );
+
+            return Some(page);
+        }
+
+        let retained = self.retained.get_mut(&start)?;
+
+        if !retained.still_describes(&state) {
+            self.retained.remove(&start);
+
+            return None;
+        }
+
+        retained.used = self.clock;
+
+        Some(retained.page.clone())
     }
 
     pub(super) fn read(

@@ -1,4 +1,4 @@
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
 
 use futures::executor::block_on;
 
@@ -6,11 +6,12 @@ use crate::block_store::BlockStore;
 use crate::event::{BlockEvent, Msg};
 use crate::ghostty::{BlockHandle, GhosttyTerminal};
 use crate::pty_pipe::requests::answer_query;
+use crate::render_buffer::RenderBuffer;
 use crate::selection::SelectionType;
-use crate::session::BlockPoint;
 use crate::session::blocks::frozen_selection_pieces;
 use crate::session::request::Request;
 use crate::session::state_tests::session_from_engine;
+use crate::session::{BlockPoint, TerminalSession};
 
 /// `frozen_selection_pieces` produces one per-block range with block-edge
 /// endpoints resolved per item.
@@ -177,4 +178,118 @@ fn retained_frame_and_history_page_do_not_prevent_reflow() {
     assert_eq!(page.cols, 24);
     assert_eq!(session.snapshot().cols(), 12);
     assert_eq!(page.rows[0].cells[0].text.as_str(), "h");
+}
+
+fn publish_screen(
+    session: &TerminalSession,
+    engine: &mut GhosttyTerminal,
+    revision: u64,
+    theme_revision: u64,
+) -> Arc<RenderBuffer> {
+    let mut next = RenderBuffer::new(engine.cols() as usize, engine.rows() as usize);
+
+    engine
+        .snapshot_into(&mut next, revision, theme_revision)
+        .unwrap();
+
+    session.render_buffer.publish(&mut next);
+
+    session.snapshot()
+}
+
+fn answer_all(
+    engine: &mut GhosttyTerminal,
+    revision: u64,
+    theme_revision: u64,
+    messages: &mpsc::Receiver<Msg>,
+) {
+    while let Ok(Msg::Query(query)) = messages.try_recv() {
+        answer_query(engine, revision, theme_revision, query);
+    }
+}
+
+/// New output bumps the revision, which misses the page cache. Painting keeps
+/// the previous page for those rows until the fresh read lands; exact text
+/// reads stay pending; removing history drops the retained page.
+#[test]
+fn display_page_outlives_its_revision_until_history_is_removed() {
+    let mut engine = GhosttyTerminal::new(24, 4, 100).unwrap();
+
+    engine.write_vt(b"one\r\ntwo\r\nthree\r\nfour\r\nfive\r\nsix\r\n");
+
+    let (session, messages) = session_from_engine(&mut engine);
+    let first = session.snapshot();
+
+    assert!(session.screen_page_for_display(&first, 0).is_none());
+
+    answer_all(&mut engine, 0, 0, &messages);
+
+    let page = session.screen_page_for_display(&first, 0).unwrap();
+
+    assert_eq!(page.rows[0].cells[0].text.as_str(), "o");
+
+    engine.write_vt(b"seven\r\n");
+
+    let second = publish_screen(&session, &mut engine, 1, 0);
+    let retained = session.screen_page_for_display(&second, 0).unwrap();
+
+    assert!(Arc::ptr_eq(&retained, &page));
+    assert!(session.screen_row_text_in(&second, 0).is_none());
+
+    answer_all(&mut engine, 1, 0, &messages);
+
+    let fresh = session.screen_page_for_display(&second, 0).unwrap();
+
+    assert!(!Arc::ptr_eq(&fresh, &page));
+    assert_eq!(
+        session
+            .screen_row_text_in(&second, 0)
+            .unwrap()
+            .text
+            .trim_end(),
+        "one"
+    );
+
+    session
+        .block_store()
+        .lock()
+        .apply([BlockEvent::HistoryCleared]);
+
+    engine.write_vt(b"eight\r\n");
+
+    let third = publish_screen(&session, &mut engine, 2, 0);
+
+    assert!(session.screen_page_for_display(&third, 0).is_none());
+}
+
+/// A retained page carries the width it was wrapped at and colors resolved
+/// against the theme of its time, so either change discards it.
+#[test]
+fn display_page_drops_after_reflow_or_theme_change() {
+    let mut engine = GhosttyTerminal::new(24, 4, 100).unwrap();
+
+    engine.write_vt(b"one\r\ntwo\r\nthree\r\nfour\r\nfive\r\nsix\r\n");
+
+    let (session, messages) = session_from_engine(&mut engine);
+    let first = session.snapshot();
+
+    session.screen_page_for_display(&first, 0);
+
+    answer_all(&mut engine, 0, 0, &messages);
+
+    assert!(session.screen_page_for_display(&first, 0).is_some());
+
+    let recolored = publish_screen(&session, &mut engine, 1, 1);
+
+    assert!(session.screen_page_for_display(&recolored, 0).is_none());
+
+    answer_all(&mut engine, 1, 1, &messages);
+
+    assert!(session.screen_page_for_display(&recolored, 0).is_some());
+
+    engine.resize(12, 4, 8, 18).unwrap();
+
+    let narrow = publish_screen(&session, &mut engine, 2, 1);
+
+    assert!(session.screen_page_for_display(&narrow, 0).is_none());
 }

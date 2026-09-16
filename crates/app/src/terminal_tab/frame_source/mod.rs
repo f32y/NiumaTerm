@@ -323,28 +323,45 @@ impl TerminalFrameSource {
         rows: ops::Range<u64>,
         default_fg: frame::TerminalColor,
     ) -> Vec<(u64, frame::TerminalLine)> {
-        rows.filter_map(|row| {
-            let page = self
+        let (Ok(start), Ok(end)) = (usize::try_from(rows.start), usize::try_from(rows.end)) else {
+            return Vec::new();
+        };
+
+        let mut lines = Vec::with_capacity(end.saturating_sub(start));
+
+        // One lookup per page: the worker reply can land between two row
+        // reads, and a page looked up per row could then mix the retained
+        // rows with their replacement inside a single paint.
+        for page_start in (start / PAGE_ROWS * PAGE_ROWS..end).step_by(PAGE_ROWS) {
+            let Some(page) = self
                 .session
-                .screen_page_at(self.snapshot.revision(), usize::try_from(row).ok()?)?;
+                .screen_page_for_display(&self.snapshot, page_start)
+            else {
+                continue;
+            };
 
-            let data = page.row(row as usize)?;
+            for row in start.max(page_start)..end.min(page_start.saturating_add(PAGE_ROWS)) {
+                let Some(data) = page.row(row) else {
+                    continue;
+                };
 
-            let mut builder = EngineRowBuilder::default();
+                let mut builder = EngineRowBuilder::default();
 
-            for cell in &data.cells {
-                builder.push(
-                    cell.x,
-                    cell.text.clone(),
-                    cell.wide,
-                    &cell.style,
-                    default_fg,
-                );
+                for cell in &data.cells {
+                    builder.push(
+                        cell.x,
+                        cell.text.clone(),
+                        cell.wide,
+                        &cell.style,
+                        default_fg,
+                    );
+                }
+
+                lines.push((row as u64, builder.into()));
             }
+        }
 
-            Some((row, builder.into()))
-        })
-        .collect()
+        lines
     }
 }
 

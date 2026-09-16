@@ -71,7 +71,7 @@ use crate::selection::{SelectionRange, SelectionType, WORD_DELIMITERS};
 use crate::session::blocks::frozen_selection_pieces;
 use crate::session::config::{default_shell, is_windows_powershell};
 use crate::session::mouse::{mouse_button_code, mouse_motion_code, mouse_report_mods};
-use crate::session::page::{PageCache, PageSource, RowPage};
+use crate::session::page::{PageCache, PageSource, RowPage, ScreenState};
 use crate::session::proxy::TerminalEventProxy;
 use crate::session::request::{BlockRange, Query, Request, TextPiece, TextSource};
 use crate::session::rows::materialized_pointer_row;
@@ -658,6 +658,31 @@ impl TerminalSession {
         self.pages
             .borrow_mut()
             .read(PageSource::Screen { revision }, row, &self.messenger)
+    }
+
+    /// Screen rows for painting at `snapshot`'s revision. While the fresh
+    /// read is pending this returns the previous page for the same rows, so
+    /// a repaint after new output keeps the history text on screen. The rows
+    /// may therefore lag by a frame; pointer and selection text use
+    /// [`Self::screen_row_text_in`], which only returns exact rows.
+    pub fn screen_page_for_display(
+        &self,
+        snapshot: &RenderBuffer,
+        row: usize,
+    ) -> Option<Arc<RowPage>> {
+        let scrollbar = snapshot.scrollbar();
+
+        let state = ScreenState {
+            revision: snapshot.revision(),
+            cols: snapshot.cols(),
+            history_rows: scrollbar.total.saturating_sub(scrollbar.len),
+            theme: snapshot.theme_revision(),
+            history_epoch: self.shared.block_store.lock().history_epoch(),
+        };
+
+        self.pages
+            .borrow_mut()
+            .read_screen_for_display(state, row, &self.messenger)
     }
 
     pub fn block_page(&self, handle: BlockHandle, row: usize) -> Option<Arc<RowPage>> {
