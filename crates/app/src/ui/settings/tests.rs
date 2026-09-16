@@ -19,6 +19,119 @@ use nmt_platform::default_shell;
 use crate::ui::settings::theme::ui_theme_config;
 use crate::ui::settings::*;
 
+struct SettingsHost(SettingsSurface);
+
+impl gpui::Render for SettingsHost {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div().children(self.0.render(cx))
+    }
+}
+
+#[gpui::test]
+fn closed_settings_release_local_edits_while_another_window_stays_open(cx: &mut TestAppContext) {
+    use gpui::VisualTestContext;
+
+    cx.update(|cx| {
+        gpui_component::init(cx);
+
+        cx.set_global(AppSettings::default());
+    });
+
+    let mut windows = Vec::new();
+    let mut editors = Vec::new();
+
+    for _ in 0..2 {
+        let window = cx.update(|cx| {
+            cx.open_window(Default::default(), |window, cx| {
+                let editing = cx.new(|_| SettingsEditing::default());
+
+                editors.push(editing.downgrade());
+
+                let state = SettingsState::owned(
+                    SelectIndex {
+                        page_ix: 0,
+                        group_ix: Some(1),
+                    },
+                    window,
+                    cx,
+                );
+
+                let view = new_settings_view(state, editing, cx);
+
+                cx.new(|_| {
+                    SettingsHost(SettingsSurface {
+                        open: Some(OpenSettings {
+                            view,
+                            _theme_watcher: None,
+                        }),
+                    })
+                })
+            })
+            .unwrap()
+        });
+
+        windows.push(window);
+    }
+
+    cx.run_until_parked();
+
+    editors[0]
+        .update(cx, |editing, cx| {
+            editing.theme_filter = "First window".into();
+
+            #[cfg(windows)]
+            {
+                editing.remote_pairing_input = "temporary pairing code".into();
+            }
+
+            cx.notify();
+        })
+        .unwrap();
+
+    cx.update(|cx| {
+        assert!(
+            editors[1]
+                .upgrade()
+                .unwrap()
+                .read(cx)
+                .theme_filter
+                .is_empty()
+        );
+    });
+
+    let mut cx = VisualTestContext::from_window(windows[0].into(), cx);
+
+    windows[0]
+        .update(&mut cx, |host, _, cx| {
+            host.0.retire();
+
+            cx.notify();
+        })
+        .unwrap();
+
+    // Render state keeps the previous frame alive until the next frame
+    // completes, so both retained frames must stop referencing the page.
+    for _ in 0..2 {
+        windows[0].update(&mut cx, |_, _, cx| cx.notify()).unwrap();
+
+        cx.run_until_parked();
+
+        cx.refresh().unwrap();
+
+        cx.run_until_parked();
+    }
+
+    assert!(editors[0].upgrade().is_none());
+    assert!(editors[1].upgrade().is_some());
+    assert!(
+        editors[0]
+            .update(&mut cx, |editing, _| {
+                editing.theme_filter = "Late completion".into();
+            })
+            .is_err()
+    );
+}
+
 #[gpui::test]
 fn powershell_compatibility_changes_reach_the_live_terminal_snapshot(cx: &mut TestAppContext) {
     cx.set_global(AppSettings::default());

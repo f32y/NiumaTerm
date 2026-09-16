@@ -2,6 +2,9 @@
 //! written back patch-style via [`AppSettings::save`] when the settings
 //! workspace closes and on quit. Field edits mutate the global live for preview;
 //! failed writes retain those edits and expose a retry action.
+//!
+//! The settings workspace owns its page state and theme watcher until it closes,
+//! when the window returns to the previously active workspace.
 
 pub use nmt_config::appearance::MAX_TAB_WIDTH;
 
@@ -24,9 +27,7 @@ pub(crate) use crate::ui::settings::state::{
 pub(crate) use crate::ui::settings::terminal_bridge::{
     install_agent_settings, install_terminal_settings,
 };
-pub(crate) use crate::ui::settings::theme::{
-    apply_ui_theme, apply_window_translucency, watch_themes,
-};
+pub(crate) use crate::ui::settings::theme::{apply_ui_theme, apply_window_translucency};
 
 mod about_page;
 mod agent_page;
@@ -52,18 +53,16 @@ mod theme_gallery;
 #[cfg(test)]
 mod tests;
 
-use std::{io, path};
+use std::{borrow::Cow, io, path};
 
 use app::design::SETTINGS_NAV_WIDTH;
-#[cfg(test)]
-use gpui::AppContext as _;
 #[cfg(test)]
 use gpui::WindowBackgroundAppearance;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, App, Div, Entity, FileDialogFilter, InteractiveElement as _, IntoElement as _,
-    ParentElement as _, PathPromptOptions, SharedString, StatefulInteractiveElement as _,
-    Styled as _, Window, div, px, relative,
+    AnyElement, App, AppContext as _, Context, Div, Entity, FileDialogFilter,
+    InteractiveElement as _, IntoElement as _, ParentElement as _, PathPromptOptions, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Task, Window, div, px, relative,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::dialog::{DIALOG_BUTTON_MIN_WIDTH, DialogClose, DialogFooter};
@@ -74,11 +73,12 @@ use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_component::notification::{Notification, NotificationType};
 use gpui_component::scroll::ScrollableElement as _;
 use gpui_component::setting::{
-    NumberFieldOptions, SettingField, SettingGroup, SettingItem, SettingPage, Settings,
+    NumberFieldOptions, SelectIndex, SettingField, SettingGroup, SettingItem, SettingPage,
+    Settings, SettingsState, SettingsView,
 };
 use gpui_component::switch::Switch;
 use gpui_component::{
-    ActiveTheme as _, Disableable as _, Sizable as _, WindowExt as _, h_flex, v_flex,
+    ActiveTheme as _, Disableable as _, Sizable as _, Theme, WindowExt as _, h_flex, v_flex,
 };
 use nmt_agent::HookInstallStatus;
 use nmt_agent::claude_code::hook as claude_hook;
@@ -98,6 +98,7 @@ use tracing::warn;
 #[cfg(windows)]
 #[cfg(windows)]
 use crate::PlatformHandle;
+use crate::agent_updates::AgentUpdates;
 #[cfg(windows)]
 use crate::ui::UI_RADIUS;
 use crate::ui::composition::sidebar_surface;
@@ -134,12 +135,81 @@ use crate::ui::settings::table::{
     ENV_OPERATION_COLUMN, TABLE_OPERATION_BUTTON, TrashIcon, table_frame, table_header, table_row,
 };
 use crate::ui::settings::terminal_page::terminal_page;
+use crate::ui::settings::theme::watch_themes;
 use crate::ui::settings::theme_gallery::theme_list;
+use crate::ui::shell::AppWindow;
 use crate::{agent_updates, ui};
 
 const APP_VERSION: &str = env!("NIUMATERM_VERSION");
 const APP_INTERNAL_VERSION: &str = env!("NIUMATERM_INTERNAL_VERSION");
 const RELEASE_PAGE_URL: &str = "https://github.com/f32y/NiumaTerm/releases";
+
+/// Sidebar entry name and tab title of the settings pseudo workspace, in the
+/// active language. Looked up at creation time; the entry is never persisted,
+/// so a stale-language name cannot leak into local_state.
+pub(super) fn settings_title() -> Cow<'static, str> {
+    t!("shell-workspace-settings-title")
+}
+
+/// Everything the settings surface owns while it is on screen: the page and
+/// search state that outlives a repaint, the themes-directory watcher that
+/// makes theme edits preview live.
+#[derive(Default)]
+pub(super) struct SettingsSurface {
+    open: Option<OpenSettings>,
+}
+
+struct OpenSettings {
+    view: Entity<SettingsView>,
+    _theme_watcher: Option<Task<()>>,
+}
+
+impl SettingsSurface {
+    pub(super) fn open(&mut self, window: &mut Window, cx: &mut Context<AppWindow>) {
+        let state = SettingsState::owned(SelectIndex::default(), window, cx);
+        let editing = cx.new(|_| SettingsEditing::default());
+
+        let theme_watcher = watch_themes(&editing, cx);
+        let view = new_settings_view(state, editing, cx);
+
+        self.open = Some(OpenSettings {
+            view,
+            _theme_watcher: theme_watcher,
+        });
+    }
+
+    pub(super) fn retire(&mut self) {
+        self.open = None;
+    }
+
+    pub(super) fn render(&self, _: &App) -> Option<Entity<SettingsView>> {
+        let open = self.open.as_ref()?;
+
+        Some(open.view.clone())
+    }
+}
+
+fn new_settings_view(
+    state: Entity<SettingsState>,
+    editing: Entity<SettingsEditing>,
+    cx: &mut App,
+) -> Entity<SettingsView> {
+    cx.new(|cx| {
+        cx.observe(&editing, |view: &mut SettingsView, _, cx| view.refresh(cx))
+            .detach();
+
+        cx.observe_global::<AppSettings>(|view, cx| view.refresh(cx))
+            .detach();
+
+        cx.observe_global::<AgentUpdates>(|view, cx| view.refresh(cx))
+            .detach();
+
+        cx.observe_global::<Theme>(|view, cx| view.refresh(cx))
+            .detach();
+
+        SettingsView::new(state, move |cx| settings_view(editing.clone(), cx), cx)
+    })
+}
 
 struct SettingsSaveFailure;
 

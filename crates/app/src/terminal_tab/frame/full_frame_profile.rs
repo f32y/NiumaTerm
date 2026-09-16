@@ -1,6 +1,7 @@
 use std::time::{Duration, Instant};
 use std::{fs, hint};
 
+use anyhow::{Result, bail};
 use gpui::{FontRun, Platform, font, px};
 #[cfg(target_os = "macos")]
 use gpui_macos::MacPlatform;
@@ -34,9 +35,9 @@ fn line_text(i: usize) -> String {
 
 #[test]
 #[ignore = "manual full-frame pipeline profile"]
-fn profile_full_frame_pipeline() -> Result<(), &'static str> {
+fn profile_full_frame_pipeline() -> Result<()> {
     if cfg!(debug_assertions) {
-        return Err("run this profile with cargo test --release -p app --lib");
+        bail!("run this profile with cargo test --release -p app --lib");
     }
 
     // 1. parse (write_vt)
