@@ -1,7 +1,7 @@
 use nmt_config::colors::term::{DIM_FACTOR, List, TermColors};
 use nmt_config::colors::{AnsiColor, ColorArray, NamedColor};
 use nmt_terminal::render_buffer::RenderBuffer;
-use nmt_terminal::terminal::square::{ContentTag, Square};
+use nmt_terminal::terminal::square::Square;
 use nmt_terminal::terminal::style::{Style, StyleFlags};
 
 use crate::terminal_tab::frame::TerminalColor;
@@ -27,24 +27,14 @@ impl BackgroundColors {
         buf: &RenderBuffer,
         cell: Square,
     ) -> Option<TerminalColor> {
-        match cell.content_tag() {
-            ContentTag::BgRgb => {
-                let (r, g, b) = cell.bg_rgb();
+        let style = buf.style(cell.style_id());
 
-                Some((r, g, b).into())
-            }
-            ContentTag::BgPalette => Some(self.indexed(cell.bg_palette_index() as usize)),
-            ContentTag::Codepoint => {
-                let style = buf.style(cell.style_id());
-
-                if style.flags.contains(StyleFlags::INVERSE) {
-                    Some(self.color(&style.fg, style.flags, true))
-                } else {
-                    match style.bg {
-                        AnsiColor::Named(NamedColor::Background) => None,
-                        _ => Some(self.color(&style.bg, style.flags, false)),
-                    }
-                }
+        if style.flags.contains(StyleFlags::INVERSE) {
+            Some(self.color(&style.fg, style.flags, true))
+        } else {
+            match style.bg {
+                AnsiColor::Named(NamedColor::Background) => None,
+                _ => Some(self.color(&style.bg, style.flags, false)),
             }
         }
     }
@@ -59,10 +49,6 @@ impl BackgroundColors {
         } else {
             self.color(&style.fg, style.flags, true)
         }
-    }
-
-    pub(super) fn default_foreground(&self) -> TerminalColor {
-        self.named(NamedColor::Foreground)
     }
 
     fn color(&self, color: &AnsiColor, flags: StyleFlags, foreground: bool) -> TerminalColor {

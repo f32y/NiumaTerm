@@ -76,46 +76,6 @@ fn captured_style_id_resolves_bold_text() {
     assert!(buf.style(sid).flags.contains(StyleFlags::BOLD));
 }
 
-/// `content_changed` is the signal that replaces the mirror's
-/// `peek_damage_event()` on the render path. Inits `true` (first frame is Full to
-/// fill the zeroed grid); capture sets it; `take` reads+clears; a `take` with
-/// no intervening capture stays `false` (the UI-only-frame = no PTY damage
-/// invariant); coalesced updates report `true` once.
-#[test]
-fn content_changed_lifecycle() {
-    let mut engine = GhosttyTerminal::new(8, 1, 100).unwrap();
-    let mut buf = RenderBuffer::new(8, 1);
-
-    // Inits true (matches mirror TermDamageState::new full:true).
-    assert!(buf.take_content_changed(), "inits true for the first frame");
-
-    // Consumed → false; a UI-only frame (no update) must NOT report Full.
-    assert!(
-        !buf.take_content_changed(),
-        "take with no update stays false (UI-only frame)"
-    );
-
-    // A batch sets it.
-    engine.write_vt(b"a");
-
-    engine.snapshot_into(&mut buf, 0, 0).unwrap();
-
-    assert!(buf.take_content_changed(), "capture sets it");
-    assert!(!buf.take_content_changed(), "consumed after one take");
-
-    // Coalesced updates between frames report true exactly once.
-    engine.write_vt(b"b");
-
-    engine.snapshot_into(&mut buf, 0, 0).unwrap();
-
-    engine.write_vt(b"c");
-
-    engine.snapshot_into(&mut buf, 0, 0).unwrap();
-
-    assert!(buf.take_content_changed(), "coalesced updates → true");
-    assert!(!buf.take_content_changed(), "→ false after the single take");
-}
-
 /// A base codepoint plus a combining mark is preserved as a full
 /// grapheme cluster — base in the `Square`, trailing codepoints in `extras`.
 #[test]

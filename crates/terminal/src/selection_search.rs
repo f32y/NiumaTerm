@@ -1,10 +1,16 @@
 //! Selection boundary searches over the render buffer's visible grid. Ports
 //! `Crosswords`' semantic/line/bracket searches to free
 //! functions over `&[Row<Square>]` + a per-row soft-wrap flag, in visible-row
-//! coordinates. The engine has no native selection-expansion, so these live here.
+//! coordinates. They run against the published frame the user clicked on, so
+//! the result matches what was on screen even when the engine has since
+//! advanced; the engine's own selection operations work on its live grid.
 //!
 //! Boundaries are detected on the visible viewport; a logical line that
 //! soft-wraps past the viewport edge clips there to keep the scan bounded.
+
+#[cfg(test)]
+#[path = "selection_search_tests.rs"]
+mod selection_search_tests;
 
 use crate::terminal::grid::row::Row;
 use crate::terminal::pos::{Column, Pos};

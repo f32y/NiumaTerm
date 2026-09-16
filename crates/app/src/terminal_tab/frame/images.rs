@@ -4,7 +4,6 @@ use std::sync::{self, Arc};
 use nmt_terminal::ansi::kitty_virtual::{self, IncompletePlacement, PLACEHOLDER, PlaceholderRun};
 use nmt_terminal::ghostty::SnapshotPlacement;
 use nmt_terminal::render_buffer::RenderBuffer;
-use nmt_terminal::terminal::square::ContentTag;
 
 use crate::terminal_tab::graphics;
 
@@ -249,8 +248,7 @@ fn extract_virtual_images(
         for col in 0..buf.cols() {
             let cell = buf.cell(col, row);
 
-            let is_placeholder =
-                cell.content_tag() == ContentTag::Codepoint && cell.c() == PLACEHOLDER;
+            let is_placeholder = cell.c() == PLACEHOLDER;
 
             if !is_placeholder {
                 if let Some((run, start)) = current.take() {
