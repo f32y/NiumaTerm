@@ -6,7 +6,6 @@ pub use crate::session::selection::BlockPoint;
 
 pub mod interaction;
 pub mod page;
-pub mod request;
 
 pub(crate) mod selection;
 
@@ -44,7 +43,9 @@ use tracing::error;
 
 use crate::block_store::{BlockItem, BlockStore};
 use crate::clipboard::ClipboardType;
-use crate::event::{BlockEvent, Msg, MsgSender, ProgressReport};
+use crate::event::{
+    BlockEvent, BlockRange, Msg, MsgSender, ProgressReport, Query, Request, TextPiece, TextSource,
+};
 use crate::ghostty::{BlockHandle, ScreenRowRead};
 use crate::graphics::{GraphicData, UpdateQueues};
 use crate::grid::{Column, Line, Pos};
@@ -54,7 +55,6 @@ use crate::selection::{SelectionRange, SelectionType, WORD_DELIMITERS};
 use crate::session::config::{default_shell, is_windows_powershell};
 use crate::session::page::{PageCache, PageSource, RowPage, ScreenState};
 use crate::session::proxy::TerminalEventProxy;
-use crate::session::request::{BlockRange, Query, Request, TextPiece, TextSource};
 use crate::session::selection::{
     SurfaceSelection, frozen_selection_pieces, selection_screen_range,
 };

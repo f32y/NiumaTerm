@@ -3,10 +3,9 @@ use std::sync::Arc;
 
 use futures::channel::oneshot;
 
-use crate::event::{Msg, MsgSender};
+use crate::event::{Msg, MsgSender, Query, Request};
 use crate::ghostty::{BlockHandle, PlacementScreenPos, ScreenRowRead};
 use crate::graphics::GraphicData;
-use crate::session::request::{Query, Request};
 
 pub const PAGE_ROWS: usize = 64;
 const CACHED_PAGES: usize = 128;

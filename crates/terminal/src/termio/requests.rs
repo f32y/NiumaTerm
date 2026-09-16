@@ -1,6 +1,6 @@
+use crate::event::{Query, RequestError, TextSource};
 use crate::ghostty::{BlockHandle, GhosttyTerminal};
 use crate::session::page::{PAGE_ROWS, PageSource, RowPage};
-use crate::session::request::{Query, RequestError, TextSource};
 use crate::session::selection::block_selection_range;
 
 pub(crate) fn answer_query(

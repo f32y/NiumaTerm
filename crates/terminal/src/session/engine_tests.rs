@@ -7,13 +7,14 @@ use futures::executor::block_on;
 use nmt_platform::{Poll, Token, Waker};
 
 use crate::block_store::{BlockStore, SegmentMeta};
-use crate::event::{BlockEvent, CommandCapture, EventListener, Msg, MsgSender, TerminalEvent};
+use crate::event::{
+    BlockEvent, CommandCapture, EventListener, Msg, MsgSender, Request, TerminalEvent,
+};
 use crate::ghostty::{BlockHandle, GhosttyTerminal};
 use crate::render_buffer::{FrameStore, RenderBuffer};
 use crate::selection::SelectionType;
 use crate::session::page::PageCache;
 use crate::session::proxy::TerminalEventProxy;
-use crate::session::request::Request;
 use crate::session::selection::frozen_selection_pieces;
 use crate::session::{
     BlockPoint, SessionSharedState, SurfaceCellSide, SurfaceMouseEventKind, SurfaceScreenCell,

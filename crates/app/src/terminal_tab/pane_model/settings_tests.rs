@@ -5,7 +5,7 @@ use futures::channel::oneshot;
 use nmt_config::CursorShape;
 use nmt_config::appearance::InputStyle;
 use nmt_config::colors::Colors;
-use nmt_terminal::session::request::RequestError;
+use nmt_terminal::event::RequestError;
 use tokio::time::timeout;
 
 use crate::terminal_tab::block_list::chrome::DurationLabels;

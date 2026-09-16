@@ -15,8 +15,9 @@ use nmt_platform::windows::process::ProcessTree;
 use nmt_platform::{
     EventedPty, Pty, PtyOptions, WinsizeBuilder, create_managed_pty_with_env, create_pty_with_env,
 };
-use nmt_terminal::event::{EventListener, Msg, MsgSender, TerminalEvent};
-use nmt_terminal::session::request::{Checkpoint, CheckpointRequest};
+use nmt_terminal::event::{
+    Checkpoint, CheckpointRequest, EventListener, Msg, MsgSender, TerminalEvent,
+};
 use nmt_terminal::termio::{SessionOptions as PipeOptions, SessionWorker, start_session};
 use parking_lot::Mutex;
 
