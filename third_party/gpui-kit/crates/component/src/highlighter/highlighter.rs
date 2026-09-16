@@ -11,7 +11,6 @@ use std::time::{Duration, Instant};
 use std::{
     collections::{BTreeSet, HashMap},
     ops::{ControlFlow, Range},
-    usize,
 };
 use sum_tree::Bias;
 use tree_sitter::{
@@ -1292,8 +1291,8 @@ fn merge_highlight_style(style: &mut HighlightStyle, other: &HighlightStyle) {
 mod tests {
     use gpui::Hsla;
 
-    use super::*;
     use crate::Colorize as _;
+    use crate::highlighter::highlighter::*;
 
     fn color_style(color: Hsla) -> HighlightStyle {
         let mut style = HighlightStyle::default();
