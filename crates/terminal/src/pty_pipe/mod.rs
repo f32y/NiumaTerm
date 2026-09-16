@@ -217,7 +217,7 @@ fn publish_render_buffer(
     }
 
     if hide_cursor {
-        back.set_cursor_visible(false);
+        back.suppress_progress_cursor();
     }
 
     *capture_failed = false;

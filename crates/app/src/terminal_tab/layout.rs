@@ -17,8 +17,8 @@ pub(super) fn frame_content_rows(frame: &TerminalFrame) -> usize {
         }
     }
 
-    if let Some(cursor) = frame.cursor() {
-        content_end = content_end.max(cursor.row as usize + 1);
+    if let Some(row) = frame.layout_cursor_row() {
+        content_end = content_end.max(row + 1);
     }
 
     content_end.min(lines.len())

@@ -15,6 +15,7 @@ use crate::terminal_tab::frame::{
 // --- Kitty image frame extraction ---
 use crate::terminal_tab::graphics;
 use crate::terminal_tab::graphics::graphic_to_generation;
+use crate::terminal_tab::layout::frame_content_rows;
 use crate::terminal_tab::pane_model::FrameTheme;
 use crate::terminal_tab::pane_model::frame_cache::TerminalFrameCache;
 
@@ -24,6 +25,7 @@ fn frame_with_line(line: &str) -> TerminalFrame {
         line_states: [Default::default()].into(),
         cols: line.len(),
         cursor: None,
+        layout_cursor_row: None,
         scrollbar: Default::default(),
         images: [].into(),
     }
@@ -31,6 +33,28 @@ fn frame_with_line(line: &str) -> TerminalFrame {
 
 fn first_line(frame: &TerminalFrame) -> &str {
     frame.lines()[0].text().as_ref()
+}
+
+#[test]
+fn application_hidden_and_offscreen_cursors_do_not_extend_content() {
+    let mut engine = GhosttyTerminal::new(20, 3, 100).unwrap();
+
+    engine.write_vt(b"output\x1b[3;1H\x1b[?25l");
+
+    let frame = TerminalFrame::from_render_buffer(&engine.snapshot().unwrap());
+
+    assert!(frame.cursor().is_none());
+    assert_eq!(frame.layout_cursor_row(), None);
+    assert_eq!(frame_content_rows(&frame), 1);
+
+    engine.write_vt(b"\x1b[2J\x1b[H\x1b[?25h\r\n\r\n\r\n\r\n\r\nPrompt>");
+    engine.scroll_viewport_top();
+
+    let frame = TerminalFrame::from_render_buffer(&engine.snapshot().unwrap());
+
+    assert!(frame.cursor().is_none());
+    assert_eq!(frame.layout_cursor_row(), None);
+    assert_eq!(frame_content_rows(&frame), 0);
 }
 
 #[test]

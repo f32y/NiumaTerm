@@ -1009,6 +1009,42 @@ fn theme_refresh_preserves_synchronized_output_until_commit() {
 }
 
 #[test]
+fn progress_cursor_suppression_keeps_layout_and_resets_on_capture() {
+    let mut engine = ghostty::GhosttyTerminal::new(20, 3, 100).unwrap();
+    let mut buffer = RenderBuffer::new(20, 3);
+
+    engine.write_vt(b"\x1b[3;1H");
+    engine.snapshot_into(&mut buffer, 0, 0).unwrap();
+    buffer.suppress_progress_cursor();
+
+    assert!(!buffer.cursor_visible());
+    assert_eq!(buffer.layout_cursor_row(), Some(2));
+
+    engine.snapshot_into(&mut buffer, 0, 0).unwrap();
+
+    assert!(
+        buffer.cursor_visible(),
+        "reused buffers clear host suppression"
+    );
+    assert_eq!(buffer.layout_cursor_row(), Some(2));
+
+    engine.write_vt(b"\x1b[?25l");
+    engine.snapshot_into(&mut buffer, 0, 0).unwrap();
+    buffer.suppress_progress_cursor();
+
+    assert!(!buffer.cursor_visible());
+    assert_eq!(buffer.layout_cursor_row(), None);
+
+    engine.write_vt(b"\x1b[?25h\r\n\r\n\r\nPrompt>");
+    engine.scroll_viewport_top();
+    engine.snapshot_into(&mut buffer, 0, 0).unwrap();
+    buffer.suppress_progress_cursor();
+
+    assert!(!buffer.cursor_visible());
+    assert_eq!(buffer.layout_cursor_row(), None);
+}
+
+#[test]
 fn theme_refresh_preserves_progress_cursor_suppression() {
     let render_buffer = Arc::new(FrameStore::new(RenderBuffer::new(80, 3)));
 
@@ -1075,6 +1111,7 @@ fn theme_refresh_preserves_progress_cursor_suppression() {
 
         assert_eq!(buffer.cursor_shape(), ansi::CursorShape::Beam);
         assert!(!buffer.cursor_visible(), "active progress hides the cursor");
+        assert_eq!(buffer.layout_cursor_row(), Some(0));
         assert_eq!(
             buffer.colors()[NamedColor::Foreground],
             Some(colors.foreground)
