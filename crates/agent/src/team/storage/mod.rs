@@ -16,7 +16,7 @@ use thiserror::Error;
 use crate::team::model::RoomId;
 use crate::team::room::Room;
 
-const VERSION: u32 = 2;
+const VERSION: u32 = 3;
 
 /// The directory under the data directory that holds one directory per room.
 const ROOMS_DIRECTORY: &str = "agent-teams";

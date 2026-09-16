@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
 use crate::team::attempt::{AttemptState, BudgetScope};
+use crate::team::budget::Budget;
 use crate::team::discussion::DiscussionState;
 use crate::team::model::Author;
 use crate::team::room::Room;
@@ -146,11 +147,7 @@ pub(super) fn validate(room: &Room) -> Result<(), StorageError> {
         return Err(invalid("multiple active discussions"));
     }
 
-    for (id, budget) in &room.direct_allowances {
-        if !budget.validate(room.budget_attempts(BudgetScope::Direct(*id))) {
-            return Err(invalid("direct request exceeds scheduled turn limit"));
-        }
-    }
+    let mut direct_operations = BTreeSet::new();
 
     let mut attempts = BTreeSet::new();
     let mut provider_turns = BTreeSet::new();
@@ -197,7 +194,7 @@ pub(super) fn validate(room: &Room) -> Result<(), StorageError> {
         }
 
         match &attempt.state {
-            AttemptState::Accepted { provider_turn } if attempt.provider_turn.as_ref() != Some(provider_turn) => return Err(invalid("accepted provider identity changed")),
+            AttemptState::Accepted if attempt.provider_turn.is_none() => return Err(invalid("accepted provider identity changed")),
             AttemptState::Completed { message } if !room.messages.iter().any(|entry| entry.id == *message && matches!(entry.author, Author::Member { id, .. } if id == attempt.intent.recipient)) => return Err(invalid("completed reply or its author is missing")),
             _ => {}
         }
@@ -206,8 +203,12 @@ pub(super) fn validate(room: &Room) -> Result<(), StorageError> {
             BudgetScope::Discussion(id) if !discussions.contains(&id) => {
                 return Err(invalid("attempt has no discussion budget"));
             }
-            BudgetScope::Direct(id) if !room.direct_allowances.contains_key(&id) => {
-                return Err(invalid("attempt has no direct budget"));
+            BudgetScope::Direct(id)
+                if direct_operations.insert(id)
+                    && !Budget::direct()
+                        .validate(room.budget_attempts(BudgetScope::Direct(id))) =>
+            {
+                return Err(invalid("direct request exceeds scheduled turn limit"));
             }
             _ => {}
         }

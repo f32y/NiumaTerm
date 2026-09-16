@@ -99,7 +99,7 @@ impl TeamSession {
         for attempt in &mut room.attempts {
             if matches!(
                 attempt.state,
-                AttemptState::Sending | AttemptState::Accepted { .. }
+                AttemptState::Sending | AttemptState::Accepted
             ) {
                 attempt.state = AttemptState::Uncertain;
             }
@@ -1073,7 +1073,7 @@ impl TeamSession {
             && attempt.intent.stage == Some(stage_id)
             && attempt.intent.recipient == key.member
             && attempt.intent.backend_generation == key.backend_generation
-            && matches!(attempt.state, AttemptState::Accepted { .. })
+            && matches!(attempt.state, AttemptState::Accepted)
             && self.store.room().member(key.member).is_some();
 
         if !valid {

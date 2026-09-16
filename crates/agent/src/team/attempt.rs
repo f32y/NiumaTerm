@@ -43,7 +43,7 @@ pub enum Invocation {
 pub enum AttemptState {
     Reserved,
     Sending,
-    Accepted { provider_turn: String },
+    Accepted,
     Rejected,
     Completed { message: MessageId },
     Summarized { summary: SummaryId },

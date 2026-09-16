@@ -48,10 +48,7 @@ impl TimelineMirror {
             if !runtime.room().attempts().iter().any(|entry| {
                 entry.id == attempt
                     && entry.intent.backend_generation == state.runtime.epoch()
-                    && matches!(
-                        entry.state,
-                        AttemptState::Sending | AttemptState::Accepted { .. }
-                    )
+                    && matches!(entry.state, AttemptState::Sending | AttemptState::Accepted)
             }) {
                 continue;
             }
@@ -294,7 +291,7 @@ fn attempt_row(room: &Room, attempt: &Attempt, live: &BTreeMap<AttemptId, String
             })
             .unwrap_or_default(),
         AttemptState::Reserved => t!("team-waiting").into_owned(),
-        AttemptState::Sending | AttemptState::Accepted { .. } => live
+        AttemptState::Sending | AttemptState::Accepted => live
             .get(&attempt.id)
             .cloned()
             .unwrap_or_else(|| t!("team-responding").into_owned()),
