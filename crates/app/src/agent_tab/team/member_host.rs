@@ -1,16 +1,17 @@
 //! One Team member's live agent session and the Team work it is carrying.
 
+use std::iter;
+
 use gpui::{App, Subscription};
 use nmt_agent::chat::{SendOutcome, TeamDecisionRequest, ThreadSettings};
+use nmt_agent::session::RecoveryIdentity;
 use nmt_agent::session::lifecycle::Status;
-use nmt_agent::session::{ImageAttachment, RecoveryIdentity};
 use nmt_agent::team::attempt::DispatchIntent;
-use nmt_agent::team::execution_slots::WorkStatus;
 use nmt_agent::team::model::{AttemptId, InteractionId};
 
 use crate::agent_tab::composer::attachments::scratch_dir;
 use crate::agent_tab::execution::SessionOwner;
-use crate::agent_tab::team::dispatch::work_status;
+use crate::agent_tab::team::dispatch::{WorkStatus, work_status};
 
 pub(super) struct MemberHost {
     pub(super) owner: SessionOwner,
@@ -73,14 +74,11 @@ impl MemberHost {
         });
     }
 
-    /// Send `intent` as the member's next turn with `settings`, carrying the
-    /// image bytes `attachments` read for the intent's attachment references.
     /// A session that is busy or suspended for an update is not ready for it.
     pub(super) fn submit(
         &self,
         intent: &DispatchIntent,
         settings: &ThreadSettings,
-        attachments: &[Vec<u8>],
         cx: &mut App,
     ) -> SendOutcome {
         self.owner.session().update(cx, |session, cx| {
@@ -96,19 +94,7 @@ impl MemberHost {
             let result = state.submit(
                 intent.prepared_text.clone(),
                 |backend, text| {
-                    backend.send_user_message(
-                        text,
-                        settings,
-                        None,
-                        attachments
-                            .iter()
-                            .zip(&intent.attachments)
-                            .map(|(bytes, reference)| ImageAttachment {
-                                bytes,
-                                media_type: &reference.media_type,
-                            }),
-                        &scratch,
-                    )
+                    backend.send_user_message(text, settings, None, iter::empty(), &scratch)
                 },
                 || None,
             );

@@ -3,6 +3,7 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::team::attempt::{Attempt, AttemptState, BudgetScope};
 use crate::team::budget::{Budget, TurnPurpose};
 use crate::team::model::{
     AttemptId, DiscussionId, InteractionId, MemberId, MessageId, OperationId, StageId, SummaryId,
@@ -43,7 +44,6 @@ pub enum PauseReason {
     UserInput(MessageId),
     ModeChange,
     MemberUnavailable(MemberId),
-    ModeratorUnavailable,
     Interaction(InteractionId),
     AttemptFailed(AttemptId),
     UncertainAttempt(AttemptId),
@@ -54,7 +54,6 @@ pub enum PauseReason {
     DispatchUnavailable,
     Storage,
     Maintenance(String),
-    Transfer(MemberId),
     Reopened,
     Closed,
 }
@@ -79,7 +78,6 @@ pub enum StageKind {
     ModeratorDecision,
     InvitedResponses,
     Report,
-    Direct,
     Summary,
 }
 
@@ -169,6 +167,14 @@ pub enum DiscussionError {
 }
 
 impl Discussion {
+    pub fn remaining_non_report_turns(&self, attempts: &[Attempt]) -> u32 {
+        self.budget
+            .remaining_non_report_turns(attempts.iter().filter(|attempt| {
+                attempt.intent.budget == BudgetScope::Discussion(self.id)
+                    && attempt.state != AttemptState::Rejected
+            }))
+    }
+
     pub(super) fn new(
         objective: String,
         participants: Vec<MemberId>,
@@ -222,10 +228,6 @@ impl Discussion {
 
     pub fn stages(&self) -> &[Stage] {
         &self.stages
-    }
-
-    pub fn budget(&self) -> &Budget {
-        &self.budget
     }
 
     pub fn pause(&mut self, reason: PauseReason) -> bool {

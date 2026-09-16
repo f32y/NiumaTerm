@@ -4,8 +4,8 @@ use crate::team::budget::TurnPurpose;
 use crate::team::discussion::PublicSnapshot;
 use crate::team::member::AcceptedCoverage;
 use crate::team::model::{
-    AttachmentReference, AttemptId, DiscussionId, MemberId, MessageId, OperationId,
-    OwnershipGeneration, StageId, SummaryChunk, SummaryId, UserInput,
+    AttemptId, DiscussionId, MemberId, MessageId, OperationId, StageId, SummaryChunk, SummaryId,
+    UserInput,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -19,14 +19,12 @@ pub enum BudgetScope {
 pub struct DispatchIntent {
     pub invocation: Invocation,
     pub recipient: MemberId,
-    pub ownership: OwnershipGeneration,
     pub backend_generation: u64,
     pub operation: OperationId,
     pub stage: Option<StageId>,
     pub budget: BudgetScope,
     pub purpose: TurnPurpose,
     pub input: UserInput,
-    pub attachments: Vec<AttachmentReference>,
     pub prepared_text: String,
     pub snapshot: PublicSnapshot,
     pub coverage: AcceptedCoverage,

@@ -1,7 +1,7 @@
 //! The room's data model: the identifiers every record is keyed by, the
 //! public content members exchange, and the context-selection types that
 //! decide what a member is shown. They are one file because the storage
-//! journal, the room, and the app's team views all read them together.
+//! snapshot, the room, and the app's team views all read them together.
 
 use std::fmt::{self, Display, Formatter};
 use std::str::FromStr;
@@ -57,33 +57,7 @@ identities!(
     AttemptId,
     MessageId,
     InteractionId,
-    AttachmentId,
 );
-
-/// A transfer advances ownership independently of provider restarts.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct OwnershipGeneration(u64);
-
-impl Default for OwnershipGeneration {
-    fn default() -> Self {
-        Self(1)
-    }
-}
-
-impl OwnershipGeneration {
-    pub fn next(self) -> Option<Self> {
-        self.0.checked_add(1).map(Self)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AttachmentReference {
-    pub id: AttachmentId,
-    pub media_type: String,
-    pub bytes: u64,
-    pub digest: String,
-}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -97,7 +71,6 @@ pub enum Author {
 pub enum Publication {
     UserInput,
     RootReply,
-    ExplicitShare,
     ModeratorDecision,
     Report,
 }
@@ -109,14 +82,12 @@ pub struct PublicMessage {
     pub publication: Publication,
     pub text: String,
     pub replies_to: Vec<MessageId>,
-    pub attachments: Vec<AttachmentReference>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UserInput {
     pub text: String,
     pub references: Vec<MessageId>,
-    pub attachments: Vec<AttachmentReference>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -156,7 +127,6 @@ pub struct ContextLimits {
 pub struct PreparedContext {
     pub text: String,
     pub coverage: AcceptedCoverage,
-    pub attachments: Vec<AttachmentReference>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

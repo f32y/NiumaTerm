@@ -17,7 +17,6 @@ use nmt_agent::session::team_capabilities::{ModeratorAdmission, TeamLaunch};
 use nmt_agent::session::{AgentKind, RecoveryIdentity};
 use nmt_agent::team::attempt::{AttemptState, BudgetScope, Invocation};
 use nmt_agent::team::discussion::{DiscussionState, PauseReason};
-use nmt_agent::team::execution_slots::{ExecutionKey, WorkStatus};
 use nmt_agent::team::member::MemberConfig;
 use nmt_agent::team::model::{AttemptId, InteractionId, MemberId, RoomId};
 use nmt_agent::team::room::Room;
@@ -26,7 +25,7 @@ use nmt_config::profile::AgentProfile;
 
 use crate::agent_tab::execution::{AgentSession, ExecutionSignal, SessionOwner};
 use crate::agent_tab::settings::AgentSettings;
-use crate::agent_tab::team::dispatch::{CONTEXT_LIMITS, work_status};
+use crate::agent_tab::team::dispatch::{CONTEXT_LIMITS, WorkStatus, work_status};
 use crate::agent_tab::team::events::DecisionArguments;
 use crate::agent_tab::team::member_host::MemberHost;
 
@@ -211,7 +210,25 @@ impl TeamRuntime {
         command: TeamCommand,
         cx: &mut Context<Self>,
     ) -> Result<(), TeamError> {
+        let busy = self.hosts.values().any(|host| host.is_busy(cx));
+
         match command {
+            TeamCommand::Continue(_) | TeamCommand::Exclude(_) if busy => {
+                return Err(TeamError::Busy);
+            }
+            TeamCommand::Skip { .. } if busy => return Err(TeamError::Unresolved),
+            TeamCommand::ChangeMode { discussion, .. } if busy => {
+                self.session
+                    .pause_discussion(discussion, PauseReason::ModeChange)?;
+
+                return Err(TeamError::Busy);
+            }
+            TeamCommand::Finish(discussion) if busy => {
+                self.session
+                    .pause_discussion(discussion, PauseReason::User)?;
+
+                return Err(TeamError::Unresolved);
+            }
             TeamCommand::AbandonRestored(id) => {
                 let attempt = self
                     .session
@@ -262,14 +279,7 @@ impl TeamRuntime {
                 self.session.set_automatic_summaries(enabled)?
             }
             TeamCommand::MemberSettings { member, settings } => {
-                let ownership = self
-                    .room()
-                    .member(member)
-                    .ok_or(TeamError::Unavailable)?
-                    .ownership();
-
-                self.session
-                    .set_member_settings(member, ownership, settings)?;
+                self.session.set_member_settings(member, settings)?;
 
                 let settings = self
                     .room()
@@ -338,7 +348,9 @@ impl TeamRuntime {
             })
             .map(|discussion| discussion.id());
 
-        if let Some(id) = discussion {
+        if let Some(id) = discussion
+            && !self.hosts.values().any(|host| host.is_busy(cx))
+        {
             self.session.advance_discussion(id, &CONTEXT_LIMITS)?;
         }
 
@@ -365,14 +377,6 @@ impl TeamRuntime {
             let session = host.owner.session().read(cx);
             let work = work_status(session);
 
-            let ownership = self
-                .session
-                .store()
-                .room()
-                .member(*id)
-                .ok_or(TeamError::Unavailable)?
-                .ownership();
-
             if let Some(attempt_id) = host.active {
                 let attempt = self
                     .session
@@ -388,18 +392,8 @@ impl TeamRuntime {
                     AttemptState::Sending | AttemptState::Accepted { .. } | AttemptState::Uncertain
                 );
 
-                let key = ExecutionKey {
-                    member: *id,
-                    ownership,
-                    attempt: attempt_id,
-                };
-
-                if !unresolved {
-                    self.session.update_work(key, work);
-
-                    if work == WorkStatus::default() {
-                        host.active = None;
-                    }
+                if !unresolved && work == WorkStatus::default() {
+                    host.active = None;
                 }
             }
 
@@ -450,7 +444,7 @@ impl TeamRuntime {
                         .is_ok();
 
                 self.session
-                    .record_provider_identity(*id, ownership, &provider.id, registered)?;
+                    .record_provider_identity(*id, &provider.id, registered)?;
             }
 
             if state.runtime.update_suspension().is_some() {
@@ -489,7 +483,6 @@ impl TeamRuntime {
                             AttemptEventKey {
                                 attempt: attempt_id,
                                 member: *id,
-                                ownership,
                                 backend_generation: attempt.intent.backend_generation,
                             },
                             true,
@@ -528,14 +521,9 @@ impl TeamRuntime {
                 .member(*id)
                 .ok_or(TeamError::Unavailable)?;
 
-            let ownership = member.ownership();
-
             if state.controls.settings != *member.settings() {
-                self.session.set_member_settings(
-                    *id,
-                    ownership,
-                    state.controls.settings.clone(),
-                )?;
+                self.session
+                    .set_member_settings(*id, state.controls.settings.clone())?;
             }
 
             let epoch = state.runtime.epoch();
@@ -580,22 +568,15 @@ impl TeamRuntime {
             return Err(TeamError::Busy);
         }
 
-        let attachments: Vec<_> = attempt
-            .intent
-            .attachments
-            .iter()
-            .map(|reference| self.session.read_attachment(reference))
-            .collect::<Result<_, _>>()?;
-
         let settings = self
             .room()
             .member(attempt.intent.recipient)
             .map(|member| member.settings().clone())
             .ok_or(TeamError::Unavailable)?;
 
-        let outcome = self.session.dispatch(id, |intent| {
-            host.submit(intent, &settings, &attachments, cx)
-        });
+        let outcome = self
+            .session
+            .dispatch(id, |intent| host.submit(intent, &settings, cx));
 
         if self.room().attempts().iter().any(|attempt| {
             attempt.id == id
@@ -656,7 +637,6 @@ impl TeamRuntime {
         let key = AttemptEventKey {
             attempt: id,
             member,
-            ownership: attempt.intent.ownership,
             backend_generation: epoch,
         };
 
@@ -680,9 +660,7 @@ impl TeamRuntime {
 
                     self.error = Some(error.clone());
                 } else {
-                    let work = work_status(host.owner.session().read(cx));
-
-                    self.session.complete_reply(key, id, text.clone(), work)?;
+                    self.session.complete_reply(key, id, text.clone())?;
                 }
             }
             ExecutionSignal::Decision { request, .. } => {
@@ -775,14 +753,13 @@ impl TeamRuntime {
             let key = AttemptEventKey {
                 attempt: attempt.id,
                 member: attempt.intent.recipient,
-                ownership: attempt.intent.ownership,
                 backend_generation: attempt.intent.backend_generation,
             };
 
             self.session.accept_attempt(key, &turn.id)?;
 
             self.session
-                .complete_reply(key, &turn.id, turn.text.clone(), Default::default())?;
+                .complete_reply(key, &turn.id, turn.text.clone())?;
         }
 
         Ok(())

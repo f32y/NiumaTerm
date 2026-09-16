@@ -9,7 +9,7 @@ use gpui_component::{
     ActiveTheme as _, Disableable as _, IconNamed, Size, WindowExt as _, h_flex, v_flex,
 };
 use nmt_agent::AgentWorkspace;
-use nmt_agent::team::member::{HistoryScope, MemberConfig, ProfileReference};
+use nmt_agent::team::member::{MemberConfig, ProfileReference};
 use nmt_config::profile::AgentProfile;
 use rand::seq::SliceRandom as _;
 use rust_i18n::t;
@@ -84,7 +84,6 @@ impl MemberDraft {
             roots,
             settings,
             role: self.member_role.read(cx).text().to_string(),
-            history: HistoryScope::CompletedPublic,
         };
 
         Some((profile, config))

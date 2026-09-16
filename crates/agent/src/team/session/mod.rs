@@ -14,7 +14,6 @@ mod planning_tests;
 mod tests;
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
 use std::path::Path;
 
 use thiserror::Error;
@@ -27,11 +26,10 @@ use crate::team::discussion::{
     ArrangementState, DiscussionError, DiscussionMode, DiscussionState, ModeratorAction,
     ModeratorDecision, PauseReason, PublicSnapshot, Stage, StageKind,
 };
-use crate::team::execution_slots::{ExecutionKey, ExecutionSlots, WorkStatus};
 use crate::team::member::MemberConfig;
 use crate::team::model::{
-    AttachmentReference, AttemptId, ContextError, ContextLimits, DiscussionId, MemberId, MessageId,
-    OperationId, OwnershipGeneration, RoomId, StageId, UserInput,
+    AttemptId, ContextError, ContextLimits, DiscussionId, MemberId, MessageId, OperationId, RoomId,
+    StageId, UserInput,
 };
 use crate::team::room::{MemberError, Room};
 use crate::team::session::outcomes::{
@@ -40,17 +38,15 @@ use crate::team::session::outcomes::{
 use crate::team::session::planning::{
     DispatchPlan, NextStage, build_intent, next_stage, public_request, stage_purpose,
 };
-use crate::team::storage::{RoomStore, StorageError, digest};
+use crate::team::storage::{RoomStore, StorageError};
 
 pub struct TeamSession {
     store: RoomStore,
     readiness: BTreeMap<MemberId, MemberReadiness>,
-    slots: ExecutionSlots,
     restored_uncertainty: BTreeSet<AttemptId>,
 }
 
 struct MemberReadiness {
-    ownership: OwnershipGeneration,
     backend_generation: u64,
     capabilities: ModeratorAdmission,
 }
@@ -88,7 +84,6 @@ impl TeamSession {
         Ok(Self {
             store: RoomStore::create(data_directory, room)?,
             readiness: BTreeMap::new(),
-            slots: ExecutionSlots::default(),
             restored_uncertainty: BTreeSet::new(),
         })
     }
@@ -132,7 +127,6 @@ impl TeamSession {
         Ok(Self {
             store,
             readiness: BTreeMap::new(),
-            slots: ExecutionSlots::default(),
             restored_uncertainty,
         })
     }
@@ -149,8 +143,6 @@ impl TeamSession {
             return Err(TeamError::Unavailable);
         }
 
-        let ownership = member.ownership();
-
         let mut room = self.store.room().clone();
         let mut changed = false;
 
@@ -165,7 +157,6 @@ impl TeamSession {
         self.readiness.insert(
             id,
             MemberReadiness {
-                ownership,
                 backend_generation,
                 capabilities,
             },
@@ -180,10 +171,6 @@ impl TeamSession {
     ) -> Result<Vec<AttemptId>, TeamError> {
         for intent in &intents {
             self.validate_recipient(intent)?;
-
-            for attachment in intent.input.attachments.iter().chain(&intent.attachments) {
-                self.read_attachment(attachment)?;
-            }
         }
 
         Ok(dispatch::reserve_dispatches(&mut self.store, intents)?)
@@ -216,57 +203,19 @@ impl TeamSession {
             }
         }
 
-        let key = ExecutionKey {
-            member: attempt.intent.recipient,
-            ownership: attempt.intent.ownership,
-            attempt: id,
-        };
-
-        if !self.slots.reserve(key) {
+        if self.store.room().attempts.iter().any(|active| {
+            active.intent.recipient == attempt.intent.recipient && in_flight(&active.state)
+        }) {
             return Err(TeamError::Busy);
         }
 
-        let mut sent = false;
-
-        let result = dispatch::dispatch(&mut self.store, id, |intent| {
-            sent = true;
-
-            send(intent)
-        });
-
-        match &result {
-            Ok(SendOutcome::NotReady) => {
-                self.slots.update(key, WorkStatus::default());
-            }
-            Ok(SendOutcome::StartedTurn) => {}
-            Ok(SendOutcome::Steered | SendOutcome::Rejected { .. }) => {
-                self.slots.update(
-                    key,
-                    WorkStatus {
-                        uncertain: true,
-                        ..WorkStatus::default()
-                    },
-                );
-            }
-            Err(_) if !sent => {
-                self.slots.update(key, WorkStatus::default());
-            }
-            Err(_) => {
-                self.slots.update(
-                    key,
-                    WorkStatus {
-                        uncertain: true,
-                        ..WorkStatus::default()
-                    },
-                );
-            }
-        }
-
-        Ok(result?)
+        Ok(dispatch::dispatch(&mut self.store, id, send)?)
     }
 
-    pub fn update_work(&mut self, key: ExecutionKey, status: WorkStatus) -> bool {
-        self.slots.update(key, status)
+    fn has_live_attempts(&self) -> bool {
+        self.store.room().attempts.iter().any(|attempt| {
+            in_flight(&attempt.state) && !self.restored_uncertainty.contains(&attempt.id)
+        })
     }
 
     pub fn member_unavailable(&mut self, member: MemberId) -> Result<(), TeamError> {
@@ -289,9 +238,7 @@ impl TeamSession {
             .get(&intent.recipient)
             .ok_or(TeamError::Unavailable)?;
 
-        if readiness.ownership != intent.ownership
-            || readiness.backend_generation != intent.backend_generation
-        {
+        if readiness.backend_generation != intent.backend_generation {
             return Err(TeamError::Unavailable);
         }
 
@@ -304,9 +251,10 @@ impl TeamSession {
         }
 
         let member = self.store.room().member(id).ok_or(TeamError::Unavailable)?;
-        let readiness = self.readiness.get(&id).ok_or(TeamError::Unavailable)?;
 
-        if member.excluded() || member.ownership() != readiness.ownership {
+        self.readiness.get(&id).ok_or(TeamError::Unavailable)?;
+
+        if member.excluded() {
             return Err(TeamError::Unavailable);
         }
 
@@ -441,11 +389,14 @@ impl TeamSession {
         });
 
         if stage_complete {
-            if !self.slots.is_idle() {
+            if self.has_live_attempts() {
                 return Ok(Vec::new());
             }
 
-            let (kind, recipients) = match next_stage(discussion)? {
+            let (kind, recipients) = match next_stage(
+                discussion,
+                discussion.remaining_non_report_turns(self.store.room().attempts()),
+            )? {
                 NextStage::Schedule(kind, recipients) => (kind, recipients),
                 NextStage::InvalidModeration(operation) => {
                     self.pause_discussion(id, PauseReason::InvalidModeration(operation))?;
@@ -618,10 +569,6 @@ impl TeamSession {
             return Err(TeamError::Unavailable);
         }
 
-        for attachment in &input.attachments {
-            self.read_attachment(attachment)?;
-        }
-
         Ok(())
     }
 
@@ -660,7 +607,7 @@ impl TeamSession {
     }
 
     pub fn continue_discussion(&mut self, id: DiscussionId) -> Result<(), TeamError> {
-        if !self.slots.is_idle() || !self.restored_uncertainty.is_empty() {
+        if self.has_live_attempts() || !self.restored_uncertainty.is_empty() {
             return Err(TeamError::Busy);
         }
 
@@ -728,7 +675,7 @@ impl TeamSession {
     pub fn change_mode(&mut self, id: DiscussionId, mode: DiscussionMode) -> Result<(), TeamError> {
         self.pause_discussion(id, PauseReason::ModeChange)?;
 
-        if !self.slots.is_idle() {
+        if self.has_live_attempts() {
             return Err(TeamError::Busy);
         }
 
@@ -762,7 +709,7 @@ impl TeamSession {
         id: DiscussionId,
         operation: OperationId,
     ) -> Result<(), TeamError> {
-        if !self.slots.is_idle() || !self.restored_uncertainty.is_empty() {
+        if self.has_live_attempts() || !self.restored_uncertainty.is_empty() {
             return Err(TeamError::Unresolved);
         }
 
@@ -801,7 +748,7 @@ impl TeamSession {
     pub fn finish_with_report(&mut self, id: DiscussionId) -> Result<(), TeamError> {
         self.pause_discussion(id, PauseReason::User)?;
 
-        if !self.slots.is_idle() || !self.restored_uncertainty.is_empty() {
+        if self.has_live_attempts() || !self.restored_uncertainty.is_empty() {
             return Err(TeamError::Unresolved);
         }
 
@@ -885,7 +832,6 @@ impl TeamSession {
         key: AttemptEventKey,
         provider_turn: &str,
         text: String,
-        remaining_work: WorkStatus,
     ) -> Result<Option<MessageId>, TeamError> {
         let Some(index) = event_attempt(self.store.room(), key) else {
             return Ok(None);
@@ -902,15 +848,6 @@ impl TeamSession {
         self.store.commit(room)?;
 
         self.restored_uncertainty.remove(&key.attempt);
-
-        self.slots.update(
-            ExecutionKey {
-                member: key.member,
-                ownership: key.ownership,
-                attempt: key.attempt,
-            },
-            remaining_work,
-        );
 
         Ok(Some(id))
     }
@@ -938,8 +875,6 @@ impl TeamSession {
             self.restored_uncertainty.remove(&key.attempt);
         }
 
-        // A failed response says nothing about surviving background commands.
-        // Their confirmed status must arrive before the execution slot is free.
         Ok(true)
     }
 
@@ -960,12 +895,11 @@ impl TeamSession {
     pub fn set_member_settings(
         &mut self,
         id: MemberId,
-        ownership: OwnershipGeneration,
         settings: ThreadSettings,
     ) -> Result<(), TeamError> {
         let mut room = self.store.room().clone();
 
-        room.set_member_settings(id, ownership, settings)?;
+        room.set_member_settings(id, settings)?;
 
         self.store.commit(room)?;
 
@@ -975,7 +909,6 @@ impl TeamSession {
     pub fn record_provider_identity(
         &mut self,
         id: MemberId,
-        ownership: OwnershipGeneration,
         provider_id: &str,
         moderator_registered: bool,
     ) -> Result<(), TeamError> {
@@ -984,7 +917,7 @@ impl TeamSession {
         let member = room
             .members
             .iter_mut()
-            .find(|member| member.id == id && member.ownership == ownership)
+            .find(|member| member.id == id)
             .ok_or(TeamError::Unavailable)?;
 
         if provider_id.trim().is_empty()
@@ -1011,7 +944,7 @@ impl TeamSession {
     }
 
     pub fn exclude_member(&mut self, id: MemberId) -> Result<(), TeamError> {
-        if !self.slots.is_idle() || !self.restored_uncertainty.is_empty() {
+        if self.has_live_attempts() || !self.restored_uncertainty.is_empty() {
             return Err(TeamError::Busy);
         }
 
@@ -1030,10 +963,6 @@ impl TeamSession {
         self.readiness.remove(&id);
 
         Ok(())
-    }
-
-    pub fn read_attachment(&self, reference: &AttachmentReference) -> Result<Vec<u8>, TeamError> {
-        Ok(read_attachment(self.store.directory(), reference)?)
     }
 
     pub fn close(&mut self) -> Result<(), TeamError> {
@@ -1061,18 +990,6 @@ impl TeamSession {
                     continue;
                 }
 
-                let budget = match attempt.intent.budget {
-                    BudgetScope::Discussion(id) => room
-                        .discussions
-                        .iter_mut()
-                        .find(|run| run.id == id)
-                        .map(|run| &mut run.budget),
-                    BudgetScope::Direct(id) => room.direct_allowances.get_mut(&id),
-                }
-                .ok_or(TeamError::Unavailable)?;
-
-                budget.cancel_unsent(attempt.id)?;
-
                 attempt.state = AttemptState::Rejected;
             }
         }
@@ -1093,7 +1010,7 @@ impl TeamSession {
     /// The user can end tracking restored work without claiming that the
     /// provider never ran it. Its consumed budget and provider identity remain.
     pub fn abandon_restored_attempt(&mut self, id: AttemptId) -> Result<(), TeamError> {
-        if !self.slots.is_idle() || !self.restored_uncertainty.contains(&id) {
+        if self.has_live_attempts() || !self.restored_uncertainty.contains(&id) {
             return Err(TeamError::Unresolved);
         }
 
@@ -1155,14 +1072,9 @@ impl TeamSession {
             && attempt.intent.operation == operation
             && attempt.intent.stage == Some(stage_id)
             && attempt.intent.recipient == key.member
-            && attempt.intent.ownership == key.ownership
             && attempt.intent.backend_generation == key.backend_generation
             && matches!(attempt.state, AttemptState::Accepted { .. })
-            && self
-                .store
-                .room()
-                .member(key.member)
-                .is_some_and(|member| member.ownership == key.ownership);
+            && self.store.room().member(key.member).is_some();
 
         if !valid {
             self.pause_discussion(discussion_id, PauseReason::InvalidModeration(operation))?;
@@ -1174,7 +1086,7 @@ impl TeamSession {
 
         self.validate_member(key.member)?;
 
-        let reservations = match &action {
+        let purposes = match &action {
             ModeratorAction::Invite { recipients } => {
                 let unique: BTreeSet<_> = recipients.iter().copied().collect();
 
@@ -1195,15 +1107,18 @@ impl TeamSession {
 
                 recipients
                     .iter()
-                    .map(|_| (AttemptId::new(), TurnPurpose::Response))
+                    .map(|_| TurnPurpose::Response)
                     .collect::<Vec<_>>()
             }
-            ModeratorAction::Report => vec![(AttemptId::new(), TurnPurpose::Report)],
+            ModeratorAction::Report => vec![TurnPurpose::Report],
         };
 
-        let mut budget = discussion.budget.clone();
-
-        if let Err(error) = budget.reserve(&reservations) {
+        if let Err(error) = discussion.budget.check_batch(
+            self.store
+                .room()
+                .budget_attempts(BudgetScope::Discussion(discussion_id)),
+            purposes.into_iter(),
+        ) {
             self.pause_discussion(discussion_id, PauseReason::Budget)?;
 
             return Err(error.into());
@@ -1231,32 +1146,13 @@ impl TeamSession {
     }
 }
 
-pub(super) fn read_attachment(
-    directory: &Path,
-    reference: &AttachmentReference,
-) -> Result<Vec<u8>, StorageError> {
-    let bytes = fs::read(directory.join("attachments").join(reference.id.to_string()))?;
-
-    if bytes.len() as u64 != reference.bytes || digest(&bytes) != reference.digest {
-        return Err(StorageError::Invalid("attachment contents changed"));
-    }
-
-    Ok(bytes)
-}
-
 fn cancel_pending_reservations(room: &mut Room, id: DiscussionId) -> Result<(), TeamError> {
-    let discussion = room
-        .discussions
-        .iter_mut()
-        .find(|run| run.id == id)
-        .ok_or(TeamError::Unavailable)?;
+    room.discussion(id).ok_or(TeamError::Unavailable)?;
 
     for attempt in &mut room.attempts {
         if attempt.intent.budget == BudgetScope::Discussion(id)
             && attempt.state == AttemptState::Reserved
         {
-            discussion.budget.cancel_unsent(attempt.id)?;
-
             attempt.state = AttemptState::Rejected;
         }
     }

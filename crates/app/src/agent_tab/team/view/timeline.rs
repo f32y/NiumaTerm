@@ -161,10 +161,7 @@ fn public_rows(room: &Room, live: &BTreeMap<AttemptId, String>) -> Vec<TimelineR
     let mut groups = Vec::new();
 
     for (index, message) in room.messages().iter().enumerate() {
-        if !matches!(
-            message.publication,
-            Publication::UserInput | Publication::ExplicitShare
-        ) {
+        if !matches!(message.publication, Publication::UserInput) {
             continue;
         }
 
