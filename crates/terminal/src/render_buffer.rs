@@ -9,11 +9,11 @@
 //! `Arc`. Readers can retain a frame across later writes and resizes. Buffers
 //! return to the capture pool after their last external reader releases them.
 
+use nmt_config::CursorShape;
 use nmt_config::colors::ColorRgb;
 use nmt_config::colors::term::TermColors;
 use rustc_hash::FxHashMap;
 
-use crate::ansi;
 use crate::cell::{Extras, Square, Wide};
 use crate::ghostty::{
     CellWide, ScreenRowMeta, ScrollbarInfo, SnapshotColors, SnapshotCursor, SnapshotPlacement,
@@ -63,7 +63,7 @@ pub struct RenderBuffer {
     progress_cursor_suppressed: bool,
 
     /// DECSCUSR shape + modes-based blink captured from the engine render-state.
-    cursor_shape: ansi::CursorShape,
+    cursor_shape: CursorShape,
 
     /// Effective default colors captured from the render-state: the
     /// `term_colors` OSC-override layer (Foreground/Background/Cursor) over the
@@ -124,7 +124,7 @@ impl RenderBuffer {
             cursor: Pos::default(),
             cursor_visible: false,
             progress_cursor_suppressed: false,
-            cursor_shape: ansi::CursorShape::Block,
+            cursor_shape: CursorShape::Block,
             colors: TermColors::default(),
             window_bg_override: None,
             scrollbar: ScrollbarInfo::default(),
@@ -150,7 +150,7 @@ impl RenderBuffer {
     }
 
     /// The cursor's DECSCUSR shape captured from the render-state.
-    pub fn cursor_shape(&self) -> ansi::CursorShape {
+    pub fn cursor_shape(&self) -> CursorShape {
         self.cursor_shape
     }
 
@@ -206,7 +206,7 @@ impl RenderBuffer {
     /// this row in the layout prevents an erased progress line from temporarily
     /// shrinking the live item and shifting every preceding line at the bottom.
     pub fn layout_cursor_row(&self) -> Option<usize> {
-        if !self.cursor_visible || self.cursor_shape == ansi::CursorShape::Hidden {
+        if !self.cursor_visible || self.cursor_shape == CursorShape::Hidden {
             return None;
         }
 

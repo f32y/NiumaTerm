@@ -1,6 +1,5 @@
 pub use nmt_platform::clipboard;
 
-pub mod ansi;
 pub mod block_store;
 pub mod cell;
 pub mod event;
@@ -8,6 +7,7 @@ pub mod ghostty;
 pub mod graphics;
 pub mod grid_emit;
 pub mod input;
+pub mod kitty_virtual;
 pub mod links;
 pub mod pos;
 pub mod pty_pipe;

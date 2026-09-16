@@ -4,9 +4,8 @@ use libghostty_vt_sys::{
     CellWide as VtCellWide, ColorRgb as VtColorRgb, SgrUnderline as VtSgrUnderline,
     ghostty_color_rgb_get,
 };
+use nmt_config::CursorShape;
 use nmt_config::colors::ColorRgb;
-
-use crate::ansi;
 
 /// Alias of the workspace-wide RGB type; `VtColorRgb` is the FFI handle,
 /// this is the decoded byte triple.
@@ -225,7 +224,7 @@ pub struct SnapshotCursor {
     pub visible: bool,
 
     /// DECSCUSR shape from the render-state `CURSOR_VISUAL_STYLE`.
-    pub shape: ansi::CursorShape,
+    pub shape: CursorShape,
 }
 
 /// The terminal's effective default colors from the render state:

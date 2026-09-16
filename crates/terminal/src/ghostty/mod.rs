@@ -54,6 +54,7 @@ use libghostty_vt_sys::{
     ghostty_terminal_remove_block, ghostty_terminal_resize, ghostty_terminal_scroll_viewport,
     ghostty_terminal_set, ghostty_terminal_vt_write, sized as vt_sized,
 };
+use nmt_config::CursorShape;
 #[cfg(test)]
 use nmt_config::colors::ColorRgb;
 use nmt_config::colors::Colors;
@@ -68,7 +69,7 @@ use crate::ghostty::kitty::{KittyState, kitty_image_graphic_data, set_kitty_stor
 use crate::ghostty::render_state::RenderStateReader;
 use crate::pwd::pwd_to_path;
 use crate::render_buffer::RenderBuffer;
-use crate::{ansi, clipboard, graphics, vt_modes};
+use crate::{clipboard, graphics, vt_modes};
 
 /// What the engine last reported for the title and the working directory.
 ///
@@ -532,11 +533,11 @@ impl GhosttyTerminal {
 
     /// Set the shape used until a program overrides it with DECSCUSR and again
     /// after that program resets the cursor style with `CSI 0 SP q`.
-    pub fn set_default_cursor_shape(&mut self, shape: ansi::CursorShape) -> Result<()> {
+    pub fn set_default_cursor_shape(&mut self, shape: CursorShape) -> Result<()> {
         let style: VtTerminalCursorStyle::Type = match shape {
-            ansi::CursorShape::Beam => VtTerminalCursorStyle::BAR,
-            ansi::CursorShape::Underline => VtTerminalCursorStyle::UNDERLINE,
-            ansi::CursorShape::Block | ansi::CursorShape::Hidden => VtTerminalCursorStyle::BLOCK,
+            CursorShape::Beam => VtTerminalCursorStyle::BAR,
+            CursorShape::Underline => VtTerminalCursorStyle::UNDERLINE,
+            CursorShape::Block | CursorShape::Hidden => VtTerminalCursorStyle::BLOCK,
         };
 
         Error::from_code(unsafe {

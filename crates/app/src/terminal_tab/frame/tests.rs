@@ -1,6 +1,6 @@
+use nmt_config::CursorShape;
 use nmt_config::colors::term::TermColors;
 use nmt_config::colors::{ColorArray, Colors, NamedColor};
-use nmt_terminal::ansi::CursorShape;
 use nmt_terminal::cell::Wide;
 use nmt_terminal::ghostty::GhosttyTerminal;
 use nmt_terminal::pos::{Column, Line, Pos};

@@ -1,5 +1,5 @@
 use gpui::{Bounds, point, px, size};
-use nmt_terminal::ansi::CursorShape;
+use nmt_config::CursorShape;
 
 use crate::terminal_tab::frame::TerminalCursor;
 use crate::terminal_tab::metrics;

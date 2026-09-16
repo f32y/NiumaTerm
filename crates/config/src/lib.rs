@@ -24,8 +24,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::colors::Colors;
 
-/// Cursor shape. Lives here (not in `nmt_terminal::ansi`) because it is a config
-/// value `terminal` deserializes; `terminal` re-exports it as `ansi::CursorShape`.
+/// Cursor shape. Lives in the config crate because it is a deserialized config
+/// value; the terminal and app crates use it directly from here.
 #[derive(Default, Clone, Serialize, Deserialize, Copy, Debug, Eq, PartialEq)]
 pub enum CursorShape {
     /// Cursor is a block like `▒`.

@@ -5,8 +5,6 @@
 
 use bitflags::bitflags;
 
-use crate::ansi::KeyboardModes;
-
 bitflags! {
      #[derive(Debug, Copy, Clone)]
      pub struct Mode: u32 {
@@ -57,38 +55,5 @@ impl Default for Mode {
             | Mode::ALTERNATE_SCROLL
             | Mode::URGENCY_HINTS
             | Mode::SIXEL_PRIV_PALETTE
-    }
-}
-
-impl From<KeyboardModes> for Mode {
-    fn from(value: KeyboardModes) -> Self {
-        let mut mode = Self::empty();
-
-        mode.set(
-            Mode::DISAMBIGUATE_ESC_CODES,
-            value.contains(KeyboardModes::DISAMBIGUATE_ESC_CODES),
-        );
-
-        mode.set(
-            Mode::REPORT_EVENT_TYPES,
-            value.contains(KeyboardModes::REPORT_EVENT_TYPES),
-        );
-
-        mode.set(
-            Mode::REPORT_ALTERNATE_KEYS,
-            value.contains(KeyboardModes::REPORT_ALTERNATE_KEYS),
-        );
-
-        mode.set(
-            Mode::REPORT_ALL_KEYS_AS_ESC,
-            value.contains(KeyboardModes::REPORT_ALL_KEYS_AS_ESC),
-        );
-
-        mode.set(
-            Mode::REPORT_ASSOCIATED_TEXT,
-            value.contains(KeyboardModes::REPORT_ASSOCIATED_TEXT),
-        );
-
-        mode
     }
 }

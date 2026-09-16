@@ -3,10 +3,10 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 use std::thread::{Builder, JoinHandle};
 
+use nmt_config::CursorShape;
 use nmt_config::colors::Colors;
 use nmt_platform::EventedPty;
 
-use crate::ansi::CursorShape;
 use crate::event::{EventListener, Msg, MsgSender};
 use crate::pty_pipe::PtyPipe;
 use crate::publication::FrameStore;
