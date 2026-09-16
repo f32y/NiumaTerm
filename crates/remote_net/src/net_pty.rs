@@ -1,5 +1,5 @@
 //! `EventedPty` backed by a remote session instead of a local ConPTY, so a
-//! remote terminal tab reuses the entire `PtyPipe` → engine → render → wake
+//! remote terminal tab reuses the entire `Termio` → engine → render → wake
 //! pipeline unchanged. The only difference from a local session is where bytes
 //! come from and go to:
 //!
@@ -26,8 +26,8 @@ use nmt_config::colors::Colors;
 use nmt_platform::{
     EventedPty, Interest, Poll, ProcessReadWrite, SoftReady, Token, Waker, WinsizeBuilder,
 };
-use nmt_terminal::pty_pipe::SessionOptions;
 use nmt_terminal::session::{EngineError, EngineErrorCode, SessionObserver, TerminalSession};
+use nmt_terminal::termio::SessionOptions;
 use parking_lot::Mutex;
 use tracing::warn;
 

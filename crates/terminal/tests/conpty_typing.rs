@@ -10,9 +10,9 @@ use nmt_platform::windows::powershell::encode_command;
 use nmt_platform::{PtyOptions, WinsizeBuilder, create_managed_pty_with_env};
 use nmt_terminal::event::{Msg, VoidListener};
 use nmt_terminal::ghostty::GhosttyTerminal;
-use nmt_terminal::pty_pipe::{SessionHandles, SessionOptions, start_session};
 use nmt_terminal::render_buffer::RenderBuffer;
 use nmt_terminal::session::request::CheckpointRequest;
+use nmt_terminal::termio::{SessionHandles, SessionOptions, start_session};
 
 const PROMPT: &str = "NMT> ";
 const TIMEOUT: Duration = Duration::from_secs(10);
