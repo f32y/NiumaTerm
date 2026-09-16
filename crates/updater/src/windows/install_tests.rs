@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 use std::{env, fs, process};
 
-use crate::update::InstallError;
-use crate::update::install::{APP_EXE, InstallPlan, apply, differing, install_additions, plan};
+use crate::windows::InstallError;
+use crate::windows::install::{APP_EXE, InstallPlan, apply, differing, install_additions, plan};
 
 fn versions(
     entries: [(&str, Option<&str>, Option<&str>); 3],

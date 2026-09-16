@@ -9,9 +9,10 @@ use gpui_component::dialog::{
 };
 use gpui_component::{ActiveTheme as _, WindowExt as _, v_flex};
 use nmt_platform::windows::restart_manager::{AffectedApplication, ApplicationKind};
+use nmt_updater::windows::{FileUsePrompt, FileUsePromptReason};
 use rust_i18n::t;
 
-use crate::update::{self, FileUsePrompt, FileUsePromptReason};
+use crate::update;
 
 pub(crate) fn open_file_use_prompt(
     handle: AnyWindowHandle,

@@ -19,7 +19,7 @@ nmt_agent.workspace = true
 nmt_config.workspace = true
 nmt_terminal.workspace = true
 nmt_platform.workspace = true
-nmt_version.workspace = true
+nmt_updater.workspace = true
 
 dirs.workspace = true
 parking_lot.workspace = true
@@ -47,15 +47,8 @@ nmt_input.workspace = true
 # crate/version GPUI links, so `image_rs::Frame` unifies with `gpui`'s `Frame`.
 image_rs.workspace = true
 
-reqwest = { workspace = true, features = [
-    "blocking",
-    "rustls-tls-native-roots",
-    "system-proxy",
-] }
 percent-encoding.workspace = true
 raw-window-handle.workspace = true
-sha2.workspace = true
-zip.workspace = true
 tree-sitter.workspace = true
 tree-sitter-language.workspace = true
 gpui-base.workspace = true
@@ -80,7 +73,6 @@ nmt_remote_net.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 gpui_macos.workspace = true
-nmt_sparkle.workspace = true
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }

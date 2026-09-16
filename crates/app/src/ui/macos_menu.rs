@@ -22,7 +22,7 @@ use crate::ui::{
     PrevWorkspace, ShowSettings, SplitDown, SplitLeft, SplitRight, SplitUp, ToggleSidebar,
     save_settings,
 };
-use crate::{open_window_without_a_source, sparkle};
+use crate::{open_window_without_a_source, update};
 
 actions!(
     NiumaTerm,
@@ -88,8 +88,8 @@ pub(crate) fn install(cx: &mut App) {
     // Disabled rather than absent while a check runs, and for a build with no
     // updater, so the item stays where a user learned to look for it.
     cx.on_action(|_: &CheckForUpdates, cx: &mut App| {
-        if sparkle::can_check(cx) {
-            sparkle::check_now(cx);
+        if update::can_check(cx) {
+            update::check(cx);
         }
     });
 

@@ -1,6 +1,10 @@
 //! Asking the published manifest what the selected channel holds, and deciding
 //! whether it supersedes what is running.
 
+#[cfg(test)]
+#[path = "releases_tests.rs"]
+mod tests;
+
 use std::slice::from_ref;
 use std::time::Duration;
 
@@ -9,7 +13,7 @@ use nmt_version::Version;
 use reqwest::blocking::Client;
 use serde::Deserialize;
 
-use crate::update::APP_VERSION;
+use crate::windows::Status;
 
 /// Rendered by CI from GitHub's own "latest", the newest release that is
 /// neither a draft nor a prerelease, which is exactly the stable channel.
@@ -43,7 +47,7 @@ const RELEASES_URL: &str = "https://niumaterm-updates.f32.io/windows/nightly.jso
 /// would let whoever serves that document point the download at a host nobody
 /// chose. Only the prefix is pinned, because the path below it names the tag
 /// and the file.
-pub(crate) const DOWNLOAD_URL_PREFIX: &str = "https://niumaterm-downloads.f32.io/";
+pub(super) const DOWNLOAD_URL_PREFIX: &str = "https://niumaterm-downloads.f32.io/";
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -52,7 +56,7 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum CheckError {
+pub enum CheckError {
     /// The request never produced a response to read.
     Unreachable,
     /// A response arrived but was not the releases list.
@@ -60,23 +64,23 @@ pub(crate) enum CheckError {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct Release {
-    pub(crate) label: String,
-    pub(crate) page_url: String,
-    pub(crate) assets: Vec<Asset>,
+pub struct Release {
+    pub label: String,
+    pub page_url: String,
+    pub(super) assets: Vec<Asset>,
 
     /// When the channel published it, as `yyyymmdd`, which is the only thing a
     /// release tag and a nightly label can be ordered by across channels. Left
     /// unset for a response that carried no timestamp this could read.
-    pub(crate) published: Option<u32>,
+    pub(super) published: Option<u32>,
 }
 
 /// One file published with a release.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
-pub(crate) struct Asset {
-    pub(crate) name: String,
+pub(super) struct Asset {
+    pub(super) name: String,
     #[serde(rename = "browser_download_url")]
-    pub(crate) url: String,
+    pub(super) url: String,
 }
 
 #[derive(Deserialize)]
@@ -99,25 +103,50 @@ struct ReleaseEntry {
     published_at: Option<String>,
 }
 
-pub(crate) fn latest(channel: UpdateChannel) -> Result<Option<Release>, CheckError> {
+/// One check with the channel and running version captured before it starts.
+pub struct Check {
+    pub(super) channel: UpdateChannel,
+    pub(super) version: &'static str,
+}
+
+impl Check {
+    /// Fetch and compare the published release on a worker thread.
+    pub fn run(self) -> CheckedRelease {
+        let found = latest(self.channel, self.version);
+
+        CheckedRelease {
+            channel: self.channel,
+            status: outcome(found, self.version),
+        }
+    }
+}
+
+/// Retains the requested channel so a late result cannot replace a result for
+/// a channel the user selected while the request was running.
+pub struct CheckedRelease {
+    pub(super) channel: UpdateChannel,
+    pub(super) status: Status,
+}
+
+fn latest(channel: UpdateChannel, version: &str) -> Result<Option<Release>, CheckError> {
     let client = Client::builder()
         .timeout(REQUEST_TIMEOUT)
         .build()
         .map_err(|_| CheckError::Unreachable)?;
 
     match channel {
-        UpdateChannel::Stable => select_latest(&get(&client, LATEST_RELEASE_URL)?),
-        UpdateChannel::Nightly => select(&get(&client, RELEASES_URL)?, channel),
+        UpdateChannel::Stable => select_latest(&get(&client, LATEST_RELEASE_URL, version)?),
+        UpdateChannel::Nightly => select(&get(&client, RELEASES_URL, version)?, channel),
     }
 }
 
-fn get(client: &Client, url: &str) -> Result<String, CheckError> {
+fn get(client: &Client, url: &str, version: &str) -> Result<String, CheckError> {
     // The agent string names the build doing the asking, which is what makes
     // the serving edge's log useful when a release turns out to be unreadable
     // for one version and fine for the rest.
     let response = client
         .get(url)
-        .header("User-Agent", user_agent())
+        .header("User-Agent", user_agent(version))
         .send()
         .map_err(|_| CheckError::Unreachable)?;
 
@@ -134,7 +163,7 @@ fn get(client: &Client, url: &str) -> Result<String, CheckError> {
 
 /// Split from the request so the selection can be exercised against a recorded
 /// response rather than the live releases page.
-pub(crate) fn select(body: &str, channel: UpdateChannel) -> Result<Option<Release>, CheckError> {
+fn select(body: &str, channel: UpdateChannel) -> Result<Option<Release>, CheckError> {
     let entries =
         serde_json::from_str::<Vec<ReleaseEntry>>(body).map_err(|_| CheckError::Unreadable)?;
 
@@ -144,14 +173,29 @@ pub(crate) fn select(body: &str, channel: UpdateChannel) -> Result<Option<Releas
 /// The single entry the stable manifest holds. It is still checked against the
 /// stable channel: the manifest promises the newest published non-prerelease,
 /// leaving open whether its tag is one this build can be compared against.
-pub(crate) fn select_latest(body: &str) -> Result<Option<Release>, CheckError> {
+fn select_latest(body: &str) -> Result<Option<Release>, CheckError> {
     let entry = serde_json::from_str::<ReleaseEntry>(body).map_err(|_| CheckError::Unreadable)?;
 
     Ok(newest_in_channel(from_ref(&entry), UpdateChannel::Stable))
 }
 
-pub(crate) fn user_agent() -> String {
-    format!("NiumaTerm/{APP_VERSION}")
+pub(super) fn user_agent(version: &str) -> String {
+    format!("NiumaTerm/{version}")
+}
+
+fn outcome(found: Result<Option<Release>, CheckError>, version: &str) -> Status {
+    let published = match found {
+        Ok(Some(published)) => published,
+        Ok(None) => return Status::NothingPublished,
+        Err(error) => return Status::Failed(error),
+    };
+
+    // An unreadable running label cannot prove that the published build is
+    // older, so that build remains available for installation.
+    match Version::parse(version) {
+        Some(current) if !supersedes(&current, &published) => Status::UpToDate,
+        _ => Status::Available(published),
+    }
 }
 
 /// The list arrives newest first, so the first entry whose tag belongs to the
@@ -201,7 +245,7 @@ fn channel_of(version: &Version) -> UpdateChannel {
 }
 
 /// Whether `candidate` is worth offering over `current`.
-pub(crate) fn supersedes(current: &Version, candidate: &Release) -> bool {
+fn supersedes(current: &Version, candidate: &Release) -> bool {
     // A tag this build cannot read is offered rather than hidden: the channel
     // published it, and a name nothing here understands is no evidence that it
     // is behind.

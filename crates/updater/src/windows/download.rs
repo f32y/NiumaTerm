@@ -13,8 +13,9 @@ use reqwest::blocking::{Client, Response};
 use sha2::{Digest as _, Sha256};
 use tracing::warn;
 
-use crate::update::InstallError;
-use crate::update::releases::{Asset, DOWNLOAD_URL_PREFIX, Release, user_agent};
+use crate::windows::InstallError;
+use crate::windows::install::Installation;
+use crate::windows::releases::{Asset, DOWNLOAD_URL_PREFIX, Release, user_agent};
 
 /// Long enough for a package on a slow connection, short enough that a stalled
 /// transfer does not leave the About page reporting an install forever.
@@ -30,6 +31,29 @@ const MAX_PACKAGE_BYTES: u64 = 256 * 1024 * 1024;
 /// decide which system's build an installation downloads.
 const PACKAGE_NAME_PREFIX: &str = "NiumaTerm-windows-x86_64-";
 
+/// A captured release and destination, independent of later settings changes.
+pub struct Download {
+    pub(super) release: Release,
+    pub(super) staging: PathBuf,
+    pub(super) install: PathBuf,
+    pub(super) version: &'static str,
+    pub(super) testing: bool,
+}
+
+impl Download {
+    /// Download, verify, unpack, and select replacement files on a worker thread.
+    pub fn run(self) -> Result<Installation, InstallError> {
+        let staged = stage(&self.release, &self.staging, self.version)?;
+
+        Ok(Installation::new(
+            self.release,
+            staged,
+            self.install,
+            self.testing,
+        ))
+    }
+}
+
 /// Unpack `release`'s package into `staging`, and answer with the directory the
 /// files ended up in.
 ///
@@ -38,7 +62,7 @@ const PACKAGE_NAME_PREFIX: &str = "NiumaTerm-windows-x86_64-";
 /// installed file. It travels with the package rather than independently of it,
 /// so it does not establish who built the package, only that what arrived is
 /// what was published.
-pub(crate) fn stage(release: &Release, staging: &Path) -> Result<PathBuf, InstallError> {
+fn stage(release: &Release, staging: &Path, version: &str) -> Result<PathBuf, InstallError> {
     let (package, checksum) = package_assets(&release.assets).ok_or(InstallError::NoPackage)?;
 
     let name = sanitized(&release.label);
@@ -60,9 +84,9 @@ pub(crate) fn stage(release: &Release, staging: &Path) -> Result<PathBuf, Instal
     // be installed as though the package had shipped it.
     let archive = staging.join(format!("{name}.zip"));
 
-    download(&package.url, &archive)?;
+    download(&package.url, &archive, version)?;
 
-    verify(&archive, &fetch_text(&checksum.url)?)?;
+    verify(&archive, &fetch_text(&checksum.url, version)?)?;
 
     unpack(&archive, &directory)?;
 
@@ -90,16 +114,16 @@ fn package_assets(assets: &[Asset]) -> Option<(&Asset, &Asset)> {
     Some((package, checksum))
 }
 
-fn client() -> Result<Client, InstallError> {
+fn client(version: &str) -> Result<Client, InstallError> {
     Client::builder()
         .timeout(TRANSFER_TIMEOUT)
-        .user_agent(user_agent())
+        .user_agent(user_agent(version))
         .build()
         .map_err(|_| InstallError::Unreachable)
 }
 
-fn download(url: &str, into: &Path) -> Result<(), InstallError> {
-    let mut response = client()?
+fn download(url: &str, into: &Path, version: &str) -> Result<(), InstallError> {
+    let mut response = client(version)?
         .get(url)
         .send()
         .and_then(Response::error_for_status)
@@ -127,8 +151,8 @@ fn download(url: &str, into: &Path) -> Result<(), InstallError> {
     file.flush().map_err(|_| InstallError::NotWritable)
 }
 
-fn fetch_text(url: &str) -> Result<String, InstallError> {
-    client()?
+fn fetch_text(url: &str, version: &str) -> Result<String, InstallError> {
+    client(version)?
         .get(url)
         .send()
         .and_then(Response::error_for_status)
