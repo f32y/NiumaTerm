@@ -3,7 +3,7 @@ pub use crate::event::{
     AgentEvent, AgentEventInput, AgentEventKind, AgentOwner, AgentRuntimeStatus,
     AgentValidationError, RawAgentHookMessage, normalize_body, normalize_title,
 };
-pub use crate::hook_command::{HookInstallStatus, build_hook_command, hook_command_contains};
+pub use crate::hook_store::{HookInstallStatus, build_hook_command, hook_command_contains};
 pub use crate::monitor::{
     AgentActivityPolicy, AgentMonitor, AgentNotification, AgentProjection, COMPLETION_QUIET_WINDOW,
     MonitorMutation, request_native_delivery,
@@ -12,6 +12,7 @@ pub use crate::process::{
     AGENT_HOOK_EXE_ENV, AGENT_HOOK_PROTOCOL_VERSION, AGENT_HOOK_TOKEN_ENV, AGENT_HOOK_VERSION_ENV,
     AGENT_ROUTE_ENV, AGENT_TESTING_ENV, AgentProcess, agent_process,
 };
+pub use crate::subprocess::OUTPUT_FAILURE_METHOD;
 pub use crate::workspace::{AgentWorkspace, MultiRootAccess};
 
 pub mod background_task;
@@ -24,7 +25,6 @@ pub mod git;
 pub mod images;
 pub mod input_history;
 pub mod launcher;
-pub mod message_memory;
 pub mod profile;
 pub mod progress;
 pub mod session;
@@ -35,14 +35,11 @@ pub mod usage;
 pub mod workflow;
 pub mod workspace;
 
-mod deadline_timer;
 mod event;
-mod hook_command;
 mod hook_store;
 mod json;
 mod monitor;
 mod process;
-mod request_policy;
 mod subprocess;
 
 #[cfg(test)]

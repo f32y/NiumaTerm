@@ -549,10 +549,10 @@ fn an_approval_request_carries_what_answering_it_needs() {
 #[test]
 fn a_command_result_reports_what_the_registry_settled() {
     use crate::chat::SlashCommandOutcome;
-    use crate::dsh::commands;
+    use crate::dsh::catalogs;
 
     assert_eq!(
-        commands::outcome(
+        catalogs::command_outcome(
             "compact",
             &json!({ "commandId": "cmd-1", "result": { "kind": "success", "text": "compacted" } }),
         ),
@@ -561,7 +561,7 @@ fn a_command_result_reports_what_the_registry_settled() {
         }
     );
     assert_eq!(
-        commands::outcome(
+        catalogs::command_outcome(
             "permission",
             &json!({ "commandId": "cmd-2", "result": { "kind": "error", "text": "no such preset" } }),
         ),
@@ -572,7 +572,8 @@ fn a_command_result_reports_what_the_registry_settled() {
 
     // A name the registry could not resolve produces no answer at all, and
     // nothing ran, so the caller reports the refusal itself.
-    let SlashCommandOutcome::Rejected { message } = commands::outcome("nope", &Value::Null) else {
+    let SlashCommandOutcome::Rejected { message } = catalogs::command_outcome("nope", &Value::Null)
+    else {
         panic!("an unresolved name should be refused");
     };
 
@@ -581,9 +582,9 @@ fn a_command_result_reports_what_the_registry_settled() {
 
 #[test]
 fn the_skill_catalog_names_what_a_prompt_can_write() {
-    use crate::dsh::commands;
+    use crate::dsh::catalogs;
 
-    let catalog = commands::skills(&json!({
+    let catalog = catalogs::skill_catalog(&json!({
         "skills": [
             {
                 "name": "diagnose",
@@ -685,7 +686,7 @@ fn a_workflow_run_is_folded_from_its_own_increments() {
 #[test]
 fn the_child_catalog_becomes_rows_that_can_be_opened() {
     use crate::background_task::{BackgroundTaskRefs, BackgroundTaskState};
-    use crate::dsh::subagents;
+    use crate::dsh::catalogs;
 
     let catalog = json!({
         "parentAvailable": true,
@@ -711,7 +712,7 @@ fn the_child_catalog_becomes_rows_that_can_be_opened() {
         ],
     });
 
-    let snapshot = subagents::snapshot(&catalog, SESSION, 7);
+    let snapshot = catalogs::subagent_snapshot(&catalog, SESSION, 7);
 
     assert_eq!(snapshot.tasks.len(), 2);
     assert_eq!(snapshot.parent_session.id, SESSION);
@@ -741,7 +742,7 @@ fn the_child_catalog_becomes_rows_that_can_be_opened() {
 #[test]
 fn the_command_registry_fills_the_palette() {
     use crate::chat::{SlashCommandArguments, SlashCommandRunPolicy, SlashCommandSource};
-    use crate::dsh::commands;
+    use crate::dsh::catalogs;
 
     let listed = json!([
         { "name": "compact", "description": "Summarize the conversation so far" },
@@ -752,7 +753,7 @@ fn the_command_registry_fills_the_palette() {
         },
     ]);
 
-    let catalog = commands::catalog(&listed);
+    let catalog = catalogs::command_catalog(&listed);
 
     assert_eq!(catalog.len(), 2);
     assert_eq!(catalog[0].name, "compact");
@@ -769,7 +770,7 @@ fn the_command_registry_fills_the_palette() {
 
     // The registry resolves the agent from a session id, and the argument is
     // named by that resolver rather than by the method's own parameter.
-    assert_eq!(commands::agent_args(SESSION), json!({ "agentId": SESSION }));
+    assert_eq!(catalogs::agent_args(SESSION), json!({ "agentId": SESSION }));
 }
 
 #[test]
@@ -1977,9 +1978,9 @@ fn the_session_stats_projection_reports_whole_log_counters() {
 
 #[test]
 fn a_broken_preset_is_listed_by_the_harness_but_not_offered_for_selection() {
-    use crate::dsh::presets::catalog;
+    use crate::dsh::catalogs::preset_catalog;
 
-    let presets = catalog(&json!([
+    let presets = preset_catalog(&json!([
         { "id": "coding", "name": "Coding", "description": "Ships code", "trust": "system" },
         { "id": "research", "trust": "system" },
         { "id": "mine", "description": "Mine", "trust": "user" },

@@ -10,20 +10,18 @@ use crate::AgentWorkspace;
 use crate::chat::SendOutcome;
 use crate::team::attempt::{AttemptState, BudgetScope, DispatchIntent};
 use crate::team::budget::TurnPurpose;
-use crate::team::content::{
-    AttachmentReference, Author, PublicMessage, Publication, Summary, UserInput,
-};
 use crate::team::discussion::{
     Arrangement, ArrangementState, DiscussionMode, PauseReason, PublicSnapshot, Stage, StageKind,
 };
 #[cfg(test)]
-use crate::team::identity::AttachmentId;
-use crate::team::identity::{
-    AttemptId, MessageId, OperationId, OwnershipGeneration, StageId, SummaryId,
+use crate::team::model::AttachmentId;
+use crate::team::model::{
+    AttachmentReference, AttemptId, Author, MessageId, OperationId, OwnershipGeneration,
+    PublicMessage, Publication, StageId, Summary, SummaryId, UserInput,
 };
 use crate::team::room::Room;
-use crate::team::session::attachments::read_attachment;
 use crate::team::session::dispatch::{dispatch, reserve_dispatches};
+use crate::team::session::read_attachment;
 #[cfg(test)]
 use crate::team::storage::atomic_write;
 use crate::team::storage::records::digest;

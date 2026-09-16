@@ -53,7 +53,7 @@ use gpui_component::resizable::PANEL_MIN_SIZE;
 use gpui_component::{
     ActiveTheme, Icon, IconNamed, Root, Theme as ComponentTheme, WindowExt, v_flex,
 };
-use nmt_agent::team::identity::RoomId;
+use nmt_agent::team::model::RoomId;
 use nmt_agent::update::{ProviderKind, UpdatePhase};
 use nmt_agent::{
     AgentActivityPolicy, AgentEvent, AgentMonitor, AgentNotification, AgentRoute,

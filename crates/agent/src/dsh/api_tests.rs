@@ -8,7 +8,7 @@ use tungstenite::accept_hdr;
 use tungstenite::handshake::server::Request;
 
 use crate::dsh::api::{ApiClient, CallError};
-use crate::dsh::commands;
+use crate::dsh::catalogs;
 
 fn read_request(stream: &TcpStream) -> (String, String, Value) {
     stream
@@ -216,7 +216,7 @@ fn commands_submit_an_empty_attachment_list_for_every_command_line() {
 
     for line in lines {
         assert_eq!(
-            commands::execute(&client, "session-1", line).unwrap(),
+            catalogs::execute_command(&client, "session-1", line).unwrap(),
             value
         );
     }
@@ -245,7 +245,7 @@ fn commands_retry_the_older_attachment_name_after_argument_rejection() {
     ]);
 
     assert_eq!(
-        commands::execute(&client, "session-1", line).unwrap(),
+        catalogs::execute_command(&client, "session-1", line).unwrap(),
         value
     );
 
@@ -265,7 +265,7 @@ fn commands_return_unrelated_failures_without_retrying() {
         )]);
 
         assert_eq!(
-            commands::execute(&client, "session-1", "/permission dangerously"),
+            catalogs::execute_command(&client, "session-1", "/permission dangerously"),
             Err(CallError::Business {
                 code: code.into(),
                 message: message.into()

@@ -3,11 +3,12 @@ use std::collections::{HashMap, VecDeque};
 use serde_json::Value;
 
 use crate::chat::{ContextComposition, ContextWindowUsage, Event, Item, TokenUsageBreakdown};
-use crate::claude_code::compaction::{compaction_metadata, parse_compaction};
+use crate::claude_code::records::{
+    compaction_metadata, complete_tool_item, parse_compaction, tool_item,
+};
 use crate::claude_code::stream_json::parse::{
     claude_context_window, context_window_usage, parse_claude_usage, update_claude_output,
 };
-use crate::claude_code::tool_items::{complete_tool_item, tool_item};
 
 #[derive(Default)]
 pub(super) struct TurnOutputUsage {

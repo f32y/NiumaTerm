@@ -10,9 +10,8 @@ use crate::codex::ProviderConfig;
 use crate::codex::app_server::host::{
     HOST_INIT_RPC_ID, HostBootstrap, HostKey, Router, initialize_request, redact,
 };
-use crate::message_memory::OUTPUT_FAILURE_METHOD;
-use crate::request_policy::RequestClass;
-use crate::subprocess::InputTicket;
+use crate::subprocess::requests::RequestClass;
+use crate::subprocess::{InputTicket, OUTPUT_FAILURE_METHOD};
 
 #[test]
 fn startup_preserves_the_protocol_failure_reason() {

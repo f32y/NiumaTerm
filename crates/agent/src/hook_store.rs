@@ -6,13 +6,28 @@
 //! the NiumaTerm hook binary are ever touched, and a file that fails to parse
 //! is never rewritten.
 
+pub use nmt_platform::{build_hook_command, hook_command_contains};
+
 use std::path::{Path, PathBuf};
 use std::{fs, io};
 
 use nmt_platform::environment;
 use serde_json::{Value, from_str, json, to_string_pretty};
 
-use crate::{AGENT_HOOK_EXE_ENV, HookInstallStatus, hook_command_contains};
+use crate::AGENT_HOOK_EXE_ENV;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HookInstallStatus {
+    /// Every event is registered with the current hook command.
+    Installed,
+    /// NiumaTerm entries exist but differ from the current command (for
+    /// example a legacy absolute-path install) or miss events; reinstalling
+    /// migrates them.
+    Stale,
+    NotInstalled,
+    /// Existing settings could not be read or decoded.
+    Unavailable,
+}
 
 pub(crate) struct HookRegistration {
     pub(crate) events: &'static [&'static str],

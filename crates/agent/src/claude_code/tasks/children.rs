@@ -13,7 +13,7 @@ use serde_json::Value;
 
 use crate::background_task::{BackgroundTaskKey, BackgroundTaskTranscriptUpdate};
 use crate::chat::Item;
-use crate::claude_code::tool_items::{complete_tool_item, tool_item};
+use crate::claude_code::records::{complete_tool_item, tool_item};
 
 #[derive(Default)]
 pub(super) struct ChildTranscripts {

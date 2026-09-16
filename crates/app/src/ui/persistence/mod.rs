@@ -15,7 +15,7 @@ use app::terminal_tab::view::TerminalPane;
 use dirs::home_dir;
 use gpui::{App, AppContext, Axis, Context, Entity, Window};
 use gpui_component::resizable::ResizableState;
-use nmt_agent::team::identity::RoomId;
+use nmt_agent::team::model::RoomId;
 use nmt_config::config_dir_path;
 use nmt_config::local_state::{
     PaneNodeState, PaneSplitAxis, SessionState, TabState, WorkspaceState,

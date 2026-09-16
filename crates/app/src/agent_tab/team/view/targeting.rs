@@ -3,9 +3,8 @@ use std::collections::BTreeSet;
 use gpui::{Anchor, Entity, IntoElement};
 use gpui_component::button::Button;
 use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
-use nmt_agent::team::content::UserInput;
 use nmt_agent::team::discussion::{DiscussionMode, DiscussionState};
-use nmt_agent::team::identity::{DiscussionId, MemberId};
+use nmt_agent::team::model::{DiscussionId, MemberId, UserInput};
 use nmt_agent::team::room::Room;
 use rust_i18n::t;
 

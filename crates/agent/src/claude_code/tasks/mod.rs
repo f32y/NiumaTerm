@@ -20,7 +20,8 @@
 //! therefore still admitted from their own `local_agent` records. Monitors and
 //! workflows appear in the snapshot too and stay out by task type.
 
-mod aliases;
+pub(crate) use crate::claude_code::tasks::shells::shell_items;
+
 mod children;
 mod records;
 mod shells;
@@ -39,11 +40,10 @@ use crate::background_task::{
     BackgroundTaskTranscriptUpdate, BackgroundTaskUpdate,
 };
 use crate::claude_code::sessions::RestoredTask;
-use crate::claude_code::tasks::aliases::AliasTable;
 use crate::claude_code::tasks::children::ChildTranscripts;
 use crate::claude_code::tasks::records::{
-    admits_new_row, lifecycle_state, record_identifiers, refs_from, result_text, sidechain_preview,
-    stop_target,
+    AliasTable, admits_new_row, lifecycle_state, record_identifiers, refs_from, result_text,
+    sidechain_preview, stop_target,
 };
 use crate::claude_code::tasks::shells::ShellIndex;
 use crate::json::text_field;

@@ -5,7 +5,7 @@ use std::{cmp, fs, iter};
 use serde_json::Value;
 
 use crate::chat::SessionSummary;
-use crate::claude_code::sessions::paths::{project_dir, projects_root};
+use crate::claude_code::sessions::{project_dir, projects_root};
 
 /// Head window scanned for the first user prompt. Sessions can open with
 /// kilobytes of hook output and queue records before the first prompt, but

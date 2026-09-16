@@ -1,5 +1,6 @@
 #[cfg(test)]
-mod tests;
+#[path = "progress_tests.rs"]
+mod progress_tests;
 
 use std::fs::File;
 use std::io::{BufRead, BufReader};

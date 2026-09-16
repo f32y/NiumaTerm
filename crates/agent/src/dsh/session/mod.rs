@@ -28,8 +28,8 @@ use crate::background_task::{
 };
 use crate::chat::{
     Event, Item, Question, QuestionMode, QuestionRequest as ChatQuestionRequest,
-    SlashCommandArguments, SlashCommandInfo, SlashCommandRunPolicy, SlashCommandSource,
-    ThreadSettings,
+    QuestionResolution, SlashCommandArguments, SlashCommandInfo, SlashCommandRunPolicy,
+    SlashCommandSource, ThreadSettings,
 };
 use crate::dsh::api::ApiClient;
 use crate::dsh::events::Downlinks;
@@ -37,10 +37,10 @@ use crate::dsh::host::{self, Host, HostError};
 use crate::dsh::mapping::{self, ApprovalRequest, QuestionRequest, ToolTracker};
 use crate::dsh::models::ModelDirectory;
 use crate::dsh::projections::ProjectionTracker;
-use crate::dsh::session::controls::{COMPLETED_FRAME, Controls, question_id};
+use crate::dsh::session::controls::{COMPLETED_FRAME, Controls, Operation, question_id};
 use crate::dsh::session::loads::{ModelProfile, failed_read_events, load_conversation};
 use crate::dsh::workflows::WorkflowTracker;
-use crate::dsh::{commands, frames, history, presets, subagents};
+use crate::dsh::{catalogs, frames, history};
 use crate::workspace::AgentWorkspace;
 
 pub struct Session {
@@ -677,7 +677,8 @@ impl Session {
             return Vec::new();
         }
 
-        let snapshot = subagents::snapshot(&frame.catalog, &self.session_id, frame.activity);
+        let snapshot =
+            catalogs::subagent_snapshot(&frame.catalog, &self.session_id, frame.activity);
 
         self.subagent_modes = snapshot
             .tasks
@@ -719,7 +720,7 @@ impl Session {
             return Vec::new();
         }
 
-        vec![Event::Skills(commands::skills(&frame.skills))]
+        vec![Event::Skills(catalogs::skill_catalog(&frame.skills))]
     }
 
     fn on_presets(&self, payload: &Value) -> Vec<Event> {
@@ -732,7 +733,7 @@ impl Session {
         }
 
         let mut events = vec![Event::AgentPresets {
-            presets: presets::catalog(&frame.presets),
+            presets: catalogs::preset_catalog(&frame.presets),
             current: frame.current,
         }];
 
@@ -752,7 +753,7 @@ impl Session {
             return Vec::new();
         }
 
-        vec![Event::Commands(commands::catalog(&frame.commands))]
+        vec![Event::Commands(catalogs::command_catalog(&frame.commands))]
     }
 
     /// The harness republishes its whole pending inbox after every change,
@@ -869,6 +870,93 @@ impl Session {
 
         if let Some(message) = frame.read_error {
             events.push(Event::ItemStarted(Item::Error { text: message }));
+        }
+
+        events
+    }
+}
+
+impl Session {
+    pub(crate) fn expire_questions(&mut self) -> Vec<Event> {
+        self.controls.retire_questions();
+
+        self.pending_questions
+            .take()
+            .map(|request| Event::InputResolved {
+                id: question_id(&request),
+                resolution: QuestionResolution::Expired,
+            })
+            .into_iter()
+            .collect()
+    }
+
+    pub(crate) fn control_completed(&mut self, payload: &Value) -> Vec<Event> {
+        let Some(operation) = payload["id"]
+            .as_u64()
+            .and_then(|id| self.controls.complete(id))
+        else {
+            return Vec::new();
+        };
+
+        let error = payload["error"].as_str().map(str::to_string);
+
+        let mut events = Vec::new();
+
+        if let Some(message) = payload["stopError"].as_str() {
+            events.push(Event::Error {
+                message: format!("DeepSeek could not confirm stopping the turn: {message}"),
+                fatal: false,
+            });
+        }
+
+        match operation {
+            Operation::Approval(request) => {
+                if self.pending_approval.as_ref() == Some(&request) {
+                    match error {
+                        Some(message) => events.push(Event::Error {
+                            message,
+                            fatal: false,
+                        }),
+                        None => {
+                            self.pending_approval = None;
+
+                            events.push(Event::ApprovalResolved);
+                        }
+                    }
+                }
+            }
+            Operation::Questions { request, skipped } => {
+                if self.pending_questions.as_ref() == Some(&request) {
+                    let id = question_id(&request);
+
+                    match error {
+                        Some(message) => events.push(Event::InputSubmissionFailed { id, message }),
+                        None => {
+                            self.pending_questions = None;
+
+                            events.push(Event::InputResolved {
+                                id,
+                                resolution: if skipped {
+                                    QuestionResolution::Skipped
+                                } else {
+                                    QuestionResolution::Submitted {
+                                        message: None,
+                                        started_turn: false,
+                                    }
+                                },
+                            });
+                        }
+                    }
+                }
+            }
+            Operation::Interrupt | Operation::InterruptChild(_) => {
+                if let Some(message) = error {
+                    events.push(Event::Error {
+                        message,
+                        fatal: false,
+                    });
+                }
+            }
         }
 
         events

@@ -21,7 +21,7 @@ use crate::dsh::session::{
     OpenedConversation, PRESETS_FRAME, REPLAY_MESSAGES, SEARCH_FRAME, SKILLS_FRAME,
     SUBAGENT_TRANSCRIPT_FRAME, SUBAGENTS_FRAME, WORKFLOW_TRANSCRIPT_FRAME,
 };
-use crate::dsh::{commands, events, frames, history};
+use crate::dsh::{catalogs, events, frames, history};
 
 fn deliver_read(
     mut payload: Value,
@@ -50,7 +50,7 @@ pub(super) fn failed_read_events(payload: &Value, session_id: &str) -> Option<Ve
     let mut events = match payload["type"].as_str()? {
         MODELS_FRAME => return None,
         COMMANDS_FRAME => vec![Event::Commands(Vec::new())],
-        SKILLS_FRAME => vec![Event::Skills(commands::skills(&Value::Null))],
+        SKILLS_FRAME => vec![Event::Skills(catalogs::skill_catalog(&Value::Null))],
         SUBAGENT_TRANSCRIPT_FRAME => vec![Event::BackgroundTaskTranscript {
             key: BackgroundTaskKey::deepseek(payload["childSessionId"].as_str()?),
             update: BackgroundTaskTranscriptUpdate::state(
@@ -280,7 +280,10 @@ pub(super) fn load_commands(
         deliver_read(
             json!({ "type": COMMANDS_FRAME, "sessionId": session_id }),
             "commands",
-            client.call(commands::LIST_METHOD, commands::agent_args(&session_id)),
+            client.call(
+                catalogs::COMMAND_LIST_METHOD,
+                catalogs::agent_args(&session_id),
+            ),
             deliver.as_ref(),
         );
     });

@@ -1,7 +1,3 @@
-#[cfg(test)]
-#[path = "input_tests.rs"]
-mod input_tests;
-
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Weak, mpsc};
@@ -163,6 +159,14 @@ impl Drop for InputQueue {
 }
 
 impl InputQueue {
+    /// Whether every queued batch has been taken or cancelled. Test-only
+    /// visibility because the queue's contents are otherwise observed
+    /// through the receiver alone.
+    #[cfg(test)]
+    pub(super) fn is_empty(&self) -> bool {
+        self.queue.state.lock().pending.is_empty()
+    }
+
     pub(super) fn new() -> (Self, InputReceiver) {
         let queue = Arc::new(Queue {
             state: Mutex::new(QueueState {

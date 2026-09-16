@@ -3,21 +3,20 @@ pub use crate::team::session::DispatchError;
 pub(super) use crate::team::storage::records::digest;
 
 mod records;
-mod replay;
 mod validation;
 
 #[cfg(test)]
 mod tests;
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Seek, SeekFrom, Write};
+use std::io::{self, BufRead as _, BufReader, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use nmt_platform::filesystem::replace_file_durable;
 use tempfile::NamedTempFile;
 use thiserror::Error;
 
-use crate::team::identity::RoomId;
+use crate::team::model::RoomId;
 use crate::team::room::Room;
 use crate::team::storage::records::{Checkpoint, JournalRecord, RoomDelta, decode, encode};
 
@@ -140,7 +139,7 @@ impl RoomStore {
             .write(true)
             .open(directory.join("journal.jsonl"))?;
 
-        let replay = replay::replay(&mut journal, checkpoint)?;
+        let replay = replay(&mut journal, checkpoint)?;
 
         let truncated = if let Some(valid_bytes) = replay.truncated_at {
             journal.set_len(valid_bytes)?;
@@ -289,4 +288,93 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     temporary.as_file().sync_all()?;
 
     replace_file_durable(temporary.path(), path)
+}
+
+struct Replay {
+    room: Room,
+    sequence: u64,
+    digest: String,
+    truncated_at: Option<u64>,
+}
+
+fn replay(journal: &mut File, checkpoint: Checkpoint) -> Result<Replay, StorageError> {
+    let mut result = Replay {
+        room: checkpoint.room,
+        sequence: checkpoint.sequence,
+        digest: checkpoint.digest,
+        truncated_at: None,
+    };
+
+    let mut reader = BufReader::new(journal);
+    let mut offset = 0;
+    let mut prior: Option<(u64, String)> = None;
+    let mut line = Vec::new();
+
+    loop {
+        line.clear();
+
+        let count = reader.read_until(b'\n', &mut line)?;
+
+        if count == 0 {
+            break;
+        }
+
+        if line.last() != Some(&b'\n') {
+            result.truncated_at = Some(offset);
+
+            break;
+        }
+
+        line.pop();
+
+        let record: JournalRecord = decode(&line)?;
+        let record_digest = digest(&line);
+
+        if let Some((sequence, hash)) = &prior {
+            if sequence.checked_add(1) != Some(record.sequence) || &record.previous != hash {
+                return Err(StorageError::Invalid(
+                    "journal sequence or predecessor changed",
+                ));
+            }
+        } else if record.sequence == 0
+            || (record.sequence > result.sequence
+                && Some(record.sequence) != result.sequence.checked_add(1))
+        {
+            return Err(StorageError::Invalid(
+                "journal starts after missing records",
+            ));
+        }
+
+        if record.sequence == checkpoint.sequence && record_digest != result.digest {
+            return Err(StorageError::Invalid("checkpoint does not match journal"));
+        }
+
+        if record.sequence > result.sequence {
+            if Some(record.sequence) != result.sequence.checked_add(1)
+                || record.previous != result.digest
+            {
+                return Err(StorageError::Invalid(
+                    "journal does not continue checkpoint",
+                ));
+            }
+
+            record.changes.apply(&mut result.room);
+
+            validation::validate(&result.room)?;
+
+            result.sequence = record.sequence;
+            result.digest = record_digest.clone();
+        }
+
+        prior = Some((record.sequence, record_digest));
+        offset += count as u64;
+    }
+
+    if prior.is_some_and(|(sequence, _)| sequence < checkpoint.sequence) {
+        return Err(StorageError::Invalid(
+            "retained journal ends before checkpoint",
+        ));
+    }
+
+    Ok(result)
 }

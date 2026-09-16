@@ -2,8 +2,8 @@ use std::collections::BTreeSet;
 
 use crate::team::attempt::{AttemptState, BudgetScope};
 use crate::team::budget::ReservationState;
-use crate::team::content::Author;
 use crate::team::discussion::DiscussionState;
+use crate::team::model::Author;
 use crate::team::room::Room;
 use crate::team::storage::StorageError;
 
