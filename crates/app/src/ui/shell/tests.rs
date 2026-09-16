@@ -4,15 +4,17 @@ use std::rc::Rc;
 use app::agent_tab::AgentKind;
 use app::agent_tab::settings::AgentSettings;
 use app::agent_tab::team::{TeamPane, TeamRuntime};
-use gpui::{AppContext as _, TestAppContext};
+use gpui::{AnyWindowHandle, AppContext as _, EmptyView, TestAppContext, WeakEntity};
 use gpui_component::input::InputState;
 use nmt_agent::AgentWorkspace;
 use nmt_agent::team::session::TeamSession;
-use nmt_config::local_state::TabState;
+use nmt_config::local_state::{
+    SessionState, TabState, WindowLocalState, WindowState, WorkspaceState,
+};
 use tempfile::tempdir;
 
 use crate::ui::shell::close_confirm::should_confirm_close;
-use crate::ui::shell::{InlineRename, InlineRenameStyle, TabSurface};
+use crate::ui::shell::{InlineRename, InlineRenameStyle, TabSurface, WindowRegistry};
 
 struct InlineRenameProbe {
     input: gpui::Entity<InputState>,
@@ -198,4 +200,171 @@ fn marked_tab_search_wraps_past_the_active_tab() {
 
     assert_eq!(next_marked_position(&[false, false], 0), None);
     assert_eq!(next_marked_position(&[], 0), None);
+}
+
+fn window_state() -> WindowState {
+    WindowState {
+        x: 1.0,
+        y: 2.0,
+        width: 800.0,
+        height: 600.0,
+        maximized: false,
+    }
+}
+
+fn session_state() -> SessionState {
+    SessionState {
+        active_workspace: 0,
+        workspaces: vec![WorkspaceState {
+            name: "Workspace 1".into(),
+            cwd: Some("C:/Projects/example".into()),
+            additional_cwds: Vec::new(),
+            pinned: false,
+            active_tab: 0,
+            tabs: vec![TabState {
+                name: None,
+                user_named: false,
+                shell: Some("pwsh.exe".into()),
+                args: vec!["-NoLogo".into()],
+                cwd: Some("C:/Projects/example/repo".into()),
+                agent: None,
+                agent_profile: None,
+                team_room: None,
+                git_cwd: None,
+                panes: None,
+                grid_size: None,
+            }],
+        }],
+    }
+}
+
+fn remembered() -> WindowLocalState {
+    WindowLocalState {
+        window: Some(window_state()),
+        session: Some(session_state()),
+        sidebar_width: Some(220.0),
+    }
+}
+
+fn register_window(
+    cx: &mut TestAppContext,
+    registry: &mut WindowRegistry,
+    state: WindowLocalState,
+) -> AnyWindowHandle {
+    let handle = cx.add_window(|_, _| EmptyView).into();
+
+    registry.register(handle, WeakEntity::new_invalid(), state);
+
+    handle
+}
+
+#[gpui::test]
+fn closed_windows_leave_no_dispatch_targets_and_only_last_state_is_saved(cx: &mut TestAppContext) {
+    let mut registry = WindowRegistry::default();
+
+    let first = register_window(cx, &mut registry, remembered());
+    let second = register_window(cx, &mut registry, remembered());
+
+    registry.get_mut(second.window_id()).unwrap().sidebar_width = Some(300.0);
+
+    assert!(registry.close(first.window_id()));
+    assert!(registry.get(first.window_id()).is_none());
+    assert_eq!(registry.windows().len(), 1);
+    assert_eq!(
+        registry
+            .prioritized(Some(first.window_id()))
+            .next()
+            .unwrap()
+            .handle,
+        second
+    );
+
+    assert!(registry.close(second.window_id()));
+    assert!(!registry.close(first.window_id()));
+    assert!(registry.windows().is_empty());
+    assert_eq!(
+        registry.states().cloned().collect::<Vec<_>>(),
+        vec![WindowLocalState {
+            sidebar_width: Some(300.0),
+            ..remembered()
+        }]
+    );
+
+    cx.update(|cx| {
+        cx.set_global(registry);
+
+        assert!(!WindowRegistry::dispatch(cx, |_, _, _| {
+            panic!("closed windows must not receive events");
+        }));
+    });
+}
+
+#[gpui::test]
+fn reopening_replaces_retained_state_without_saving_a_duplicate(cx: &mut TestAppContext) {
+    let mut registry = WindowRegistry::default();
+
+    let first = register_window(cx, &mut registry, remembered());
+
+    registry.close(first.window_id());
+
+    let restored = registry.take_last_closed().unwrap();
+
+    assert_eq!(restored, remembered());
+    assert!(registry.take_last_closed().is_none());
+
+    let reopened = register_window(cx, &mut registry, restored);
+
+    assert_eq!(registry.states().count(), 1);
+
+    registry.close(reopened.window_id());
+
+    let fresh = WindowLocalState {
+        sidebar_width: Some(350.0),
+        ..WindowLocalState::default()
+    };
+
+    let replacement = register_window(cx, &mut registry, fresh.clone());
+
+    assert!(registry.take_last_closed().is_none());
+    assert_eq!(registry.windows()[0].handle, replacement);
+    assert_eq!(registry.states().cloned().collect::<Vec<_>>(), vec![fresh]);
+}
+
+#[gpui::test]
+fn dispatch_can_close_windows_and_stops_at_first_accepted_target(cx: &mut TestAppContext) {
+    let mut registry = WindowRegistry::default();
+
+    let windows: Vec<_> = (0..3)
+        .map(|_| register_window(cx, &mut registry, remembered()))
+        .collect();
+
+    assert_eq!(
+        registry
+            .prioritized(Some(windows[0].window_id()))
+            .map(|entry| entry.handle)
+            .collect::<Vec<_>>(),
+        vec![windows[0], windows[2], windows[1]]
+    );
+
+    cx.update(|cx| {
+        cx.set_global(registry);
+
+        let mut visited = Vec::new();
+
+        let accepted = WindowRegistry::dispatch(cx, |handle, _, cx| {
+            visited.push(handle);
+
+            cx.global_mut::<WindowRegistry>().close(handle.window_id());
+
+            handle == windows[1]
+        });
+
+        assert!(accepted);
+        assert_eq!(visited, windows[..2]);
+        assert_eq!(
+            cx.global::<WindowRegistry>().windows()[0].handle,
+            windows[2]
+        );
+        assert_eq!(cx.global::<WindowRegistry>().states().count(), 1);
+    });
 }

@@ -12,7 +12,7 @@ use rust_i18n::t;
 
 use crate::pane_tree::{PaneId, PaneNode};
 use crate::ui::main_view_background_opacity;
-use crate::ui::shell::{Shell, TabSurface};
+use crate::ui::shell::{AppWindow, TabSurface};
 
 /// The active tab's pane tree as nested resizable groups. The main surface
 /// owns the outer frame, so a single pane renders without another card.
@@ -23,7 +23,7 @@ pub(super) fn tab_surface_view(
     surface: &TabSurface,
     agent: Option<Entity<AgentPane>>,
     settings: Option<Entity<SettingsView>>,
-    cx: &mut Context<Shell>,
+    cx: &mut Context<AppWindow>,
 ) -> AnyElement {
     match surface {
         TabSurface::Git(tab) => {
@@ -92,7 +92,7 @@ fn render_pane_node(
     node: &PaneNode<Entity<TerminalPane>>,
     focused: PaneId,
     multi: bool,
-    cx: &mut Context<Shell>,
+    cx: &mut Context<AppWindow>,
 ) -> AnyElement {
     match node {
         PaneNode::Leaf { id, pane, .. } => {

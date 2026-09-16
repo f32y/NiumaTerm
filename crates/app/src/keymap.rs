@@ -27,7 +27,7 @@ use crate::ui::{
 /// displays, and the key equivalent the platform then reserves for it, from the
 /// binding already registered for its action.
 pub(crate) fn bind(cx: &mut App) {
-    cx.bind_keys(shell_bindings());
+    cx.bind_keys(window_bindings());
 
     cx.bind_keys(terminal_bindings());
 
@@ -37,70 +37,70 @@ pub(crate) fn bind(cx: &mut App) {
 
 /// Chords the window chrome answers: tabs, workspaces, panes and settings.
 #[cfg(windows)]
-fn shell_bindings() -> Vec<KeyBinding> {
+fn window_bindings() -> Vec<KeyBinding> {
     vec![
-        KeyBinding::new("ctrl-shift-t", NewTab, Some("Shell")),
-        KeyBinding::new("ctrl-shift-w", CloseTab, Some("Shell")),
-        KeyBinding::new("ctrl-tab", NextTab, Some("Shell")),
-        KeyBinding::new("ctrl-shift-tab", PrevTab, Some("Shell")),
-        KeyBinding::new("ctrl-shift-n", NewWorkspace, Some("Shell")),
-        KeyBinding::new("ctrl-alt-n", NewWindow, Some("Shell")),
-        KeyBinding::new("ctrl-pagedown", NextWorkspace, Some("Shell")),
-        KeyBinding::new("ctrl-pageup", PrevWorkspace, Some("Shell")),
-        KeyBinding::new("ctrl-shift-b", ToggleSidebar, Some("Shell")),
-        KeyBinding::new("ctrl-,", ShowSettings, Some("Shell")),
-        KeyBinding::new("ctrl-shift-r", NewRemoteTab, Some("Shell")),
-        KeyBinding::new("ctrl-shift-a", NewAgentTab, Some("Shell")),
+        KeyBinding::new("ctrl-shift-t", NewTab, Some("AppWindow")),
+        KeyBinding::new("ctrl-shift-w", CloseTab, Some("AppWindow")),
+        KeyBinding::new("ctrl-tab", NextTab, Some("AppWindow")),
+        KeyBinding::new("ctrl-shift-tab", PrevTab, Some("AppWindow")),
+        KeyBinding::new("ctrl-shift-n", NewWorkspace, Some("AppWindow")),
+        KeyBinding::new("ctrl-alt-n", NewWindow, Some("AppWindow")),
+        KeyBinding::new("ctrl-pagedown", NextWorkspace, Some("AppWindow")),
+        KeyBinding::new("ctrl-pageup", PrevWorkspace, Some("AppWindow")),
+        KeyBinding::new("ctrl-shift-b", ToggleSidebar, Some("AppWindow")),
+        KeyBinding::new("ctrl-,", ShowSettings, Some("AppWindow")),
+        KeyBinding::new("ctrl-shift-r", NewRemoteTab, Some("AppWindow")),
+        KeyBinding::new("ctrl-shift-a", NewAgentTab, Some("AppWindow")),
         // Split-pane creation and keyboard resize. These consume the xterm
         // `\x1b[1;7A..D` / `\x1b[1;4A..D` arrow sequences before the terminal
         // encodes them (accepted conflict, see the terminal-split-panes
         // change).
-        KeyBinding::new("ctrl-alt-up", SplitUp, Some("Shell")),
-        KeyBinding::new("ctrl-alt-down", SplitDown, Some("Shell")),
-        KeyBinding::new("ctrl-alt-left", SplitLeft, Some("Shell")),
-        KeyBinding::new("ctrl-alt-right", SplitRight, Some("Shell")),
-        KeyBinding::new("alt-shift-up", ResizePaneUp, Some("Shell")),
-        KeyBinding::new("alt-shift-down", ResizePaneDown, Some("Shell")),
-        KeyBinding::new("alt-shift-left", ResizePaneLeft, Some("Shell")),
-        KeyBinding::new("alt-shift-right", ResizePaneRight, Some("Shell")),
+        KeyBinding::new("ctrl-alt-up", SplitUp, Some("AppWindow")),
+        KeyBinding::new("ctrl-alt-down", SplitDown, Some("AppWindow")),
+        KeyBinding::new("ctrl-alt-left", SplitLeft, Some("AppWindow")),
+        KeyBinding::new("ctrl-alt-right", SplitRight, Some("AppWindow")),
+        KeyBinding::new("alt-shift-up", ResizePaneUp, Some("AppWindow")),
+        KeyBinding::new("alt-shift-down", ResizePaneDown, Some("AppWindow")),
+        KeyBinding::new("alt-shift-left", ResizePaneLeft, Some("AppWindow")),
+        KeyBinding::new("alt-shift-right", ResizePaneRight, Some("AppWindow")),
     ]
 }
 
 /// The same commands on the chords macOS applications use for them. Remote
 /// sessions are absent because the host they connect to is Windows-only.
 #[cfg(target_os = "macos")]
-fn shell_bindings() -> Vec<KeyBinding> {
+fn window_bindings() -> Vec<KeyBinding> {
     vec![
-        KeyBinding::new("cmd-t", NewTab, Some("Shell")),
-        KeyBinding::new("cmd-w", CloseTab, Some("Shell")),
+        KeyBinding::new("cmd-t", NewTab, Some("AppWindow")),
+        KeyBinding::new("cmd-w", CloseTab, Some("AppWindow")),
         // Both spellings of tab cycling: the bracket chords are what a tabbed
         // macOS window offers, and Ctrl-Tab is what anyone arriving from
         // another terminal reaches for.
-        KeyBinding::new("cmd-shift-]", NextTab, Some("Shell")),
-        KeyBinding::new("cmd-shift-[", PrevTab, Some("Shell")),
-        KeyBinding::new("ctrl-tab", NextTab, Some("Shell")),
-        KeyBinding::new("ctrl-shift-tab", PrevTab, Some("Shell")),
-        KeyBinding::new("cmd-n", NewWindow, Some("Shell")),
-        KeyBinding::new("cmd-shift-n", NewWorkspace, Some("Shell")),
+        KeyBinding::new("cmd-shift-]", NextTab, Some("AppWindow")),
+        KeyBinding::new("cmd-shift-[", PrevTab, Some("AppWindow")),
+        KeyBinding::new("ctrl-tab", NextTab, Some("AppWindow")),
+        KeyBinding::new("ctrl-shift-tab", PrevTab, Some("AppWindow")),
+        KeyBinding::new("cmd-n", NewWindow, Some("AppWindow")),
+        KeyBinding::new("cmd-shift-n", NewWorkspace, Some("AppWindow")),
         // Apple keyboards have no PageUp/PageDown, so switching workspaces
         // rides the arrow keys rather than the page keys the Windows table
         // uses. Control-Command keeps it clear of the split chords below.
-        KeyBinding::new("ctrl-cmd-right", NextWorkspace, Some("Shell")),
-        KeyBinding::new("ctrl-cmd-left", PrevWorkspace, Some("Shell")),
-        KeyBinding::new("cmd-shift-b", ToggleSidebar, Some("Shell")),
-        KeyBinding::new("cmd-,", ShowSettings, Some("Shell")),
-        KeyBinding::new("cmd-shift-a", NewAgentTab, Some("Shell")),
+        KeyBinding::new("ctrl-cmd-right", NextWorkspace, Some("AppWindow")),
+        KeyBinding::new("ctrl-cmd-left", PrevWorkspace, Some("AppWindow")),
+        KeyBinding::new("cmd-shift-b", ToggleSidebar, Some("AppWindow")),
+        KeyBinding::new("cmd-,", ShowSettings, Some("AppWindow")),
+        KeyBinding::new("cmd-shift-a", NewAgentTab, Some("AppWindow")),
         // Splitting takes Command-Option rather than the Windows table's
         // Control-Option, which a macOS terminal encodes and sends to the
         // shell as an escape sequence.
-        KeyBinding::new("cmd-alt-up", SplitUp, Some("Shell")),
-        KeyBinding::new("cmd-alt-down", SplitDown, Some("Shell")),
-        KeyBinding::new("cmd-alt-left", SplitLeft, Some("Shell")),
-        KeyBinding::new("cmd-alt-right", SplitRight, Some("Shell")),
-        KeyBinding::new("alt-shift-up", ResizePaneUp, Some("Shell")),
-        KeyBinding::new("alt-shift-down", ResizePaneDown, Some("Shell")),
-        KeyBinding::new("alt-shift-left", ResizePaneLeft, Some("Shell")),
-        KeyBinding::new("alt-shift-right", ResizePaneRight, Some("Shell")),
+        KeyBinding::new("cmd-alt-up", SplitUp, Some("AppWindow")),
+        KeyBinding::new("cmd-alt-down", SplitDown, Some("AppWindow")),
+        KeyBinding::new("cmd-alt-left", SplitLeft, Some("AppWindow")),
+        KeyBinding::new("cmd-alt-right", SplitRight, Some("AppWindow")),
+        KeyBinding::new("alt-shift-up", ResizePaneUp, Some("AppWindow")),
+        KeyBinding::new("alt-shift-down", ResizePaneDown, Some("AppWindow")),
+        KeyBinding::new("alt-shift-left", ResizePaneLeft, Some("AppWindow")),
+        KeyBinding::new("alt-shift-right", ResizePaneRight, Some("AppWindow")),
     ]
 }
 

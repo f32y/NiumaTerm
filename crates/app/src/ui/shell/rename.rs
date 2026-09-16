@@ -10,7 +10,7 @@ use gpui::{Context, Entity, Window};
 use gpui_component::input::{InputEvent, InputState};
 
 use crate::tabs::TabId;
-use crate::ui::shell::Shell;
+use crate::ui::shell::AppWindow;
 use crate::workspace::WorkspaceId;
 
 /// The in-flight inline renames. A rename is identified by the row it belongs
@@ -27,9 +27,9 @@ impl InlineRenameSession {
         id: WorkspaceId,
         current: String,
         window: &mut Window,
-        cx: &mut Context<Shell>,
+        cx: &mut Context<AppWindow>,
     ) {
-        let input = rename_input(current, Shell::finish_workspace_rename, window, cx);
+        let input = rename_input(current, AppWindow::finish_workspace_rename, window, cx);
 
         self.workspace = Some((id, input));
     }
@@ -39,9 +39,9 @@ impl InlineRenameSession {
         id: TabId,
         current: String,
         window: &mut Window,
-        cx: &mut Context<Shell>,
+        cx: &mut Context<AppWindow>,
     ) {
-        let input = rename_input(current, Shell::finish_tab_rename, window, cx);
+        let input = rename_input(current, AppWindow::finish_tab_rename, window, cx);
 
         self.tab = Some((id, input));
     }
@@ -79,9 +79,9 @@ impl InlineRenameSession {
 /// hosting row, which calls `finish` with commit = false.
 fn rename_input(
     current: String,
-    finish: fn(&mut Shell, bool, &mut Window, &mut Context<Shell>),
+    finish: fn(&mut AppWindow, bool, &mut Window, &mut Context<AppWindow>),
     window: &mut Window,
-    cx: &mut Context<Shell>,
+    cx: &mut Context<AppWindow>,
 ) -> Entity<InputState> {
     let input = cx.new(|cx| InputState::new(window, cx).default_value(current));
 

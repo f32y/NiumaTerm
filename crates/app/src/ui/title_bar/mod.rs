@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests;
 
+use app::design::TITLE_BAR_HEIGHT;
 use gpui::prelude::*;
 use gpui::{AnyElement, App, Context, Div, Entity, SharedString, div, px};
 use gpui_component::modern_menu::ModernMenu;
@@ -17,7 +18,7 @@ use crate::ui::git_status::{GitStatusModel, GitStatusView};
 use crate::ui::platform_style::{Host, PlatformStyle as _};
 use crate::ui::shell::{ToggleBackgroundTasks, ToggleGitSidebar, ToggleWorkflows};
 use crate::ui::{
-    AppSettings, NewWindow, NewWorkspace, Shell, ShowSettings, ToggleSidebar, modern_dropdown,
+    AppSettings, AppWindow, NewWindow, NewWorkspace, ShowSettings, ToggleSidebar, modern_dropdown,
 };
 #[cfg(windows)]
 use crate::update::check;
@@ -81,12 +82,6 @@ pub(crate) struct PanelToggle {
 /// horizontal scroll stays reachable at the window's minimum width.
 const TAB_STRIP_MIN_WIDTH: f32 = 120.0;
 
-/// The bar is taller than the Fluent standard strip because it carries
-/// controls and a session heading rather than a title alone. A host that
-/// draws its own window buttons over the bar measures their inset from this
-/// height, since it would otherwise center them in a shorter strip.
-pub(crate) const TITLE_BAR_HEIGHT: f32 = 44.0;
-
 const TITLE_BAR_BUTTON_GAP: f32 = 4.0;
 
 /// Four controls, three internal gaps, and a trailing gap stay reachable
@@ -106,13 +101,13 @@ const TITLE_BAR_CHIP_PADDING_Y: f32 = 2.0;
 const TITLE_BAR_CHIP_ICON: f32 = 11.0;
 
 impl WindowTitleBar {
-    pub(crate) fn new(git_model: Entity<GitStatusModel>, cx: &mut Context<Shell>) -> Self {
+    pub(crate) fn new(git_model: Entity<GitStatusModel>, cx: &mut Context<AppWindow>) -> Self {
         Self {
             git_status: cx.new(|cx| GitStatusView::new(git_model, cx)),
         }
     }
 
-    pub(crate) fn render(&self, inputs: TitleBarInputs, cx: &mut Context<Shell>) -> TitleBar {
+    pub(crate) fn render(&self, inputs: TitleBarInputs, cx: &mut Context<AppWindow>) -> TitleBar {
         let TitleBarInputs {
             sidebar_width,
             sidebar_collapsed,
@@ -276,7 +271,7 @@ impl WindowTitleBar {
 /// The leading control of the title bar. It carries the commands that have
 /// no chrome of their own; anything with a visible button of its own stays
 /// on that button rather than being listed here as well.
-fn app_menu_button(cx: &mut Context<Shell>) -> impl IntoElement {
+fn app_menu_button(cx: &mut Context<AppWindow>) -> impl IntoElement {
     let shell = cx.entity();
 
     modern_dropdown(
@@ -328,7 +323,7 @@ fn session_heading(
 /// the number of agents running right now in the active tab, which is the one
 /// thing about a workflow worth watching without opening the view; a run with
 /// nothing in flight shows the icon alone rather than a zero.
-fn workflows_button(toggle: PanelToggle, cx: &mut Context<Shell>) -> impl IntoElement {
+fn workflows_button(toggle: PanelToggle, cx: &mut Context<AppWindow>) -> impl IntoElement {
     let PanelToggle { running, open } = toggle;
 
     let label = t!("workflows-running-agents", count = running).into_owned();
@@ -351,7 +346,7 @@ fn workflows_button(toggle: PanelToggle, cx: &mut Context<Shell>) -> impl IntoEl
 /// active tab; a session with none in flight shows the icon alone rather than
 /// a zero. The `ToggleBackgroundTasks` action still reaches the view while the
 /// control is hidden.
-fn background_tasks_button(toggle: PanelToggle, cx: &mut Context<Shell>) -> impl IntoElement {
+fn background_tasks_button(toggle: PanelToggle, cx: &mut Context<AppWindow>) -> impl IntoElement {
     let PanelToggle { running, open } = toggle;
 
     let label = match running {
@@ -412,7 +407,7 @@ impl IconNamed for SideBarIcon {
 /// The application menu: opening things, then the two application-wide
 /// commands. Every entry here is reachable by keyboard as well, so the menu is
 /// a place to find them rather than the only way to reach them.
-fn app_menu(menu: ModernMenu, shell: &Entity<Shell>, _cx: &mut App) -> ModernMenu {
+fn app_menu(menu: ModernMenu, shell: &Entity<AppWindow>, _cx: &mut App) -> ModernMenu {
     let window_shell = shell.clone();
     let workspace_shell = shell.clone();
     let settings_shell = shell.clone();

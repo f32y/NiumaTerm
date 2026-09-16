@@ -18,7 +18,7 @@ pub(crate) enum InlineRenameStyle {
     Workspace,
 }
 
-/// Presentation for a Shell-owned rename input. Enter and blur are handled by
+/// Presentation for a AppWindow-owned rename input. Enter and blur are handled by
 /// the input subscription; this element only protects row activation and sends
 /// Escape to the caller's cancellation path.
 #[derive(IntoElement)]

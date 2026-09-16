@@ -13,7 +13,7 @@ use gpui::{App, Context, Entity};
 
 use crate::ui::git_status::GitStatusModel;
 use crate::ui::right_panel::{RightPanel, RightPanelKind};
-use crate::ui::shell::Shell;
+use crate::ui::shell::AppWindow;
 
 /// Controls the right-side task views and their title-bar entry points.
 /// The title-bar Git summary follows the active workspace independently.
@@ -76,7 +76,7 @@ impl RightPanelController {
     }
 
     /// Hand the git model the directory to watch; it no-ops when unchanged.
-    pub(super) fn set_git_target(&self, cwd: Option<String>, cx: &mut Context<Shell>) {
+    pub(super) fn set_git_target(&self, cwd: Option<String>, cx: &mut Context<AppWindow>) {
         self.git_model
             .update(cx, |model, cx| model.set_target_cwd(cwd, cx));
     }
@@ -104,7 +104,7 @@ impl RightPanelController {
 
     /// Show `kind`, or close the area when it was already showing. Reports
     /// whether the area ended up open.
-    pub(super) fn select(&self, kind: RightPanelKind, cx: &mut Context<Shell>) -> bool {
+    pub(super) fn select(&self, kind: RightPanelKind, cx: &mut Context<AppWindow>) -> bool {
         self.panel.update(cx, |panel, cx| panel.select(kind, cx))
     }
 }

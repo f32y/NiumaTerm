@@ -96,8 +96,8 @@ pub struct CursorConfig {
 static TESTING_MODE: AtomicBool = AtomicBool::new(false);
 
 /// Select the isolated `Test` configuration directory before configuration is loaded.
-pub fn enable_testing_mode() {
-    TESTING_MODE.store(true, Ordering::Relaxed);
+pub fn set_testing_mode(enabled: bool) {
+    TESTING_MODE.store(enabled, Ordering::Relaxed);
 }
 
 fn config_dir_for_mode(path: PathBuf, testing: bool) -> PathBuf {
@@ -299,7 +299,7 @@ impl Default for CursorConfig {
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
 
-pub fn init(config: Config) {
+pub fn init_from(config: Config) {
     let colors = config.colors;
 
     assert!(

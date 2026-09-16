@@ -9,7 +9,7 @@ use nmt_config::config_dir_path;
 use nmt_config::profile::Profile;
 use rust_i18n::t;
 
-use crate::ui::{AppSettings, Shell};
+use crate::ui::{AppSettings, AppWindow};
 
 /// A shell tab's mark: the prompt itself, with no box drawn around it. At the
 /// size a tab strip and a menu row set their glyphs, a box spends most of the
@@ -106,7 +106,7 @@ pub(crate) fn profile_root_choices(
 /// expose terminal and agent profiles in the same order.
 pub(crate) fn new_tab_menu(
     mut menu: ModernMenu,
-    shell: &Entity<Shell>,
+    shell: &Entity<AppWindow>,
     cx: &mut App,
 ) -> ModernMenu {
     let profiles = cx.global::<AppSettings>().config().profiles.list.clone();

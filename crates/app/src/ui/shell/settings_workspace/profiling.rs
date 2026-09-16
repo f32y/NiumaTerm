@@ -7,10 +7,10 @@ use nmt_profiling::enabled;
 use tracing::info;
 
 use crate::agent_updates::AgentUpdates;
-use crate::ui::shell::{Shell, ShowSettings};
+use crate::ui::shell::{AppWindow, ShowSettings};
 
 /// Exercise native window drawing only in an explicitly enabled isolated run.
-pub(crate) fn start_settings_profile(window: &mut Window, cx: &mut Context<Shell>) {
+pub(crate) fn start_settings_profile(window: &mut Window, cx: &mut Context<AppWindow>) {
     if !enabled()
         || !cx.global::<AgentUpdates>().testing()
         || env::var_os("NMT_SETTINGS_SCROLL_PROFILE").is_none()

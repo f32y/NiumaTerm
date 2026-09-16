@@ -4,10 +4,10 @@ use std::rc::Rc;
 use gpui::{Bounds, Pixels, TestAppContext};
 
 use crate::ui::platform_style::{Host, PlatformStyle as _};
+use crate::ui::shell::MIN_WINDOW_WIDTH;
 use crate::ui::title_bar::{
     TAB_STRIP_MIN_WIDTH, title_bar_git_summary, title_bar_leading_region, title_bar_trailing_region,
 };
-use crate::window::MIN_WINDOW_WIDTH;
 
 /// Bounds captured from a laid-out title bar, keyed by group name.
 type TitleBarProbe = Rc<RefCell<Vec<(&'static str, Bounds<Pixels>)>>>;

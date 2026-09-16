@@ -11,32 +11,30 @@ use gpui::App;
 use nmt_profiling::transcript::flush;
 
 /// Schedule reporting on the same thread that owns transcript samples.
+#[cfg(enable_profiling)]
 pub(crate) fn initialize(cx: &mut App) {
-    #[cfg(enable_profiling)]
-    {
-        if !nmt_profiling::enabled() {
-            return;
-        }
-
-        tracing::info!(target: "transcript_perf", "transcript profiling enabled; timings include instrumentation; allocation bytes are traffic, not live memory");
-
-        cx.spawn(async move |cx| {
-            loop {
-                cx.background_executor().timer(Duration::from_secs(1)).await;
-
-                cx.update(|_| flush());
-            }
-        })
-        .detach();
-
-        cx.on_app_quit(|_| {
-            flush();
-
-            async {}
-        })
-        .detach();
+    if !nmt_profiling::enabled() {
+        return;
     }
 
-    #[cfg(not(enable_profiling))]
-    let _ = cx;
+    tracing::info!(target: "transcript_perf", "transcript profiling enabled; timings include instrumentation; allocation bytes are traffic, not live memory");
+
+    cx.spawn(async move |cx| {
+        loop {
+            cx.background_executor().timer(Duration::from_secs(1)).await;
+
+            cx.update(|_| flush());
+        }
+    })
+    .detach();
+
+    cx.on_app_quit(|_| {
+        flush();
+
+        async {}
+    })
+    .detach();
 }
+
+#[cfg(not(enable_profiling))]
+pub(crate) fn initialize(_: &mut App) {}
