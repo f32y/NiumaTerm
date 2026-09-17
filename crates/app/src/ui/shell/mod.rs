@@ -2922,7 +2922,7 @@ impl AppWindow {
             let tabs = self.workspaces.tabs_of(summary.id)?;
 
             for (tab_index, tab) in tabs.list().items().iter().enumerate() {
-                if let Some(pane) = tab.surface().agent()
+                if tab.surface().agent().is_some()
                     && tab
                         .surface()
                         .agent_session()
@@ -2933,7 +2933,7 @@ impl AppWindow {
                         workspace_index,
                         tab_id: tab.id(),
                         tab_index,
-                        target: AgentRouteTarget::Agent(pane.clone()),
+                        terminal_pane_id: None,
                     });
                 }
 
@@ -2944,10 +2944,7 @@ impl AppWindow {
                             workspace_index,
                             tab_id: tab.id(),
                             tab_index,
-                            target: AgentRouteTarget::Terminal {
-                                pane_id,
-                                pane: pane.clone(),
-                            },
+                            terminal_pane_id: Some(pane_id),
                         });
                     }
                 }
@@ -2964,15 +2961,8 @@ impl AppWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self
-            .agent_notifications
-            .agent_monitor
-            .notification(route)
-            .is_some_and(|notification| notification.id == notification_id && !notification.read)
-        {
-            return false;
-        }
-
+        // A delivered notification can be clicked after it was acknowledged
+        // or replaced. Its route still identifies the tab while that tab lives.
         let Some(location) = self.locate_agent_route(route, cx) else {
             return false;
         };
@@ -2995,25 +2985,16 @@ impl AppWindow {
 
         window.activate_window();
 
-        match location.target {
-            AgentRouteTarget::Terminal { pane_id, pane } => {
-                self.workspaces
-                    .active_tabs_mut()
-                    .active_mut()
-                    .live_mut()
-                    .tree_mut()
-                    .set_focused(pane_id);
-
-                let handle = pane.read(cx).focus.clone();
-
-                window.focus(&handle, cx);
-            }
-            AgentRouteTarget::Agent(pane) => {
-                pane.update(cx, |pane, cx| pane.focus(window, cx));
-            }
+        if let Some(pane_id) = location.terminal_pane_id {
+            self.workspaces
+                .active_tabs_mut()
+                .active_mut()
+                .live_mut()
+                .tree_mut()
+                .set_focused(pane_id);
         }
 
-        self.on_active_tab_changed(window, cx);
+        self.show_active_tab(window, cx);
 
         self.agent_notifications
             .acknowledge(route, notification_id, cx);
@@ -3247,15 +3228,7 @@ struct AgentRouteLocation {
     workspace_index: usize,
     tab_id: TabId,
     tab_index: usize,
-    target: AgentRouteTarget,
-}
-
-enum AgentRouteTarget {
-    Terminal {
-        pane_id: PaneId,
-        pane: Entity<TerminalPane>,
-    },
-    Agent(Entity<AgentPane>),
+    terminal_pane_id: Option<PaneId>,
 }
 
 impl Render for AppWindow {
