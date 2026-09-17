@@ -256,7 +256,7 @@ fn replacement_rejects_old_completion_settings_and_input_events() {
 }
 
 #[test]
-fn provider_busy_input_keeps_its_existing_delivery_boundary() {
+fn provider_busy_input_waits_for_confirmation_across_turn_boundaries() {
     for kind in [AgentKind::Codex, AgentKind::Claude, AgentKind::DeepSeek] {
         let mut session = started(
             kind,
@@ -277,12 +277,24 @@ fn provider_busy_input_keeps_its_existing_delivery_boundary() {
             session.conversation.borrow().content.entries().iter().filter(|entry| matches!(&entry.item, Item::UserMessage { text: Some(text) } if text == "follow-up")).count()
         };
 
-        assert_eq!(count(&session), usize::from(kind == AgentKind::Codex));
+        assert_eq!(count(&session), 0);
 
         apply(&mut session, Event::TurnStarted);
 
-        assert_eq!(count(&session), usize::from(kind != AgentKind::DeepSeek));
+        assert_eq!(count(&session), 0);
         assert!(session.delivery.pop_confirmed().is_none());
+
+        for _ in 0..2 {
+            apply(
+                &mut session,
+                Event::ItemStarted(Item::UserMessage {
+                    text: Some("follow-up".into()),
+                }),
+            );
+
+            assert_eq!(count(&session), 1);
+            assert!(session.delivery.pending().is_empty());
+        }
     }
 }
 

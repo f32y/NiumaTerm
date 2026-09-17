@@ -24,7 +24,7 @@ fn pending(id: &str, text: &str) -> QueuedPrompt {
 }
 
 #[test]
-fn running_turn_messages_wait_for_agent_output_or_completion() {
+fn running_turn_messages_wait_for_their_own_echo() {
     let mut delivery = MessageDelivery::new(AgentKind::Codex);
 
     assert_eq!(
@@ -45,16 +45,17 @@ fn running_turn_messages_wait_for_agent_output_or_completion() {
 
     assert!(drain(&mut delivery).is_empty());
 
-    delivery.agent_message();
-
-    assert_eq!(drain(&mut delivery), ["second", "third"]);
+    assert_eq!(delivery.echoed("second").as_deref(), Some("second"));
+    assert_eq!(delivery.pending().len(), 1);
+    assert_eq!(delivery.echoed("third").as_deref(), Some("third"));
     assert!(drain(&mut delivery).is_empty());
 
     submit(&mut delivery, SendOutcome::Steered, "fourth");
 
     delivery.completed();
 
-    assert_eq!(drain(&mut delivery), ["fourth"]);
+    assert!(drain(&mut delivery).is_empty());
+    assert_eq!(delivery.pending()[0].text, "fourth");
     assert!(!delivery.is_active());
 }
 
@@ -65,8 +66,7 @@ fn following_turn_messages_are_not_published_in_the_previous_turn() {
     submit(&mut delivery, SendOutcome::StartedTurn, "first");
 
     submit(&mut delivery, SendOutcome::Steered, "second");
-
-    delivery.agent_message();
+    submit(&mut delivery, SendOutcome::Steered, "third");
 
     assert!(drain(&mut delivery).is_empty());
 
@@ -76,9 +76,26 @@ fn following_turn_messages_are_not_published_in_the_previous_turn() {
 
     assert!(delivery.provider_started());
     assert_eq!(delivery.turn(), 2);
-    assert_eq!(drain(&mut delivery), ["second"]);
+    assert!(drain(&mut delivery).is_empty());
+    assert_eq!(delivery.echoed("second").as_deref(), Some("second"));
+    assert_eq!(delivery.pending()[0].text, "third");
     assert!(!delivery.provider_started());
     assert_eq!(delivery.turn(), 2);
+}
+
+#[test]
+fn the_opening_echo_does_not_consume_an_identical_queued_prompt() {
+    for kind in [AgentKind::Codex, AgentKind::Claude] {
+        let mut delivery = MessageDelivery::new(kind);
+
+        submit(&mut delivery, SendOutcome::StartedTurn, "continue");
+        submit(&mut delivery, SendOutcome::Steered, "continue");
+
+        assert!(delivery.echoed("continue").is_none());
+        assert_eq!(delivery.pending().len(), 1);
+        assert_eq!(delivery.echoed("continue").as_deref(), Some("continue"));
+        assert!(delivery.pending().is_empty());
+    }
 }
 
 #[test]
@@ -99,7 +116,8 @@ fn command_turns_do_not_claim_prompts_waiting_for_a_provider_opened_turn() {
     delivery.completed();
 
     assert!(delivery.provider_started());
-    assert_eq!(drain(&mut delivery), ["second"]);
+    assert!(drain(&mut delivery).is_empty());
+    assert_eq!(delivery.echoed("second").as_deref(), Some("second"));
 }
 
 #[test]
@@ -122,8 +140,6 @@ fn snapshots_assign_ids_then_claim_disappeared_prompts_in_order() {
             .is_empty()
     );
     assert_eq!(delivery.pending()[2].id.as_deref(), Some("3"));
-
-    delivery.agent_message();
 
     delivery.completed();
 

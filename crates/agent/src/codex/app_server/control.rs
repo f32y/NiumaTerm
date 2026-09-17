@@ -26,6 +26,7 @@ pub(super) enum ControlOperation {
     Query(QueryKind),
     Other,
     ThreadRequest,
+    Steer { next_turn_params: Value },
     Command(String),
     ThreadName,
 }
@@ -90,6 +91,14 @@ impl ControlState {
             .operations
             .values()
             .any(|operation| matches!(operation, ControlOperation::Command(_)))
+    }
+
+    pub(super) fn cancel_steering_retries(&mut self) {
+        for operation in self.pending.operations.values_mut() {
+            if matches!(operation, ControlOperation::Steer { .. }) {
+                *operation = ControlOperation::ThreadRequest;
+            }
+        }
     }
 
     pub(super) fn reset_thread(&mut self) {

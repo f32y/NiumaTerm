@@ -66,6 +66,63 @@ fn disconnected_controls_reject_without_consuming_approval_or_switching_state() 
 }
 
 #[test]
+fn steering_retries_require_an_explicit_refusal_and_an_active_owner() {
+    for response in [
+        json!({"result": {"turnId": "turn"}}),
+        json!({"error": {"message": "request timed out", "data": {"requestTimedOut": true}}}),
+        json!({"error": {"message": "input must not be empty"}}),
+    ] {
+        let mut session = disconnected_session();
+
+        let id = session.alloc_rpc_id();
+
+        session.control.track(
+            id,
+            ControlOperation::Steer {
+                next_turn_params: json!({"threadId": "parent"}),
+            },
+        );
+
+        let next_id = session.control.next_id();
+
+        let mut response = response;
+
+        response["id"] = json!(id);
+
+        session.process(response.clone());
+        session.process(response);
+
+        assert_eq!(session.control.next_id(), next_id);
+        assert!(session.control.is_empty());
+    }
+
+    for retire in [
+        ControlState::cancel_steering_retries,
+        ControlState::reset_thread,
+        ControlState::close,
+    ] {
+        let mut session = disconnected_session();
+
+        let id = session.alloc_rpc_id();
+
+        session.control.track(
+            id,
+            ControlOperation::Steer {
+                next_turn_params: json!({"threadId": "old"}),
+            },
+        );
+
+        retire(&mut session.control);
+
+        let next_id = session.control.next_id();
+
+        session.process(json!({"id": id, "error": {"message": "no active turn to steer"}}));
+
+        assert_eq!(session.control.next_id(), next_id);
+    }
+}
+
+#[test]
 fn history_refresh_rejects_old_pages_and_keeps_the_latest_cursor() {
     let mut session = disconnected_session();
 
