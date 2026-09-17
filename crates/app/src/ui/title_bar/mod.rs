@@ -341,8 +341,8 @@ fn workflows_button(toggle: PanelToggle, cx: &mut Context<AppWindow>) -> impl In
         }))
 }
 
-/// Upper-right `Background Tasks` control, revealed once a tab has spawned
-/// background work. It carries the number of tasks running right now in the
+/// Upper-right `Background Tasks` control, shown when the active session has
+/// running or finished children. It carries the number of tasks running in the
 /// active tab; a session with none in flight shows the icon alone rather than
 /// a zero. The `ToggleBackgroundTasks` action still reaches the view while the
 /// control is hidden.
