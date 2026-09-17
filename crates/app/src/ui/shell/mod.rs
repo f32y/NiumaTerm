@@ -59,6 +59,7 @@ use nmt_agent::{
 use nmt_config::local_state::{TabState, WindowLocalState, WindowState};
 use nmt_config::system::WarnBeforeTerminatingShell;
 use nmt_config::{config_dir_path, get};
+use nmt_platform::filesystem::path_identity;
 use nmt_platform::window::native_active_state;
 use nmt_platform::{
     NativeNotification, remove_notification, show_notification, system_notification_enabled,
@@ -1966,10 +1967,59 @@ impl AppWindow {
         self.open_agent_tab(profile, window, cx);
     }
 
-    /// CLI `new_tab`: reuse the workspace rooted exactly at `path`, otherwise
-    /// open a fresh workspace there. With `open_in_best_workspace` on, a
-    /// containing workspace is preferred over a new one and gets the tab
-    /// instead, with the shell started in `path`.
+    /// Find a terminal by its current directory across this window's workspaces.
+    /// A workspace root alone says nothing about where its shells are now.
+    pub(crate) fn focus_dir_tab(
+        &mut self,
+        path: &path::Path,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let target = path_identity(path);
+
+        let location =
+            self.workspaces
+                .all_tabs()
+                .enumerate()
+                .find_map(|(workspace_index, tabs)| {
+                    tabs.list()
+                        .items()
+                        .iter()
+                        .enumerate()
+                        .find_map(|(tab_index, tab)| {
+                            tab.surface()
+                                .terminal_in_directory(&target, cx)
+                                .map(|pane_index| (workspace_index, tab_index, pane_index))
+                        })
+                });
+
+        let Some((workspace_index, tab_index, pane_index)) = location else {
+            return false;
+        };
+
+        self.workspaces.list_mut().activate(workspace_index);
+
+        self.workspaces
+            .active_tabs_mut()
+            .list_mut()
+            .activate(tab_index);
+
+        self.ensure_active_tab_live(window, cx);
+
+        let tree = self.workspaces.active_tabs_mut().active_mut().live_mut();
+
+        if let Some(pane_id) = tree.tree().leaves().get(pane_index).map(|(id, _)| *id) {
+            tree.tree_mut().set_focused(pane_id);
+        }
+
+        window.activate_window();
+        self.show_active_tab(window, cx);
+
+        true
+    }
+
+    /// Open a terminal in the exact workspace, or a containing workspace when
+    /// enabled. With no suitable workspace, create a temporary one at `path`.
     pub(crate) fn open_dir_tab(
         &mut self,
         path: &path::Path,
@@ -1977,34 +2027,18 @@ impl AppWindow {
         cx: &mut Context<Self>,
     ) {
         let summaries = self.workspaces.summaries();
-
-        if let Some(index) = exact_match(&summaries, path).and_then(|workspace_id| {
-            summaries
-                .iter()
-                .position(|workspace| workspace.id == workspace_id)
-        }) {
-            // Workspace activation preserves its TabManager's active index,
-            // restoring the tab the user last used without spawning a shell.
-            self.workspaces.list_mut().activate(index);
-
-            window.activate_window();
-
-            self.show_active_tab(window, cx);
-
-            return;
-        }
-
         let target = path.display().to_string();
 
-        let containing = cx
-            .global::<AppSettings>()
-            .config()
-            .system
-            .open_in_best_workspace
-            .then(|| best_match(&self.workspaces.summaries(), path))
-            .flatten();
+        let workspace = exact_match(&summaries, path).or_else(|| {
+            cx.global::<AppSettings>()
+                .config()
+                .system
+                .open_in_best_workspace
+                .then(|| best_match(&summaries, path))
+                .flatten()
+        });
 
-        let Some(ws_id) = containing else {
+        let Some(ws_id) = workspace else {
             self.create_temporary_workspace(
                 t!("shell-workspace-default-name").into(),
                 WorkspaceRoots::single(target),
@@ -2015,12 +2049,7 @@ impl AppWindow {
             return;
         };
 
-        if let Some(index) = self
-            .workspaces
-            .summaries()
-            .iter()
-            .position(|ws| ws.id == ws_id)
-        {
+        if let Some(index) = summaries.iter().position(|ws| ws.id == ws_id) {
             self.workspaces.list_mut().activate(index);
         }
 

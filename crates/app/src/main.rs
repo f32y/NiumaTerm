@@ -629,9 +629,8 @@ pub(crate) fn open_window_without_a_source(cx: &mut App) {
 }
 
 /// Apply one `nmt://` action: validate the target
-/// directory, then reuse an exact workspace, open it as a tab in the
-/// best-matching workspace, or create a new window. Invalid targets only bring
-/// the app forward.
+/// directory, then focus a terminal there or open one in a matching workspace
+/// or a new window. Invalid targets only bring the app forward.
 fn on_ipc_cli(action: CliAction, cx: &mut App) {
     match action {
         CliAction::FocusNotification {
@@ -644,8 +643,8 @@ fn on_ipc_cli(action: CliAction, cx: &mut App) {
                 return;
             };
 
-            // Prefer an exact-path workspace across all windows. The most
-            // recently active window wins when duplicates already exist;
+            // Existing terminals take priority over workspace roots. The most
+            // recently active window wins when multiple terminals match;
             // remaining windows are checked newest first.
             let last = cx.global::<LastActiveWindow>().0;
             let registry = cx.global::<WindowRegistry>();
@@ -654,6 +653,22 @@ fn on_ipc_cli(action: CliAction, cx: &mut App) {
                 .prioritized(last)
                 .map(|entry| (entry.handle, entry.view.clone()))
                 .collect();
+
+            for (handle, app_window) in &targets {
+                let focused = handle
+                    .update(cx, |_, window, cx| {
+                        app_window
+                            .update(cx, |app_window, cx| {
+                                app_window.focus_dir_tab(&path, window, cx)
+                            })
+                            .unwrap_or(false)
+                    })
+                    .unwrap_or(false);
+
+                if focused {
+                    return;
+                }
+            }
 
             for (handle, app_window) in targets {
                 let activated = handle
@@ -667,6 +682,7 @@ fn on_ipc_cli(action: CliAction, cx: &mut App) {
                                 }
 
                                 app_window.open_dir_tab(&path, window, cx);
+                                window.activate_window();
 
                                 true
                             })
