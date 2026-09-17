@@ -2,10 +2,11 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui::{
-    App, Bounds, IntoElement, ParentElement as _, Pixels, Styled as _, Window, canvas, div, px,
+    App, Bounds, InteractiveElement as _, IntoElement, MouseButton, ParentElement as _, Pixels,
+    Styled as _, Window, canvas, div, px,
 };
 use gpui_component::button::Button;
-use gpui_component::modern_menu::ModernMenu;
+use gpui_component::modern_menu::{ModernMenu, dismiss_modern_menu};
 
 /// A button that opens a modern menu under its own bottom-left corner.
 ///
@@ -26,6 +27,10 @@ pub(crate) fn modern_dropdown(
     div()
         .flex_none()
         .relative()
+        // Titlebar controls block ancestor hitboxes to prevent window dragging,
+        // so the shell's menu dismissal cannot see their presses. Dismiss here
+        // on mouse down so releasing the button opens the menu again.
+        .on_mouse_down(MouseButton::Left, |_, _, cx| dismiss_modern_menu(cx))
         .child(button.on_click(move |_, window, cx| {
             let mut position = measured.get().bottom_left();
 
