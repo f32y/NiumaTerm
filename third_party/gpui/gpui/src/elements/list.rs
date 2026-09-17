@@ -1958,14 +1958,17 @@ impl Element for List {
             );
         }
 
-        // If the width of the list has changed, invalidate all cached item heights
+        // If the width of the list has changed, invalidate all cached item heights.
+        // The old heights stay behind as hints: only items near the viewport are
+        // measured again, and counting the rest as zero would collapse the
+        // scrollbar's range and make it jump as scrolling measures them one by one.
         if state
             .last_layout_bounds
             .is_none_or(|last_bounds| last_bounds.size.width != bounds.size.width)
         {
             let new_items = SumTree::from_iter(
                 state.items.iter().map(|item| ListItem::Unmeasured {
-                    size_hint: None,
+                    size_hint: item.size_hint(),
                     focus_handle: item.focus_handle(),
                 }),
                 (),
@@ -2998,6 +3001,48 @@ mod test {
         // Second draw at a different width: items get invalidated.
         // Without the fix, max_offset would drop because unmeasured items
         // contribute 0 height.
+        cx.draw(point(px(0.), px(0.)), size(px(200.), px(200.)), |_, _| {
+            view.into_any_element()
+        });
+        assert_eq!(state.max_offset_for_scrollbar().y, px(300.));
+    }
+
+    #[gpui::test]
+    fn test_width_change_keeps_offscreen_heights_as_hints(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+
+        let state = ListState::new(10, crate::ListAlignment::Top, px(0.));
+
+        struct TestView(ListState);
+        impl Render for TestView {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                list(self.0.clone(), |_, _, _| {
+                    div().h(px(50.)).w_full().into_any()
+                })
+                .w_full()
+                .h_full()
+            }
+        }
+
+        let view = cx.update(|_, cx| cx.new(|_| TestView(state.clone())));
+
+        // Walk the 200px viewport down the list at width 100 so every item
+        // has been measured once (total 500px, max scroll offset 300px).
+        for item_ix in [0, 4, 8] {
+            state.scroll_to(crate::ListOffset {
+                item_ix,
+                offset_in_item: px(0.),
+            });
+            cx.draw(point(px(0.), px(0.)), size(px(100.), px(200.)), |_, _| {
+                view.clone().into_any_element()
+            });
+        }
+        assert_eq!(state.max_offset_for_scrollbar().y, px(300.));
+
+        // A different width invalidates every cached height, but only the
+        // visible items are measured again. The rest keep their old heights
+        // as estimates, so the scrollbar's range does not collapse to the
+        // viewport and then jump as scrolling measures items one by one.
         cx.draw(point(px(0.), px(0.)), size(px(200.), px(200.)), |_, _| {
             view.into_any_element()
         });
