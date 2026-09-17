@@ -24,7 +24,6 @@ use futures::stream::ReadyChunks;
 use gpui::{App, AppContext as _, AsyncApp, Context, Entity, EventEmitter, Task, WeakEntity};
 use nmt_agent::background_task::BackgroundTaskKey;
 use nmt_agent::chat::{Event, Item, QuestionMode, SlashCommandOutcome, TeamDecisionRequest};
-use nmt_agent::claude_code::sessions;
 use nmt_agent::launcher::AgentCli;
 use nmt_agent::session::branch::{BranchUpdate, CheckpointRead};
 use nmt_agent::session::capabilities::AgentCapabilities as _;
@@ -449,23 +448,24 @@ impl AgentSession {
             return;
         }
 
-        let starting_sequence = {
-            let mut state = self.controller.borrow_mut();
+        let cwd = self.active_workspace.primary();
 
-            let Some(session) = state.runtime.backend_mut() else {
-                return;
-            };
-
-            session.begin_task_restoration()
+        let Some(read) = self
+            .controller
+            .borrow_mut()
+            .runtime
+            .backend_mut()
+            .and_then(|session| session.begin_task_restoration(cwd))
+        else {
+            return;
         };
 
-        let cwd = self.active_workspace.primary().map(str::to_owned);
         let epoch = self.controller.borrow().runtime.epoch();
 
         Self::read_in_background(
             cx,
-            move || sessions::load_task_history(cwd.as_deref(), &session_id),
-            move |this, restored, cx| {
+            move || read.run(),
+            move |this, history, cx| {
                 if !this.controller.borrow().runtime.is_current(epoch) {
                     return;
                 }
@@ -477,7 +477,7 @@ impl AgentSession {
                         return;
                     };
 
-                    session.finish_task_restoration(restored, starting_sequence)
+                    session.finish_task_restoration(history)
                 };
 
                 for event in events {

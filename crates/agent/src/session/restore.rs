@@ -11,7 +11,7 @@ use nmt_platform::filesystem::path_identity;
 use crate::chat::{ReplayTurn, SessionSummary};
 use crate::claude_code::sessions;
 use crate::session::lifecycle::{SessionRuntime, Status};
-use crate::session::{AgentKind, RecoveryIdentity};
+use crate::session::{AgentKind, RecoveryIdentity, ResumeOutcome};
 
 /// Only controls absent from the provider's resumed settings are seeded locally.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -131,17 +131,18 @@ impl ConversationRestore {
 
         let previous = runtime.begin_conversation_change();
 
-        match kind {
-            AgentKind::Codex | AgentKind::DeepSeek => {
-                if !runtime
-                    .backend_mut()
-                    .is_some_and(|backend| backend.resume_thread(&summary.id))
-                {
-                    runtime.conversation_change_rejected(previous);
+        let outcome = match runtime.backend_mut() {
+            Some(backend) => backend.resume_thread(&summary.id),
+            None => ResumeOutcome::without_session(kind),
+        };
 
-                    return ResumeStart::Rejected;
-                }
+        match outcome {
+            ResumeOutcome::Rejected => {
+                runtime.conversation_change_rejected(previous);
 
+                ResumeStart::Rejected
+            }
+            ResumeOutcome::SwitchedInPlace => {
                 self.pending = Some(PendingRestore::AwaitingReplay {
                     epoch: runtime.epoch(),
                     previous,
@@ -149,7 +150,7 @@ impl ConversationRestore {
 
                 ResumeStart::Requested
             }
-            AgentKind::Claude => {
+            ResumeOutcome::NeedsReplayRead => {
                 self.generation = self
                     .generation
                     .checked_add(1)

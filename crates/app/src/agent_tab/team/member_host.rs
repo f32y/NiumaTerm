@@ -1,11 +1,9 @@
 //! One Team member's live agent session and the Team work it is carrying.
 
-use std::iter;
-
 use gpui::{App, Subscription};
 use nmt_agent::chat::{SendOutcome, TeamDecisionRequest, ThreadSettings};
-use nmt_agent::session::RecoveryIdentity;
 use nmt_agent::session::lifecycle::Status;
+use nmt_agent::session::{PromptRequest, RecoveryIdentity};
 use nmt_agent::team::attempt::DispatchIntent;
 use nmt_agent::team::model::{AttemptId, InteractionId};
 
@@ -94,7 +92,14 @@ impl MemberHost {
             let result = state.submit(
                 intent.prepared_text.clone(),
                 |backend, text| {
-                    backend.send_user_message(text, settings, None, iter::empty(), &scratch)
+                    backend.submit(&PromptRequest {
+                        text,
+                        settings,
+                        skill: None,
+                        images: &[],
+                        scratch: &scratch,
+                        title: None,
+                    })
                 },
                 || None,
             );

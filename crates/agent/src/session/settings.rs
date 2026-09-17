@@ -4,7 +4,7 @@ use std::mem::take;
 use crate::chat::{AgentPreset, ApprovalPreset, ModelInfo, ThreadSettings};
 use crate::session::capabilities::AgentCapabilities as _;
 use crate::session::restore::SettingsSeed;
-use crate::session::{AgentKind, Backend};
+use crate::session::{AgentKind, Backend, SettingsOutcome};
 
 #[derive(Default)]
 pub struct ConversationSettings {
@@ -144,7 +144,11 @@ impl ConversationSettings {
         self.settings = next;
     }
 
-    pub(crate) fn apply_model(&mut self, session: &mut Backend) -> Option<Result<(), String>> {
+    /// Hand the model and effort picks to the session when they differ from
+    /// what it runs under. A request the harness answered, either way, makes
+    /// the session's selection the authority, so a refusal puts the pickers
+    /// back. A pick that rides the next submission leaves them as chosen.
+    pub(crate) fn apply_model(&mut self, session: &mut Backend) -> Option<SettingsOutcome> {
         let model = self.settings.model.as_deref()?;
 
         let effort = (session.selection().0 == Some(model))
@@ -156,10 +160,16 @@ impl ConversationSettings {
         }
 
         let outcome = session.select_model(model, effort);
-        let (model, effort) = session.selection();
 
-        self.settings.model = model.map(str::to_owned);
-        self.settings.effort = effort.map(str::to_owned);
+        match outcome {
+            SettingsOutcome::Effective | SettingsOutcome::Refused { .. } => {
+                let (model, effort) = session.selection();
+
+                self.settings.model = model.map(str::to_owned);
+                self.settings.effort = effort.map(str::to_owned);
+            }
+            SettingsOutcome::RidesNextSubmission => {}
+        }
 
         Some(outcome)
     }
@@ -171,7 +181,7 @@ impl ConversationSettings {
         &mut self,
         session: &mut Backend,
         reported: Option<String>,
-    ) -> Option<Result<(), String>> {
+    ) -> Option<SettingsOutcome> {
         let approval = self.settings.approval.clone()?;
 
         if reported.as_deref() == Some(approval.as_str()) {
@@ -180,7 +190,7 @@ impl ConversationSettings {
 
         let outcome = session.select_approval(&approval);
 
-        if outcome.is_err() {
+        if matches!(outcome, SettingsOutcome::Refused { .. }) {
             self.settings.approval = reported;
         }
 

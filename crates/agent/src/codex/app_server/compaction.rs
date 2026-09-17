@@ -137,6 +137,7 @@ pub(super) fn compaction_completed(state: &mut CompactionState, item: &Value) ->
             name: "compact".to_string(),
             outcome: SlashCommandOutcome::Completed {
                 message: Some("Conversation context compacted.".to_string()),
+                approval: None,
             },
         });
     }

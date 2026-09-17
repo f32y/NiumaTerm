@@ -67,27 +67,11 @@ pub struct Capabilities {
     /// them mention a phrase, which is what `/find` offers.
     pub session_search: bool,
 
-    /// The model pick is its own request the harness answers immediately, so a
-    /// remembered pick seeded into the picker has to be pushed to reach the
-    /// session at all. Where the pick instead rides the launch or the next
-    /// turn, seeding the picker is the whole of applying it.
-    pub model_selection_is_a_request: bool,
-
     /// Whether the harness can use every workspace directory or only the
     /// primary one. A harness that cannot take the whole set must say so in
     /// the tab rather than quietly working against one directory, and must
     /// never be widened to a common ancestor to look like one that can.
     pub multi_root_access: MultiRootAccess,
-
-    /// Accepted approvals remain pending until the harness confirms resolution.
-    pub async_approval_resolution: bool,
-
-    /// The permission preset is switched per conversation by a command, and
-    /// the harness pins its own default into every conversation it opens, so
-    /// a remembered pick has to be sent again before a new conversation runs
-    /// under it. Where the pick rides the launch or each turn's overrides,
-    /// seeding the picker is the whole of applying it.
-    pub approval_selection_is_a_command: bool,
 }
 
 const CODEX: Capabilities = Capabilities {
@@ -103,10 +87,7 @@ const CODEX: Capabilities = Capabilities {
     session_fork: true,
     session_rename: false,
     session_search: false,
-    model_selection_is_a_request: false,
     multi_root_access: MultiRootAccess::Full,
-    async_approval_resolution: false,
-    approval_selection_is_a_command: false,
 };
 
 const CLAUDE: Capabilities = Capabilities {
@@ -122,10 +103,7 @@ const CLAUDE: Capabilities = Capabilities {
     session_fork: false,
     session_rename: false,
     session_search: false,
-    model_selection_is_a_request: false,
     multi_root_access: MultiRootAccess::Full,
-    async_approval_resolution: false,
-    approval_selection_is_a_command: false,
 };
 
 /// `skill_references` is false because the harness has no structured skill
@@ -145,7 +123,6 @@ const DEEPSEEK: Capabilities = Capabilities {
     session_fork: true,
     session_rename: true,
     session_search: true,
-    model_selection_is_a_request: true,
     // The installed Harness resolves one workspace root per session and its
     // workspace-write policy has no additional writable roots, so a
     // multi-directory workspace reduces to its primary directory and the tab
@@ -153,8 +130,6 @@ const DEEPSEEK: Capabilities = Capabilities {
     // publishes a per-session multi-root policy this becomes `Full` and the
     // adapter passes every selected root.
     multi_root_access: MultiRootAccess::PrimaryOnly,
-    async_approval_resolution: true,
-    approval_selection_is_a_command: true,
 };
 
 pub trait AgentCapabilities {

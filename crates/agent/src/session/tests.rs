@@ -33,7 +33,9 @@ fn cli_session_starts_sends_images_and_rejects_cross_provider_recovery_without_a
 
     use crate::chat::{Event, SendOutcome, ThreadSettings};
     use crate::session::lifecycle::StartOutcome;
-    use crate::session::{AgentKind, Backend, ImageAttachment, RecoveryIdentity, SessionRuntime};
+    use crate::session::{
+        AgentKind, Backend, ImageAttachment, PromptRequest, RecoveryIdentity, SessionRuntime,
+    };
     use crate::{AgentWorkspace, LaunchConfig};
 
     let scratch = Scratch::new();
@@ -96,17 +98,17 @@ fn cli_session_starts_sends_images_and_rejects_cross_provider_recovery_without_a
     );
 
     let outcome = runtime.send(|backend| {
-        backend.send_user_message(
-            "picture",
-            &ThreadSettings::default(),
-            None,
-            [ImageAttachment {
+        backend.submit(&PromptRequest {
+            text: "picture",
+            settings: &ThreadSettings::default(),
+            skill: None,
+            images: &[ImageAttachment {
                 bytes: &[1, 2, 3],
                 media_type: "image/png",
-            }]
-            .into_iter(),
-            &scratch.0.join("images"),
-        )
+            }],
+            scratch: &scratch.0.join("images"),
+            title: None,
+        })
     });
 
     assert!(matches!(outcome, SendOutcome::StartedTurn));

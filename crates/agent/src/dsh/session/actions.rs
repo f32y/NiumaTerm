@@ -395,7 +395,7 @@ impl Session {
         let answer = catalogs::execute_command(&self.client, &self.session_id, &line);
 
         match answer {
-            Ok(value) => catalogs::command_outcome(name, &value),
+            Ok(value) => catalogs::command_outcome(name, arguments, &value),
             Err(error) => SlashCommandOutcome::Rejected {
                 message: error.message().to_string(),
             },

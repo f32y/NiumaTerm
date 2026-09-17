@@ -7,7 +7,7 @@ use crate::session::restore::{
     SettingsSeed,
 };
 use crate::session::test_support::TestBackend;
-use crate::session::{AgentKind, Backend, RecoveryIdentity};
+use crate::session::{AgentKind, Backend, RecoveryIdentity, ResumeOutcome};
 
 fn summary(id: &str) -> SessionSummary {
     SessionSummary {
@@ -93,7 +93,7 @@ fn accepted_protocol_resume_is_busy_until_replay_and_failure_restores_old_status
         let mut restore = ConversationRestore::default();
         let mut backend = TestBackend::new([], SlashCommandOutcome::NotReady, Vec::new());
 
-        backend.resume_accepted = true;
+        backend.resume_outcome = ResumeOutcome::SwitchedInPlace;
 
         let epoch = runtime.begin_start();
 

@@ -1455,7 +1455,8 @@ fn manual_compaction_completes_only_from_the_item_lifecycle() {
         Event::SlashCommandResult {
             name: "compact".into(),
             outcome: SlashCommandOutcome::Completed {
-                message: Some("Conversation context compacted.".into())
+                message: Some("Conversation context compacted.".into()),
+                approval: None,
             },
         }
     );

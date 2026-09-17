@@ -64,7 +64,6 @@ use nmt_agent::chat::{
 };
 use nmt_agent::claude_code::stream_json;
 use nmt_agent::codex::app_server;
-use nmt_agent::session::ImageAttachment;
 use nmt_agent::session::branch::{
     BranchCompletion, BranchError, BranchFailure, BranchUpdate, BranchView, FileProgress,
     PromptTarget,
@@ -81,6 +80,7 @@ use nmt_agent::session::input::{
 use nmt_agent::session::lifecycle::InterruptOutcome;
 use nmt_agent::session::restore::{ResumeStart, SettingsSeed};
 use nmt_agent::session::workflows::OpenWorkflowAgent;
+use nmt_agent::session::{ImageAttachment, PromptRequest, SettingsOutcome};
 #[cfg(test)]
 use nmt_agent::transcript::TextField;
 use nmt_agent::transcript::conversation::ConversationImage;
@@ -1501,9 +1501,7 @@ impl AgentPane {
                 // recording the pick is not applying it. This runs after the
                 // notice so a refusal replaces it rather than hiding under
                 // a confirmation of something that did not happen.
-                if session_kind.caps().model_selection_is_a_request {
-                    self.apply_model_selection(cx);
-                }
+                self.apply_model_selection(cx);
 
                 true
             }
@@ -1642,20 +1640,14 @@ impl AgentPane {
 
                 true
             }
-            SlashCommandOutcome::Completed { message } => {
+            SlashCommandOutcome::Completed { message, approval } => {
                 // The harness pins its own default preset into every
                 // conversation it opens, so a switch it accepted is remembered
-                // for the next one, whether it was picked or typed. A bare
-                // `/permission` only reports the preset in effect.
-                let preset = command.arguments.trim();
-
-                if session_kind.caps().approval_selection_is_a_command
-                    && command.name == "permission"
-                    && !preset.is_empty()
-                {
+                // for the next one, whether it was picked or typed.
+                if let Some(preset) = approval {
                     let session_profile = session_host.read(cx).profile.clone();
 
-                    self.session.borrow_mut().controls.settings.approval = Some(preset.to_owned());
+                    self.session.borrow_mut().controls.settings.approval = Some(preset);
 
                     remember_defaults(
                         &self.session.borrow().controls,
@@ -2300,14 +2292,14 @@ impl AgentPane {
 
         self.prompts.reset_editors();
 
-        if let Some(Err(error)) = selection {
+        if let Some(SettingsOutcome::Refused { message }) = selection {
             self.palette
-                .set_feedback(CommandFeedbackKind::Error, error, cx);
+                .set_feedback(CommandFeedbackKind::Error, message, cx);
         }
 
-        if let Some(Err(error)) = ready.approval {
+        if let Some(SettingsOutcome::Refused { message }) = ready.approval {
             self.palette
-                .set_feedback(CommandFeedbackKind::Error, error, cx);
+                .set_feedback(CommandFeedbackKind::Error, message, cx);
         }
 
         info!(
@@ -2343,7 +2335,7 @@ impl AgentPane {
                     cx,
                 );
             }
-            SlashCommandOutcome::Completed { message } => {
+            SlashCommandOutcome::Completed { message, .. } => {
                 self.palette.set_feedback(
                     CommandFeedbackKind::Notice,
                     message.unwrap_or_else(|| {
@@ -3011,21 +3003,24 @@ impl AgentPane {
         let outcome = self.session.borrow_mut().submit(
             text.clone(),
             |session, text| {
-                let images = self
+                let images: Vec<_> = self
                     .attachments
                     .images()
                     .iter()
                     .map(|image| ImageAttachment {
                         bytes: image.image.bytes(),
                         media_type: image.image.format().mime_type(),
-                    });
+                    })
+                    .collect();
 
-                match title_request.as_ref() {
-                    Some(title) => session.send_user_message_with_title(
-                        text, &settings, skill, images, &scratch, title,
-                    ),
-                    None => session.send_user_message(text, &settings, skill, images, &scratch),
-                }
+                session.submit(&PromptRequest {
+                    text,
+                    settings: &settings,
+                    skill,
+                    images: &images,
+                    scratch: &scratch,
+                    title: title_request.as_ref(),
+                })
             },
             || {
                 restore_on_interrupt.map(|(text, response_annotations)| RecoverablePrompt {
@@ -3425,10 +3420,11 @@ impl AgentPane {
         };
 
         match outcome {
-            Ok(()) => cx.notify(),
-            Err(error) => self
-                .palette
-                .set_feedback(CommandFeedbackKind::Error, error, cx),
+            SettingsOutcome::Effective | SettingsOutcome::RidesNextSubmission => cx.notify(),
+            SettingsOutcome::Refused { message } => {
+                self.palette
+                    .set_feedback(CommandFeedbackKind::Error, message, cx)
+            }
         }
     }
 
@@ -3448,7 +3444,7 @@ impl AgentPane {
         };
 
         match outcome {
-            Ok(()) => {
+            SettingsOutcome::Effective | SettingsOutcome::RidesNextSubmission => {
                 let Some(session_host) = self.host.upgrade() else {
                     return;
                 };
@@ -3467,9 +3463,10 @@ impl AgentPane {
 
                 cx.notify()
             }
-            Err(error) => self
-                .palette
-                .set_feedback(CommandFeedbackKind::Error, error, cx),
+            SettingsOutcome::Refused { message } => {
+                self.palette
+                    .set_feedback(CommandFeedbackKind::Error, message, cx)
+            }
         }
     }
 

@@ -1,4 +1,3 @@
-use std::iter;
 use std::path::Path;
 use std::time::Instant;
 
@@ -14,7 +13,7 @@ use crate::session::input::{ApprovalOutcome, QuestionAction, QuestionKey, Submis
 use crate::session::lifecycle::{InterruptOutcome, StartOutcome, Status};
 use crate::session::restore::SettingsSeed;
 use crate::session::test_support::TestBackend;
-use crate::session::{AgentKind, Backend};
+use crate::session::{AgentKind, Backend, PromptRequest, SettingsOutcome};
 
 #[test]
 fn progress_survives_turns_but_clears_with_the_conversation_for_every_provider() {
@@ -93,13 +92,14 @@ fn send(session: &mut SessionController, text: &str) -> SendOutcome {
         .submit(
             text.into(),
             |backend, text| {
-                backend.send_user_message(
+                backend.submit(&PromptRequest {
                     text,
-                    &ThreadSettings::default(),
-                    None,
-                    iter::empty(),
-                    Path::new("unused-test-attachments"),
-                )
+                    settings: &ThreadSettings::default(),
+                    skill: None,
+                    images: &[],
+                    scratch: Path::new("unused-test-attachments"),
+                    title: None,
+                })
             },
             || {
                 Some(RecoverablePrompt {
@@ -468,7 +468,7 @@ fn repeated_ready_preserves_the_running_turn_and_selected_settings() {
     assert_eq!(session.conversation.borrow().content.entries().len(), 1);
 }
 
-fn deepseek_with_remembered_permission(selection: Result<(), String>) -> (SessionController, u64) {
+fn deepseek_with_remembered_permission(selection: SettingsOutcome) -> (SessionController, u64) {
     let mut session = SessionController::new(AgentKind::DeepSeek);
 
     let epoch = session.starting(None);
@@ -508,13 +508,13 @@ fn approval_selections(session: &SessionController) -> Vec<String> {
 
 #[test]
 fn a_new_deepseek_conversation_runs_under_the_remembered_permission() {
-    let (mut session, epoch) = deepseek_with_remembered_permission(Ok(()));
+    let (mut session, epoch) = deepseek_with_remembered_permission(SettingsOutcome::Effective);
 
     let SessionEffect::Ready(ready) = session.apply_event(epoch, harness_default_ready()) else {
         panic!("startup must expose effective settings");
     };
 
-    assert!(matches!(ready.approval, Some(Ok(()))));
+    assert_eq!(ready.approval, Some(SettingsOutcome::Effective));
     assert_eq!(approval_selections(&session), ["danger-full-access"]);
     assert_eq!(
         session.controls.settings.approval.as_deref(),
@@ -537,14 +537,20 @@ fn a_new_deepseek_conversation_runs_under_the_remembered_permission() {
 
 #[test]
 fn a_refused_remembered_permission_leaves_the_picker_on_the_session_preset() {
-    let (mut session, epoch) =
-        deepseek_with_remembered_permission(Err("unknown preset".to_string()));
+    let (mut session, epoch) = deepseek_with_remembered_permission(SettingsOutcome::Refused {
+        message: "unknown preset".to_string(),
+    });
 
     let SessionEffect::Ready(ready) = session.apply_event(epoch, harness_default_ready()) else {
         panic!("startup must expose effective settings");
     };
 
-    assert_eq!(ready.approval, Some(Err("unknown preset".to_string())));
+    assert_eq!(
+        ready.approval,
+        Some(SettingsOutcome::Refused {
+            message: "unknown preset".to_string()
+        })
+    );
     assert_eq!(
         session.controls.settings.approval.as_deref(),
         Some("workspace-write")
@@ -552,8 +558,50 @@ fn a_refused_remembered_permission_leaves_the_picker_on_the_session_preset() {
 }
 
 #[test]
+fn picks_that_ride_the_next_submission_stay_on_the_pickers() {
+    let mut session = SessionController::new(AgentKind::Codex);
+
+    let epoch = session.starting(None);
+
+    session.controls.seed_settings(SettingsSeed::Defaults);
+
+    session.ready_defaults.stored = Some(ThreadSettings {
+        model: Some("remembered-model".into()),
+        approval: Some("danger-full-access".into()),
+        ..ThreadSettings::default()
+    });
+
+    // The test backend answers like a harness that sends nothing for a pick
+    // and reports no selection of its own.
+    let backend = TestBackend::new(Vec::new(), SlashCommandOutcome::NotReady, Vec::new());
+
+    assert!(matches!(
+        session.install(epoch, Ok(Backend::Test(backend))),
+        StartOutcome::Installed
+    ));
+
+    let SessionEffect::Ready(ready) = session.apply_event(epoch, harness_default_ready()) else {
+        panic!("startup must expose effective settings");
+    };
+
+    assert_eq!(ready.selection, Some(SettingsOutcome::RidesNextSubmission));
+    assert_eq!(ready.approval, Some(SettingsOutcome::RidesNextSubmission));
+
+    // Nothing answered for the session, so its empty selection must not
+    // replace what the user chose.
+    assert_eq!(
+        session.controls.settings.model.as_deref(),
+        Some("remembered-model")
+    );
+    assert_eq!(
+        session.controls.settings.approval.as_deref(),
+        Some("danger-full-access")
+    );
+}
+
+#[test]
 fn a_remembered_agent_preset_never_overrides_the_reported_composition() {
-    let (mut session, epoch) = deepseek_with_remembered_permission(Ok(()));
+    let (mut session, epoch) = deepseek_with_remembered_permission(SettingsOutcome::Effective);
 
     session.ready_defaults.stored = Some(ThreadSettings {
         agent_preset: Some("reviewer".into()),

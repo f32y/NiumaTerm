@@ -1169,7 +1169,10 @@ impl Session {
                     Some(message) => SlashCommandOutcome::Rejected {
                         message: message.clone(),
                     },
-                    None => SlashCommandOutcome::Completed { message: None },
+                    None => SlashCommandOutcome::Completed {
+                        message: None,
+                        approval: None,
+                    },
                 },
             });
         }
