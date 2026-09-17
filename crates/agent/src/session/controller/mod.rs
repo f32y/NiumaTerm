@@ -922,6 +922,15 @@ impl SessionController {
 
                 SessionEffect::Changed
             }
+            Event::GenerationCompleted(sample) => {
+                let mut conversation = self.conversation.borrow_mut();
+
+                if conversation.live.is_working() && conversation.generation_stats.record(sample) {
+                    SessionEffect::Changed
+                } else {
+                    SessionEffect::Unchanged
+                }
+            }
             Event::ContextWindowUpdated(usage) => {
                 self.conversation.borrow_mut().context_window_usage = Some(usage);
 

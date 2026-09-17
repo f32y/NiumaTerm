@@ -3,6 +3,7 @@ use std::time::Duration;
 use gpui::{point, px};
 use gpui_component::input::Enter;
 use nmt_agent::chat::QueuedPrompt;
+use nmt_agent::transcript::turns::GenerationSpeed;
 use nmt_agent::{AgentWorkspace, MultiRootAccess};
 use nmt_config::system::NewlineShortcut;
 
@@ -38,22 +39,60 @@ fn queued_message_label_omits_response_annotation_context() {
 
 #[test]
 fn composer_stats_report_only_what_the_conversation_knows() {
-    assert_eq!(composer_stats_label(0, 0, None, None), None);
+    assert_eq!(composer_stats_label(0, 0, None, None, None), None);
 
     // A turn that has run but reported nothing else stands on its own.
     assert_eq!(
-        composer_stats_label(3, 0, None, None).as_deref(),
+        composer_stats_label(3, 0, None, None, None).as_deref(),
         Some("3 turns")
     );
 
     assert_eq!(
-        composer_stats_label(3, 7, Some(Duration::from_millis(820)), Some(94)).as_deref(),
+        composer_stats_label(3, 7, Some(Duration::from_millis(820)), Some(94), None).as_deref(),
         Some("3 turns · 7 steps · first 820ms · 94% cached")
     );
     assert_eq!(
-        composer_stats_label(1, 1, Some(Duration::from_millis(1_240)), None).as_deref(),
+        composer_stats_label(1, 1, Some(Duration::from_millis(1_240)), None, None).as_deref(),
         Some("1 turns · 1 steps · first 1.2s")
     );
+}
+
+#[test]
+fn composer_stats_append_generation_speed_and_mark_estimates() {
+    assert_eq!(
+        composer_stats_label(
+            0,
+            0,
+            None,
+            None,
+            Some(GenerationSpeed {
+                tokens_per_second: 42.74,
+                estimated: false,
+            })
+        )
+        .as_deref(),
+        Some("42.7 tok/s")
+    );
+
+    for (estimated, expected) in [
+        (false, "2 turns · 90% cached · 42.7 tok/s"),
+        (true, "2 turns · 90% cached · ~42.7 tok/s"),
+    ] {
+        assert_eq!(
+            composer_stats_label(
+                2,
+                0,
+                None,
+                Some(90),
+                Some(GenerationSpeed {
+                    tokens_per_second: 42.74,
+                    estimated,
+                })
+            )
+            .as_deref(),
+            Some(expected)
+        );
+    }
 }
 
 #[test]

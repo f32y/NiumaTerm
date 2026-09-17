@@ -12,7 +12,7 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use crate::chat::{ContextComposition, ContextWindowUsage, Item, ReplayTurn, SessionStats};
-use crate::transcript::turns::{LiveTurn, TurnLedger};
+use crate::transcript::turns::{GenerationStats, LiveTurn, TurnLedger};
 use crate::transcript::{TextAppend, TextField, TranscriptContent, TranscriptEntry};
 
 /// Immutable PNG data retained after an image submission is accepted.
@@ -44,6 +44,7 @@ pub struct ConversationState {
     pub content: TranscriptContent<EntryMetadata>,
     pub turns: TurnLedger,
     pub live: LiveTurn,
+    pub generation_stats: GenerationStats,
     pub context_window_usage: Option<ContextWindowUsage>,
     pub context_composition: Option<ContextComposition>,
     pub session_stats: Option<SessionStats>,
@@ -195,6 +196,7 @@ impl ConversationState {
 
     pub fn start(&mut self) {
         self.submitted_at = Some(Instant::now());
+        self.generation_stats = GenerationStats::default();
 
         self.live.start();
 
@@ -251,6 +253,8 @@ impl ConversationState {
         self.turns.clear();
 
         self.live.discard();
+
+        self.generation_stats = GenerationStats::default();
 
         self.context_window_usage = None;
         self.context_composition = None;

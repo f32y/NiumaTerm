@@ -1,8 +1,15 @@
+#[cfg(test)]
+#[path = "generation_tests.rs"]
+mod generation_tests;
+
 use std::collections::{HashMap, VecDeque};
+use std::time::Instant;
 
 use serde_json::Value;
 
-use crate::chat::{ContextComposition, ContextWindowUsage, Event, Item, TokenUsageBreakdown};
+use crate::chat::{
+    ContextComposition, ContextWindowUsage, Event, GenerationSample, Item, TokenUsageBreakdown,
+};
 use crate::claude_code::records::{
     compaction_metadata, complete_tool_item, parse_compaction, tool_item,
 };
@@ -71,14 +78,22 @@ pub(super) struct TranscriptState {
     last_turn_usage: Option<TokenUsageBreakdown>,
     context_window: Option<u64>,
     turn_output_usage: TurnOutputUsage,
+    generation_id: Option<String>,
+    generation_started: Option<Instant>,
 }
 
 impl TranscriptState {
     pub(super) fn begin_turn(&mut self) {
         self.turn_output_usage.reset();
+
+        self.generation_id = None;
+        self.generation_started = None;
     }
 
     pub(super) fn finish_turn(&mut self, message: &Value) -> Vec<Event> {
+        self.generation_id = None;
+        self.generation_started = None;
+
         let mut events = Vec::new();
 
         if let Some(max_tokens) = claude_context_window(&message["modelUsage"]) {
@@ -161,6 +176,9 @@ impl TranscriptState {
 
         match event["type"].as_str() {
             Some("message_start") => {
+                self.generation_id = event["message"]["id"].as_str().map(str::to_owned);
+                self.generation_started = None;
+
                 self.open_blocks.clear();
 
                 self.open_texts.clear();
@@ -207,6 +225,23 @@ impl TranscriptState {
 
                 events
             }
+            Some("message_stop") => {
+                let started = self.generation_started.take();
+                let id = self.generation_id.take();
+
+                started
+                    .zip(id)
+                    .and_then(|(started, response_id)| {
+                        Some(Event::GenerationCompleted(GenerationSample {
+                            response_id,
+                            output_tokens: self.context_usage?.output_tokens?,
+                            elapsed: started.elapsed(),
+                            estimated: false,
+                        }))
+                    })
+                    .into_iter()
+                    .collect()
+            }
             Some("content_block_start") => {
                 let Some(index) = index else {
                     return Vec::new();
@@ -242,11 +277,22 @@ impl TranscriptState {
                 }
             }
             Some("content_block_delta") => {
+                let delta = &event["delta"];
+
+                // Tool argument fragments have no transcript item, but still
+                // count as model output when locating the first token.
+                if self.generation_started.is_none()
+                    && self.generation_id.is_some()
+                    && ["text", "thinking", "partial_json"]
+                        .iter()
+                        .any(|field| delta[field].as_str().is_some_and(|text| !text.is_empty()))
+                {
+                    self.generation_started = Some(Instant::now());
+                }
+
                 let Some(item_id) = index.and_then(|i| self.open_blocks.get(&i)).cloned() else {
                     return Vec::new();
                 };
-
-                let delta = &event["delta"];
 
                 match delta["type"].as_str() {
                     Some("text_delta") => delta["text"]

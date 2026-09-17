@@ -400,6 +400,7 @@ pub enum Event {
     },
     /// Replacement output-token count for the active turn.
     TurnOutputTokensUpdated(u64),
+    GenerationCompleted(GenerationSample),
     /// Replacement snapshot of the current thread's active context window.
     ContextWindowUpdated(ContextWindowUsage),
     /// Replacement breakdown of what fills that window. Reported only by

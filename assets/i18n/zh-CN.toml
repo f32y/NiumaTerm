@@ -1130,3 +1130,7 @@ git-toggle-files = "显示/隐藏文件树"
 "app-update-notice-available-title" = "NiumaTerm 有新版本"
 "app-update-notice-installing-title" = "正在更新 NiumaTerm"
 "app-update-notice-failed-title" = "NiumaTerm 更新失败"
+
+"agent-status-generation-speed" = "%{value} tok/s"
+"agent-status-generation-tooltip" = "本轮模型平均生成速度。每次有效响应结束后更新，不计工具执行和等待确认耗时。"
+"agent-status-generation-estimated-tooltip" = "根据收到的输出片段估算本轮模型生成速度。隐藏推理和流式缓冲可能影响估算，不计工具执行和等待确认耗时。"

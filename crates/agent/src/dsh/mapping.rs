@@ -4,12 +4,18 @@
 //! rather than interprets: there is no vendor stream to reassemble, and
 //! anything unrecognized becomes nothing at all instead of an error.
 
+#[cfg(test)]
+#[path = "generation_tests.rs"]
+mod generation_tests;
+
 use std::collections::HashMap;
+use std::time::Duration;
 
 use serde_json::{Value, from_str, json};
 
 use crate::chat::{
-    Compaction, CompactionTrigger, Event, Item, Question, QuestionOption, TurnRetry,
+    Compaction, CompactionTrigger, Event, GenerationSample, Item, Question, QuestionOption,
+    TurnRetry,
 };
 use crate::json::diff_lines;
 
@@ -162,7 +168,17 @@ pub(crate) fn map_frame(frame: &Value, session_id: &str, tools: &mut ToolTracker
                 return Vec::new();
             }
 
-            map_session_event(&payload["event"], &payload["view"], tools)
+            let event = &payload["event"];
+
+            let mut events = map_session_event(event, &payload["view"], tools);
+
+            // History reconstruction uses only transcript content. Decode
+            // timing is needed only for samples arriving on the live stream.
+            if event["type"] == "assistant/message" {
+                events.extend(generation_sample(event).map(Event::GenerationCompleted));
+            }
+
+            events
         }
         Some("host/agent-error") if payload["sessionId"].as_str() == Some(session_id) => {
             match payload["message"].as_str() {
@@ -713,6 +729,73 @@ fn map_completed_message(data: &Value) -> Vec<Event> {
             }
         })
         .collect()
+}
+
+fn generation_sample(event: &Value) -> Option<GenerationSample> {
+    let data = &event["data"];
+
+    let started = data["stream"]
+        .as_array()?
+        .iter()
+        .find_map(first_token_time)?;
+
+    let elapsed = event["time"].as_u64()?.checked_sub(started)?;
+
+    Some(GenerationSample {
+        response_id: format!("{}:{}", data["turn"].as_u64()?, data["step"].as_u64()?),
+        output_tokens: data["usage"]["outputTokens"].as_u64()?,
+        elapsed: Duration::from_millis(elapsed),
+        estimated: false,
+    })
+}
+
+fn first_token_time(record: &Value) -> Option<u64> {
+    let kind = record["type"].as_str()?;
+
+    if kind == "chunk" {
+        let chunk = &record["chunk"];
+
+        let has_output = match chunk["type"].as_str()? {
+            "text-delta" | "reasoning-delta" => {
+                chunk["text"].as_str().is_some_and(|text| !text.is_empty())
+            }
+            "tool-call-delta" => {
+                chunk["name"].as_str().is_some()
+                    || chunk["argumentsDelta"]
+                        .as_str()
+                        .is_some_and(|text| !text.is_empty())
+            }
+            _ => false,
+        };
+
+        return has_output.then(|| record["time"].as_u64()).flatten();
+    }
+
+    let fragments = match kind {
+        "text-chunks" | "reasoning-chunks" => &record["texts"],
+        "tool-call-chunks" => {
+            if record["name"].as_str().is_some() {
+                return record["time0"].as_u64();
+            }
+
+            &record["args"]
+        }
+        _ => return None,
+    };
+
+    let mut time = record["time0"].as_u64()?;
+
+    for (index, fragment) in fragments.as_array()?.iter().enumerate() {
+        if index > 0 {
+            time = time.checked_add(record["dt"][index - 1].as_u64()?)?;
+        }
+
+        if !fragment.as_str()?.is_empty() {
+            return Some(time);
+        }
+    }
+
+    None
 }
 
 /// One prompt produces several `user/message` events: the user's own, plus the
