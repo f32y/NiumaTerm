@@ -84,6 +84,9 @@ struct StateInner {
     scroll_handler: Option<Box<dyn FnMut(&ListScrollEvent, &mut Window, &mut App)>>,
     scrollbar_drag_start_height: Option<Pixels>,
     measuring_behavior: ListMeasuringBehavior,
+    /// Items that have never been measured count as the average measured
+    /// height instead of zero.
+    estimate_unmeasured_heights: bool,
     pending_scroll: Option<PendingScroll>,
     follow_state: FollowState,
     smooth_wheel_enabled: bool,
@@ -327,7 +330,7 @@ struct ListItemSummary {
     unrendered_count: usize,
     height: Pixels,
     has_focus_handles: bool,
-    has_unknown_height: bool,
+    unknown_height_count: usize,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -355,6 +358,7 @@ impl ListState {
             reset: false,
             scrollbar_drag_start_height: None,
             measuring_behavior: ListMeasuringBehavior::default(),
+            estimate_unmeasured_heights: false,
             pending_scroll: None,
             follow_state: FollowState::default(),
             smooth_wheel_enabled: false,
@@ -403,6 +407,23 @@ impl ListState {
     /// This is useful for ensuring that the scrollbar size is correct instead of based on only rendered elements.
     pub fn measure_all(self) -> Self {
         self.0.borrow_mut().measuring_behavior = ListMeasuringBehavior::Measure(false);
+        self
+    }
+
+    /// Count items that have never been measured as the average height of the
+    /// measured ones, instead of as zero.
+    ///
+    /// A list opened on a long history measures only what is near the
+    /// viewport, so the scrollbar's range starts at about one screen and both
+    /// its range and its offset grow by a whole item every time scrolling
+    /// measures another, which moves the thumb in jumps. An estimate keeps the
+    /// range close to its final size from the first layout, and measuring an
+    /// item then only corrects it by how far that item is from the average.
+    /// This is a cheaper alternative to [`Self::measure_all`] for lists whose
+    /// items are too costly to lay out all at once, and unlike
+    /// [`Self::with_uniform_item_height`] it needs no height known up front.
+    pub fn estimate_unmeasured_heights(self) -> Self {
+        self.0.borrow_mut().estimate_unmeasured_heights = true;
         self
     }
 
@@ -554,7 +575,7 @@ impl ListState {
         let state = self.0.borrow();
         let bounds = state.last_layout_bounds?;
         let summary = state.items.summary();
-        if summary.has_unknown_height {
+        if summary.unknown_height_count > 0 {
             return None;
         }
         let padding = state.last_padding.unwrap_or_default();
@@ -1019,6 +1040,36 @@ impl StateInner {
                     })
             }
         };
+    }
+
+    /// Give every item of unknown height the average height of the rest as a
+    /// hint. The estimate lives in the items rather than in the scrollbar's
+    /// queries so that every pixel computation reads the same total: the
+    /// scrollbar's range and offset, the offset a scrollbar drag maps back to
+    /// an item, and the travel limit of a wheel motion. Layout only reuses the
+    /// size of a measured item, so a hinted item is still measured when it
+    /// comes near the viewport.
+    fn estimate_unknown_heights(&mut self, width: Pixels) {
+        let summary = self.items.summary();
+        let known_count = summary.count - summary.unknown_height_count;
+        if summary.unknown_height_count == 0 || known_count == 0 {
+            return;
+        }
+
+        let estimate = size(width, summary.height / known_count as f32);
+        self.items = SumTree::from_iter(
+            self.items.iter().map(|item| match item {
+                ListItem::Unmeasured {
+                    size_hint: None,
+                    focus_handle,
+                } => ListItem::Unmeasured {
+                    size_hint: Some(estimate),
+                    focus_handle: focus_handle.clone(),
+                },
+                item => item.clone(),
+            }),
+            (),
+        );
     }
 
     fn max_scroll_offset(&self) -> Pixels {
@@ -1579,6 +1630,10 @@ impl StateInner {
         new_items.append(cursor.suffix(), ());
         self.items = new_items;
 
+        if self.estimate_unmeasured_heights {
+            self.estimate_unknown_heights(available_width.unwrap_or_default());
+        }
+
         // If follow_tail mode is on but the user scrolled away
         // (is_following is false), check whether the current scroll
         // position has returned to the bottom. An active smooth wheel
@@ -2079,7 +2134,7 @@ impl sum_tree::Item for ListItem {
                     px(0.)
                 },
                 has_focus_handles: focus_handle.is_some(),
-                has_unknown_height: size_hint.is_none(),
+                unknown_height_count: size_hint.is_none().into(),
             },
             ListItem::Measured {
                 size, focus_handle, ..
@@ -2089,7 +2144,7 @@ impl sum_tree::Item for ListItem {
                 unrendered_count: 0,
                 height: size.height,
                 has_focus_handles: focus_handle.is_some(),
-                has_unknown_height: false,
+                unknown_height_count: 0,
             },
         }
     }
@@ -2106,7 +2161,7 @@ impl sum_tree::ContextLessSummary for ListItemSummary {
         self.unrendered_count += summary.unrendered_count;
         self.height += summary.height;
         self.has_focus_handles |= summary.has_focus_handles;
-        self.has_unknown_height |= summary.has_unknown_height;
+        self.unknown_height_count += summary.unknown_height_count;
     }
 }
 
@@ -3047,6 +3102,89 @@ mod test {
             view.into_any_element()
         });
         assert_eq!(state.max_offset_for_scrollbar().y, px(300.));
+    }
+
+    #[gpui::test]
+    fn test_estimated_heights_size_the_scrollbar_from_the_first_layout(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+
+        let state =
+            ListState::new(100, crate::ListAlignment::Bottom, px(0.)).estimate_unmeasured_heights();
+
+        struct TestView(ListState);
+        impl Render for TestView {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                list(self.0.clone(), |_, _, _| {
+                    div().h(px(50.)).w_full().into_any()
+                })
+                .w_full()
+                .h_full()
+            }
+        }
+
+        let view = cx.update(|_, cx| cx.new(|_| TestView(state.clone())));
+
+        // One layout at the live end measures the four items on screen. The
+        // other 96 count as the average, so the range already covers the
+        // whole list (100 * 50px - 200px) rather than the measured screenful.
+        cx.draw(point(px(0.), px(0.)), size(px(100.), px(200.)), |_, _| {
+            view.clone().into_any_element()
+        });
+        assert_eq!(state.max_offset_for_scrollbar().y, px(4800.));
+        assert_eq!(state.scroll_px_offset_for_scrollbar().y, px(-4800.));
+
+        // Scrolling up measures items the estimate already accounted for, so
+        // the range holds. `scroll_by` counts from the end of the content
+        // (5000px) rather than from the last reachable offset, which puts a
+        // 500px scroll at 4500px.
+        state.scroll_by(px(-500.));
+        cx.draw(point(px(0.), px(0.)), size(px(100.), px(200.)), |_, _| {
+            view.into_any_element()
+        });
+        assert_eq!(state.max_offset_for_scrollbar().y, px(4800.));
+        assert_eq!(state.scroll_px_offset_for_scrollbar().y, px(-4500.));
+    }
+
+    #[gpui::test]
+    fn test_estimated_heights_give_way_to_measured_ones(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+
+        let state =
+            ListState::new(40, crate::ListAlignment::Bottom, px(0.)).estimate_unmeasured_heights();
+
+        // Heights cycle through 40, 60, 80, 100 and 120px: 3200px in all.
+        struct TestView(ListState);
+        impl Render for TestView {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                list(self.0.clone(), |ix, _, _| {
+                    div().h(px(40. + (ix % 5) as f32 * 20.)).w_full().into_any()
+                })
+                .w_full()
+                .h_full()
+            }
+        }
+
+        let view = cx.update(|_, cx| cx.new(|_| TestView(state.clone())));
+        let exact = px(3200. - 400.);
+
+        cx.draw(point(px(0.), px(0.)), size(px(100.), px(400.)), |_, _| {
+            view.clone().into_any_element()
+        });
+        let estimated = state.max_offset_for_scrollbar().y;
+        assert!(
+            (estimated - exact).abs() < exact * 0.25,
+            "one screenful estimates the range as {estimated:?}, against {exact:?}"
+        );
+
+        // Walking the viewport to the top measures every item, and each
+        // measurement replaces its estimate, so the range ends up exact.
+        for _ in 0..10 {
+            state.scroll_by(px(-400.));
+            cx.draw(point(px(0.), px(0.)), size(px(100.), px(400.)), |_, _| {
+                view.clone().into_any_element()
+            });
+        }
+        assert_eq!(state.max_offset_for_scrollbar().y, exact);
     }
 
     #[gpui::test]
