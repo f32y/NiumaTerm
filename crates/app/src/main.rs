@@ -270,7 +270,7 @@ fn parse_startup_args() -> StartupArgs {
 fn on_finish_launching(
     cx: &mut App,
     is_testing: bool,
-    platform: Rc<Platform>,
+    #[cfg(windows)] platform: Rc<Platform>,
     mut cli_rx: UnboundedReceiver<IpcAction>,
 ) {
     profiling::initialize(cx);
