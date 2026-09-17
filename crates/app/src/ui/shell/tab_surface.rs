@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use app::agent_tab::execution::{AgentSession, SessionOwner};
 use app::agent_tab::team::TeamPane;
 use app::agent_tab::{AgentKind, AgentPane};
@@ -5,7 +7,8 @@ use app::terminal_tab::view::TerminalPane;
 use gpui::{App, Entity};
 use gpui_component::{Icon, IconName, Sizable as _};
 use nmt_agent::AgentRoute;
-use nmt_config::local_state::TabState;
+use nmt_config::local_state::{PaneNodeState, TabState};
+use nmt_platform::filesystem::path_identity;
 use tracing::warn;
 
 use crate::tabs::TabId;
@@ -49,6 +52,42 @@ pub(crate) enum TabSurface {
 }
 
 impl TabSurface {
+    /// The matching terminal leaf in display order. Saved leaves use the same
+    /// order as restored panes, so activation can focus the selected directory.
+    pub(super) fn terminal_in_directory(&self, target: &[String], cx: &App) -> Option<usize> {
+        let matches = |cwd: &str| path_identity(Path::new(cwd)) == target;
+
+        match self {
+            Self::Live(tree) => tree.tree().leaves().iter().position(|(_, pane)| {
+                pane.read(cx)
+                    .tab_state()
+                    .cwd
+                    .as_deref()
+                    .is_some_and(matches)
+            }),
+            Self::Pending(state)
+                if state.git_cwd.is_none()
+                    && state.team_room.is_none()
+                    && state
+                        .agent
+                        .as_deref()
+                        .and_then(AgentKind::from_id)
+                        .is_none() =>
+            {
+                if let Some(panes) = &state.panes {
+                    let mut directories = Vec::new();
+
+                    saved_terminal_directories(panes, &mut directories);
+
+                    directories.iter().position(|cwd| cwd.is_some_and(matches))
+                } else {
+                    state.cwd.as_deref().is_some_and(matches).then_some(0)
+                }
+            }
+            _ => None,
+        }
+    }
+
     /// Every agent route this surface holds: one per terminal pane, and the
     /// Agent session's when it has one.
     pub(crate) fn agent_routes(&self, cx: &App) -> Vec<AgentRoute> {
@@ -209,5 +248,16 @@ impl TabSurface {
 
     pub(crate) fn contains(&self, id: PaneId) -> bool {
         self.tree().is_some_and(|tree| tree.tree().contains(id))
+    }
+}
+
+fn saved_terminal_directories<'a>(node: &'a PaneNodeState, directories: &mut Vec<Option<&'a str>>) {
+    match node {
+        PaneNodeState::Leaf { cwd, .. } => directories.push(cwd.as_deref()),
+        PaneNodeState::Split { children, .. } => {
+            for child in children {
+                saved_terminal_directories(child, directories);
+            }
+        }
     }
 }
