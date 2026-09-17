@@ -306,13 +306,6 @@ impl AgentSession {
         &self.profile
     }
 
-    pub fn background_task_count(&self) -> usize {
-        self.controller
-            .borrow()
-            .background_tasks()
-            .map_or(0, |snapshot| snapshot.tasks.len())
-    }
-
     pub fn downgrade(owner: &SessionOwner) -> WeakEntity<Self> {
         owner.session.downgrade()
     }

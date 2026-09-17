@@ -11,12 +11,12 @@ use nmt_config::profile::AgentProfile;
 use crate::ui::AppSettings;
 use crate::ui::background_tasks::BackgroundTasksView;
 use crate::ui::git_status::GitStatusModel;
-use crate::ui::right_panel::RightPanel;
+use crate::ui::right_panel::{RightPanel, RightPanelKind};
 use crate::ui::shell::panels::RightPanelController;
 use crate::ui::workflows::WorkflowsView;
 
 #[gpui::test]
-fn leaving_an_agent_tab_clears_both_panel_targets(cx: &mut TestAppContext) {
+fn empty_tabs_clear_panel_targets_and_close_background_tasks(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_component::init(cx);
 
@@ -29,7 +29,7 @@ fn leaving_an_agent_tab_clears_both_panel_targets(cx: &mut TestAppContext) {
 
     let cx = cx.add_empty_window();
 
-    let (_owner, _pane, controller, workflows, tasks) = cx.update(|window, cx| {
+    let (_owner, pane, controller, workflows, tasks) = cx.update(|window, cx| {
         let owner =
             AgentSession::create(AgentProfile::default(), AgentWorkspace::default(), None, cx);
 
@@ -77,4 +77,26 @@ fn leaving_an_agent_tab_clears_both_panel_targets(cx: &mut TestAppContext) {
     cx.run_until_parked();
 
     assert_eq!(changes.get(), 2);
+
+    for active in [Some(pane), None] {
+        cx.update(|_, cx| {
+            controller.panel().update(cx, |panel, cx| {
+                assert!(panel.select(RightPanelKind::BackgroundTasks, cx));
+            });
+
+            controller.sync_agent_targets(active, cx);
+
+            assert!(!controller.shows(RightPanelKind::BackgroundTasks, cx));
+        });
+    }
+
+    cx.update(|_, cx| {
+        controller.panel().update(cx, |panel, cx| {
+            assert!(panel.select(RightPanelKind::Workflows, cx));
+        });
+
+        controller.sync_agent_targets(None, cx);
+
+        assert!(controller.shows(RightPanelKind::Workflows, cx));
+    });
 }

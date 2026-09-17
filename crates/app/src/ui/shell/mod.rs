@@ -3066,13 +3066,6 @@ impl AppWindow {
                 return;
             }
             AgentPaneEvent::BackgroundTaskActivity => {
-                // Sticky: a finished child stays reachable, so the control
-                // never goes away once it has appeared. The running count
-                // is read at render time, so this only has to repaint the
-                // title bar.
-                self.panels
-                    .note_background_task_seen(session.read(cx).background_task_count() > 0);
-
                 cx.notify();
 
                 return;
@@ -3181,12 +3174,10 @@ impl AppWindow {
                     .unwrap_or(0),
                 open: self.panels.shows(RightPanelKind::Workflows, cx),
             }),
-            // The background-task control stays out of the chrome until a tab
-            // has spawned a child to look at. The history flag is window-wide,
-            // so the active Agent gate keeps this Agent-only control off
-            // terminal tabs.
+            // Finished children remain reachable in their own session without
+            // making the control appear in tabs that have no children.
             background_tasks: active_agent
-                .filter(|_| self.panels.background_tasks_seen())
+                .filter(|pane| pane.read(cx).background_task_count() > 0)
                 .map(|pane| PanelToggle {
                     running: pane.read(cx).running_background_tasks(),
                     open: self.panels.shows(RightPanelKind::BackgroundTasks, cx),

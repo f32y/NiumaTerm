@@ -28,11 +28,6 @@ pub(super) struct RightPanelController {
     /// appears the first time one runs and stays, so a finished run remains
     /// reachable after its rows have settled.
     workflows_seen: bool,
-
-    /// Whether any tab has spawned a background task. Sticky for the same
-    /// reason as `workflows_seen`: a child that has finished is still worth
-    /// opening the view for.
-    background_tasks_seen: bool,
 }
 
 impl RightPanelController {
@@ -41,7 +36,6 @@ impl RightPanelController {
             panel,
             git_model,
             workflows_seen: false,
-            background_tasks_seen: false,
         }
     }
 
@@ -57,16 +51,8 @@ impl RightPanelController {
         self.workflows_seen
     }
 
-    pub(super) fn background_tasks_seen(&self) -> bool {
-        self.background_tasks_seen
-    }
-
     pub(super) fn note_workflow_seen(&mut self) {
         self.workflows_seen = true;
-    }
-
-    pub(super) fn note_background_task_seen(&mut self, any: bool) {
-        self.background_tasks_seen |= any;
     }
 
     /// Whether the right-side area currently shows this content, which is the
@@ -81,9 +67,13 @@ impl RightPanelController {
             .update(cx, |model, cx| model.set_target_cwd(cwd, cx));
     }
 
-    /// Both views follow the active tab. Unsupported sessions clear their
-    /// target while retaining the panel's open state.
+    /// Both views follow the active tab. Empty sessions close the task panel
+    /// because its title-bar toggle is hidden when there are no children.
     pub(super) fn sync_agent_targets(&self, active: Option<Entity<AgentPane>>, cx: &mut App) {
+        let has_background_tasks = active
+            .as_ref()
+            .is_some_and(|pane| pane.read(cx).background_task_count() > 0);
+
         let (workflow_target, task_target) = active.map_or((None, None), |pane| {
             let view = pane.read(cx);
 
@@ -100,6 +90,12 @@ impl RightPanelController {
         workflows.update(cx, |view, cx| view.set_target(workflow_target, cx));
 
         tasks.update(cx, |view, cx| view.set_target(task_target, cx));
+
+        if !has_background_tasks && self.shows(RightPanelKind::BackgroundTasks, cx) {
+            self.panel.update(cx, |panel, cx| {
+                panel.select(RightPanelKind::BackgroundTasks, cx);
+            });
+        }
     }
 
     /// Show `kind`, or close the area when it was already showing. Reports
