@@ -17,8 +17,10 @@ unicode-width.workspace = true
 nmt_profiling.workspace = true
 nmt_agent.workspace = true
 nmt_config.workspace = true
+nmt_input.workspace = true
 nmt_terminal.workspace = true
 nmt_platform.workspace = true
+nmt_runtime.workspace = true
 nmt_updater.workspace = true
 
 dirs.workspace = true
@@ -38,11 +40,11 @@ serde_json.workspace = true
 semver.workspace = true
 toml.workspace = true
 gpui.workspace = true
+gpui_tokio.workspace = true
 gpui-component.workspace = true
 lsp-types.workspace = true
 gpui-kit-assets.workspace = true
 rust-embed.workspace = true
-nmt_input.workspace = true
 # Kitty graphics: construct GPUI `RenderImage` frames from decoded pixels. Same
 # crate/version GPUI links, so `image_rs::Frame` unifies with `gpui`'s `Frame`.
 image_rs.workspace = true

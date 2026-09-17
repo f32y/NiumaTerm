@@ -9,10 +9,12 @@
 #![cfg(windows)]
 
 use std::io::Read;
-use std::thread;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use nmt_platform::{ProcessReadWrite, PtyOptions, create_pty_with_env};
+use nmt_platform::{
+    Events, Interest, Poll, ProcessReadWrite, PtyOptions, Token, Waker, create_pty_with_env,
+};
 
 /// Minimal base64 (standard alphabet, padded) so the test needs no crates.
 fn b64(input: &[u8]) -> String {
@@ -67,6 +69,10 @@ fn drive_conpty_with_title(script: &str, title: Option<&str>) -> Vec<u8> {
     let encoded = b64(&utf16le(script));
     let cmdline = format!("powershell -NoProfile -NonInteractive -EncodedCommand {encoded}");
 
+    let mut poll = Poll::new().expect("failed to create PTY poller");
+
+    let waker = Arc::new(Waker::new(poll.registry(), Token(0)).unwrap());
+
     let mut pty = create_pty_with_env(PtyOptions {
         shell: &cmdline,
         args: &[],
@@ -79,6 +85,10 @@ fn drive_conpty_with_title(script: &str, title: Option<&str>) -> Vec<u8> {
     })
     .expect("failed to create ConPTY");
 
+    pty.register(&poll, &mut (1..).map(Token), Interest::READABLE, &waker)
+        .expect("failed to register ConPTY");
+
+    let mut events = Events::with_capacity(8);
     let mut collected: Vec<u8> = Vec::new();
     let mut buf = [0u8; 4096];
 
@@ -91,12 +101,15 @@ fn drive_conpty_with_title(script: &str, title: Option<&str>) -> Vec<u8> {
         }
 
         match pty.reader().read(&mut buf) {
-            Ok(0) => thread::sleep(Duration::from_millis(20)),
+            Ok(0) => poll
+                .poll(&mut events, Some(Duration::from_millis(20)))
+                .unwrap(),
             Ok(n) => {
                 collected.extend_from_slice(&buf[..n]);
 
                 if find_subslice(&collected, marker).is_some() {
-                    thread::sleep(Duration::from_millis(50));
+                    poll.poll(&mut events, Some(Duration::from_millis(50)))
+                        .unwrap();
 
                     if let Ok(n2) = pty.reader().read(&mut buf) {
                         collected.extend_from_slice(&buf[..n2]);

@@ -6,10 +6,9 @@ mod api_tests;
 
 use std::time::Duration;
 
-use reqwest::blocking::Client;
 use reqwest::header::{COOKIE, HeaderValue, SET_COOKIE};
 use reqwest::redirect::Policy;
-use reqwest::{StatusCode, Url};
+use reqwest::{Client, StatusCode, Url};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tungstenite::client::IntoClientRequest as _;
@@ -63,7 +62,14 @@ impl ApiClient {
     /// The printed URL points at the browser entry page; API paths belong on
     /// its origin, outside the token query. Cookies stay in memory and redirects
     /// are disabled so credentials cannot travel to another server.
+    ///
+    /// Callers are threads outside the shared runtime: host startup already
+    /// waits on the process, so it waits on the login the same way.
     pub(crate) fn new(address: String) -> Result<Self, String> {
+        nmt_runtime::handle().block_on(Self::connect(address))
+    }
+
+    async fn connect(address: String) -> Result<Self, String> {
         let url = Url::parse(&address)
             .map_err(|_| "the harness printed an invalid startup URL".to_string())?;
 
@@ -75,10 +81,10 @@ impl ApiClient {
             .map_err(|error| format!("could not create the DeepSeek client: {error}"))?;
 
         let cookie = if url.query_pairs().any(|(name, _)| name == "token") {
-            let response = http
-                .get(url.clone())
-                .send()
-                .map_err(|error| format!("the harness login failed: {}", error.without_url()))?;
+            let response =
+                http.get(url.clone()).send().await.map_err(|error| {
+                    format!("the harness login failed: {}", error.without_url())
+                })?;
 
             if response.status() != StatusCode::SEE_OTHER {
                 return Err(format!(
@@ -117,27 +123,32 @@ impl ApiClient {
     }
 
     /// Invoke a Remote method with its generated named arguments.
-    pub(crate) fn call(&self, method: &str, args: Value) -> Result<Value, CallError> {
-        self.call_with_timeout(method, args, CALL_TIMEOUT)
+    pub(crate) async fn call(&self, method: &str, args: Value) -> Result<Value, CallError> {
+        self.call_with_timeout(method, args, CALL_TIMEOUT).await
     }
 
     /// Session command methods take one named request object.
-    pub(crate) fn request(&self, method: &str, request: Value) -> Result<Value, CallError> {
-        self.call(method, json!({ "request": request }))
+    pub(crate) async fn request(&self, method: &str, request: Value) -> Result<Value, CallError> {
+        self.call(method, json!({ "request": request })).await
     }
 
     /// Close cleanup uses a shorter deadline so a stalled host cannot retain
-    /// its detached worker for the entire foreground timeout.
-    pub(crate) fn call_with_timeout(
+    /// its detached task for the entire foreground timeout.
+    pub(crate) async fn call_with_timeout(
         &self,
         method: &str,
         args: Value,
         timeout: Duration,
     ) -> Result<Value, CallError> {
-        self.send(method, json!({ "args": args }), timeout)
+        self.send(method, json!({ "args": args }), timeout).await
     }
 
-    fn send(&self, method: &str, payload: Value, timeout: Duration) -> Result<Value, CallError> {
+    async fn send(
+        &self,
+        method: &str,
+        payload: Value,
+        timeout: Duration,
+    ) -> Result<Value, CallError> {
         let request = json!({
             "type": "client-request",
             "rpcId": Uuid::new_v4().to_string(),
@@ -156,7 +167,7 @@ impl ApiClient {
             pending = pending.header(COOKIE, cookie.clone());
         }
 
-        let response = pending.send().map_err(|error| {
+        let response = pending.send().await.map_err(|error| {
             CallError::Transport(format!("{method} could not be sent: {error}"))
         })?;
 
@@ -167,7 +178,7 @@ impl ApiClient {
             )));
         }
 
-        let body = response.text().map_err(|error| {
+        let body = response.text().await.map_err(|error| {
             CallError::Transport(format!("{method} returned an unreadable response: {error}"))
         })?;
 
@@ -189,7 +200,7 @@ impl ApiClient {
 
     /// Event replies carry their stream generation and event identity, so an
     /// answer from an earlier connection cannot settle a newer request.
-    pub(crate) fn respond_event(
+    pub(crate) async fn respond_event(
         &self,
         client_id: &str,
         event_id: &str,
@@ -199,6 +210,7 @@ impl ApiClient {
             "$events/result",
             json!({ "clientId": client_id, "eventId": event_id, "outcome": outcome }),
         )
+        .await
         .map(|_| ())
     }
 

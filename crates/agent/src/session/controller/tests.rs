@@ -782,3 +782,48 @@ fn settings_changes_and_restart_keep_catalog_state_consistent() {
     assert!(session.command_catalog().is_none());
     assert!(session.skill_catalog().is_none());
 }
+
+#[test]
+fn an_answered_model_pick_puts_the_pickers_on_what_the_session_runs() {
+    let (mut session, epoch) = deepseek_with_remembered_permission(SettingsOutcome::Requested);
+
+    session.controls.settings.model = Some("picked-model".into());
+    session.controls.settings.effort = Some("max".into());
+
+    // The harness took the model and kept the effort it chose for it.
+    let taken = session.apply_event(
+        epoch,
+        Event::ModelSelection {
+            model: Some("picked-model".into()),
+            effort: Some("high".into()),
+            refusal: None,
+        },
+    );
+
+    assert!(matches!(taken, SessionEffect::Changed));
+    assert_eq!(
+        session.controls.settings.model.as_deref(),
+        Some("picked-model")
+    );
+    assert_eq!(session.controls.settings.effort.as_deref(), Some("high"));
+
+    session.controls.settings.model = Some("unserved-model".into());
+
+    let refused = session.apply_event(
+        epoch,
+        Event::ModelSelection {
+            model: Some("picked-model".into()),
+            effort: Some("high".into()),
+            refusal: Some("no adapter serves it".into()),
+        },
+    );
+
+    assert!(matches!(
+        refused,
+        SessionEffect::EffortRejected { message } if message == "no adapter serves it"
+    ));
+    assert_eq!(
+        session.controls.settings.model.as_deref(),
+        Some("picked-model")
+    );
+}

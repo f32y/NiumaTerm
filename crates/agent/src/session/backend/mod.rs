@@ -92,6 +92,9 @@ pub enum SettingsOutcome {
     /// The harness answered the request and the pick is in force. The
     /// session's own selection is now the authority on what is set.
     Effective,
+    /// The request is on its way and its answer arrives as an event. The
+    /// caller's recorded settings stand until that event corrects them.
+    Requested,
     /// Nothing was sent. The pick travels with the next submission, so the
     /// caller's recorded settings remain the authority until then.
     RidesNextSubmission,
@@ -320,11 +323,17 @@ impl Backend {
         }
     }
 
-    /// Pin a title on the conversation, answering with the title the backend
-    /// actually accepted after its own normalization.
+    /// Ask the backend to pin a title on the conversation, answering with the
+    /// title that was requested. The backend normalizes what it stores and
+    /// publishes the result as a title update, and reports a refusal in the
+    /// transcript.
     pub fn rename_conversation(&mut self, title: &str) -> Result<String, OperationError> {
         match self {
-            Backend::DeepSeek(session) => session.rename(title).map_err(OperationError::Failed),
+            Backend::DeepSeek(session) => {
+                session.rename(title);
+
+                Ok(title.to_owned())
+            }
             Backend::Codex(_) | Backend::Claude(_) => {
                 Err(OperationError::Unsupported(UnsupportedOperation::Rename))
             }
@@ -757,7 +766,11 @@ impl Backend {
     /// turn, and Claude bakes the model into the launch.
     pub(crate) fn select_model(&mut self, model: &str, effort: Option<&str>) -> SettingsOutcome {
         match self {
-            Backend::DeepSeek(session) => requested(session.select_model(model, effort)),
+            Backend::DeepSeek(session) => {
+                session.select_model(model, effort);
+
+                SettingsOutcome::Requested
+            }
             Backend::Codex(_) | Backend::Claude(_) => SettingsOutcome::RidesNextSubmission,
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(_) => SettingsOutcome::RidesNextSubmission,
@@ -770,7 +783,11 @@ impl Backend {
     /// sent with each turn.
     pub(crate) fn select_approval(&mut self, preset: &str) -> SettingsOutcome {
         match self {
-            Backend::DeepSeek(session) => requested(session.select_permission(preset)),
+            Backend::DeepSeek(session) => {
+                session.select_permission(preset);
+
+                SettingsOutcome::Requested
+            }
             Backend::Codex(_) | Backend::Claude(_) => SettingsOutcome::RidesNextSubmission,
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(session) => {
@@ -786,7 +803,11 @@ impl Backend {
     /// whose capabilities are fixed for the life of the process.
     pub fn select_agent_preset(&mut self, preset: &str) -> SettingsOutcome {
         match self {
-            Backend::DeepSeek(session) => requested(session.select_agent_preset(preset)),
+            Backend::DeepSeek(session) => {
+                session.select_agent_preset(preset);
+
+                SettingsOutcome::Requested
+            }
             Backend::Codex(_) | Backend::Claude(_) => SettingsOutcome::RidesNextSubmission,
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(_) => SettingsOutcome::Effective,
@@ -912,14 +933,6 @@ impl Backend {
 
 /// Build inline images without writing files, so every supplied attachment
 /// travels with the message even when a scratch directory is unavailable.
-/// A pick sent as its own request is in force once the harness accepts it.
-fn requested(result: Result<(), String>) -> SettingsOutcome {
-    match result {
-        Ok(()) => SettingsOutcome::Effective,
-        Err(message) => SettingsOutcome::Refused { message },
-    }
-}
-
 fn inline_images<'a>(attachments: impl Iterator<Item = ImageAttachment<'a>>) -> Vec<MessageImage> {
     attachments
         .map(|attachment| MessageImage {

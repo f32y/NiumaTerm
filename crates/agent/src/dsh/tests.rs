@@ -4,17 +4,14 @@
 
 use std::io::{BufRead as _, BufReader, Read as _, Write as _};
 use std::net::TcpListener;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
+use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use tungstenite::{Message, accept, connect};
 
 use crate::chat::{Event, Item};
 use crate::dsh::api::ApiClient;
-use crate::dsh::events::pump_for_test;
 use crate::dsh::history::sessions;
 use crate::dsh::mapping::{ToolTracker, map_frame};
 use crate::dsh::session::{
@@ -90,56 +87,6 @@ fn scripted_api_server(
 }
 
 #[test]
-fn a_dropped_downlink_does_not_wait_for_the_next_frame() {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback websocket server");
-    let url = format!("ws://{}", listener.local_addr().unwrap());
-
-    let server = thread::spawn(move || {
-        let (stream, _) = listener.accept().expect("accept websocket client");
-
-        let mut socket = accept(stream).expect("complete websocket handshake");
-
-        thread::sleep(Duration::from_millis(700));
-
-        let _ = socket.send(Message::Text("{}".into()));
-        let _ = socket.close(None);
-    });
-
-    let (socket, _) = connect(&url).expect("open websocket client");
-    let stopped = Arc::new(AtomicBool::new(false));
-    let pump_stopped = Arc::clone(&stopped);
-    let (done_tx, done_rx) = mpsc::channel();
-    let (read_tx, read_rx) = mpsc::channel();
-
-    thread::spawn(move || {
-        pump_for_test(socket, &|_| {}, &pump_stopped, &read_tx);
-
-        let _ = done_tx.send(());
-    });
-
-    read_rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("reader should enter the blocking receive");
-
-    stopped.store(true, Ordering::Relaxed);
-
-    let stopped_before_frame = done_rx.recv_timeout(Duration::from_millis(400)).is_ok();
-
-    if !stopped_before_frame {
-        done_rx
-            .recv_timeout(Duration::from_secs(2))
-            .expect("reader should exit after the server sends a frame");
-    }
-
-    server.join().expect("websocket server should exit");
-
-    assert!(
-        stopped_before_frame,
-        "dropping a downlink should stop an idle reader without another frame"
-    );
-}
-
-#[test]
 fn closing_a_session_drops_queued_work_before_cancelling_the_turn() {
     let (base, requests, server) = api_server(3);
     let client = ApiClient::new(base).expect("create API client");
@@ -151,7 +98,7 @@ fn closing_a_session_drops_queued_work_before_cancelling_the_turn() {
     ];
 
     assert_eq!(
-        run_close_actions(&client, SESSION, &actions),
+        nmt_runtime::handle().block_on(run_close_actions(&client, SESSION, &actions)),
         Vec::<String>::new()
     );
 
@@ -2131,7 +2078,12 @@ fn a_new_conversation_is_composed_from_the_remembered_preset() {
 
     let client = ApiClient::new(base).expect("create API client");
 
-    let (opened, refusal) = open_new_conversation(&client, Some(r"C:\Work\api"), Some("reviewer"))
+    let (opened, refusal) = nmt_runtime::handle()
+        .block_on(open_new_conversation(
+            &client,
+            Some(r"C:\Work\api"),
+            Some("reviewer"),
+        ))
         .expect("the conversation must open");
 
     server.join().expect("API server should exit");
@@ -2154,7 +2106,12 @@ fn a_refused_remembered_preset_opens_the_conversation_on_the_default() {
 
     let client = ApiClient::new(base).expect("create API client");
 
-    let (opened, refusal) = open_new_conversation(&client, Some(r"C:\Work\api"), Some("reviewer"))
+    let (opened, refusal) = nmt_runtime::handle()
+        .block_on(open_new_conversation(
+            &client,
+            Some(r"C:\Work\api"),
+            Some("reviewer"),
+        ))
         .expect("a refused preset must not keep the conversation from opening");
 
     server.join().expect("API server should exit");

@@ -11,7 +11,6 @@ use std::time::Duration;
 use std::{env, mem, ptr, thread};
 
 use libc::c_ushort;
-use miow::pipe::anonymous;
 use tracing::*;
 use windows_sys::Win32::Foundation::{HANDLE, S_OK};
 use windows_sys::Win32::System::Console::{COORD, HPCON};
@@ -26,7 +25,7 @@ use windows_sys::core::{HRESULT, PWSTR};
 use windows_sys::{s, w};
 
 use crate::windows::child::ChildExitWatcher;
-use crate::windows::pipes::{EventedAnonRead, EventedAnonWrite};
+use crate::windows::pipes::{conin_pair, conout_pair};
 use crate::windows::process::{KillOnCloseJob, ProcessTree};
 use crate::windows::{Pty, command_line, win32_string};
 use crate::{PtyOptions, Winsize};
@@ -206,12 +205,8 @@ pub fn new(options: PtyOptions<'_>, job: Option<KillOnCloseJob>) -> Result<Pty> 
 
     let mut pty_handle: HPCON = 0;
 
-    // Passing 0 as the size parameter allows the "system default" buffer
-    // size to be used. There may be small performance and memory advantages
-    // to be gained by tuning this in the future, but it's likely a reasonable
-    // start point.
-    let (conout, conout_pty_handle) = anonymous(0)?;
-    let (conin_pty_handle, conin) = anonymous(0)?;
+    let (conout, conout_pty_handle) = conout_pair()?;
+    let (conin_pty_handle, conin) = conin_pair()?;
 
     let winsize = Winsize {
         ws_row: rows as c_ushort,
@@ -382,9 +377,6 @@ pub fn new(options: PtyOptions<'_>, job: Option<KillOnCloseJob>) -> Result<Pty> 
     }
 
     drop(primary_thread);
-
-    let conin = EventedAnonWrite::new(conin);
-    let conout = EventedAnonRead::new(conout);
 
     let child_watcher = ChildExitWatcher::new(process.into_raw_handle())?;
 

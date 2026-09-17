@@ -6,10 +6,11 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
+use tokio::time::timeout;
 use tungstenite::{Message, accept};
 
 use crate::dsh::api::ApiClient;
-use crate::dsh::events::{Downlinks, Streams};
+use crate::dsh::events::{Downlinks, PassedEvent, Streams};
 use crate::dsh::mapping::{approval_request, question_request};
 
 fn item(stream: &str, value: Value) -> Value {
@@ -74,14 +75,14 @@ fn closing_downlinks_interrupts_handshakes_and_idle_reads_and_joins_delivery() {
             Arc::new(move |_| {
                 let _ = &delivery;
             }),
-        )
-        .unwrap();
+        );
 
         entered.recv_timeout(Duration::from_secs(3)).unwrap();
 
         if ready {
-            connected
-                .recv_timeout(Duration::from_secs(3))
+            nmt_runtime::handle()
+                .block_on(async { timeout(Duration::from_secs(3), connected).await })
+                .unwrap()
                 .unwrap()
                 .unwrap();
         }
@@ -130,15 +131,16 @@ fn a_lost_stream_without_a_serving_host_reports_the_host_exit() {
 
     let (frames_tx, frames) = mpsc::channel();
 
-    let (_downlinks, _) = Downlinks::open(
-        client,
-        Weak::new(),
-        "session-1".into(),
-        Arc::new(move |frame: Value| {
-            let _ = frames_tx.send(frame);
-        }),
-    )
-    .unwrap();
+    let (_downlinks, _) = nmt_runtime::handle()
+        .block_on(Downlinks::open(
+            client,
+            Weak::new(),
+            "session-1".into(),
+            Arc::new(move |frame: Value| {
+                let _ = frames_tx.send(frame);
+            }),
+        ))
+        .unwrap();
 
     server.join().unwrap();
 
@@ -162,7 +164,6 @@ fn a_lost_stream_without_a_serving_host_reports_the_host_exit() {
 
 #[test]
 fn readiness_waits_for_all_subscriptions_and_delivers_the_opening_history() {
-    let client = ApiClient::new("http://127.0.0.1:1".into()).unwrap();
     let frames = RefCell::new(Vec::new());
     let deliver = |frame| frames.borrow_mut().push(frame);
 
@@ -174,7 +175,6 @@ fn readiness_waits_for_all_subscriptions_and_delivers_the_opening_history() {
                 "events",
                 json!({ "type": "ready", "clientId": "generation-1" }),
             ),
-            &client,
             &deliver,
         )
         .unwrap();
@@ -185,7 +185,6 @@ fn readiness_waits_for_all_subscriptions_and_delivers_the_opening_history() {
                 "control",
                 json!({ "type": "baseline", "value": { "queues": {}, "projections": {} } }),
             ),
-            &client,
             &deliver,
         )
         .unwrap();
@@ -195,7 +194,7 @@ fn readiness_waits_for_all_subscriptions_and_delivers_the_opening_history() {
     let snapshot = json!({ "type": "snapshot", "cursor": 4, "records": [], "projections": { "asOfSeq": 4, "values": {} } });
 
     streams
-        .process(item("follow", snapshot.clone()), &client, &deliver)
+        .process(item("follow", snapshot.clone()), &deliver)
         .unwrap();
 
     assert_eq!(streams.ready_snapshot(), Some(&snapshot));
@@ -204,7 +203,6 @@ fn readiness_waits_for_all_subscriptions_and_delivers_the_opening_history() {
 
 #[test]
 fn control_updates_do_not_cross_sessions_and_keep_their_cursor() {
-    let client = ApiClient::new("http://127.0.0.1:1".into()).unwrap();
     let frames = RefCell::new(Vec::new());
     let deliver = |frame| frames.borrow_mut().push(frame);
 
@@ -216,14 +214,13 @@ fn control_updates_do_not_cross_sessions_and_keep_their_cursor() {
                 "control",
                 json!({ "type": "queue", "sessionId": "session-2", "items": [] }),
             ),
-            &client,
             &deliver,
         )
         .unwrap();
 
     assert!(frames.borrow().is_empty());
 
-    streams.process(item("control", json!({ "type": "projection", "sessionId": "session-1", "key": "title", "value": "New title", "seq": 9 })), &client, &deliver).unwrap();
+    streams.process(item("control", json!({ "type": "projection", "sessionId": "session-1", "key": "title", "value": "New title", "seq": 9 })), &deliver).unwrap();
 
     assert_eq!(
         frames.borrow()[0]["payload"],
@@ -233,7 +230,6 @@ fn control_updates_do_not_cross_sessions_and_keep_their_cursor() {
 
 #[test]
 fn interactions_retain_the_generation_and_cancel_the_matching_card() {
-    let client = ApiClient::new("http://127.0.0.1:1".into()).unwrap();
     let frames = RefCell::new(Vec::new());
     let deliver = |frame| frames.borrow_mut().push(frame);
 
@@ -245,7 +241,6 @@ fn interactions_retain_the_generation_and_cancel_the_matching_card() {
                 "events",
                 json!({ "type": "ready", "clientId": "generation-1" }),
             ),
-            &client,
             &deliver,
         )
         .unwrap();
@@ -253,7 +248,7 @@ fn interactions_retain_the_generation_and_cancel_the_matching_card() {
     streams.process(item("events", json!({
         "type": "waterfall", "event": "approval/request", "eventId": "approval-1", "agentId": "session-1",
         "request": { "toolName": "pwsh", "reason": "Write outside the workspace" },
-    })), &client, &deliver).unwrap();
+    })), &deliver).unwrap();
 
     let approval = approval_request(&frames.borrow()[0], "session-1").unwrap();
 
@@ -263,7 +258,7 @@ fn interactions_retain_the_generation_and_cancel_the_matching_card() {
     streams.process(item("events", json!({
         "type": "waterfall", "event": "user-questions/request", "eventId": "question-1", "agentId": "session-1",
         "request": { "questions": [{ "id": "q1", "question": "Continue?", "options": [{ "label": "Yes" }] }] },
-    })), &client, &deliver).unwrap();
+    })), &deliver).unwrap();
 
     let (questions, _) = question_request(&frames.borrow()[1], "session-1").unwrap();
 
@@ -275,7 +270,6 @@ fn interactions_retain_the_generation_and_cancel_the_matching_card() {
                 "events",
                 json!({ "type": "cancel", "eventId": "approval-1" }),
             ),
-            &client,
             &deliver,
         )
         .unwrap();
@@ -291,7 +285,6 @@ fn interactions_retain_the_generation_and_cancel_the_matching_card() {
                 "events",
                 json!({ "type": "cancel", "eventId": "question-1" }),
             ),
-            &client,
             &deliver,
         )
         .unwrap();
@@ -304,17 +297,133 @@ fn interactions_retain_the_generation_and_cancel_the_matching_card() {
 
 #[test]
 fn a_failed_subscription_is_a_startup_failure() {
-    let client = ApiClient::new("http://127.0.0.1:1".into()).unwrap();
-
     let error = Streams::new("session-1")
         .process(
             json!({
                 "type": "error", "streamId": "follow", "error": { "message": "session not found" },
             }),
-            &client,
             &|_| {},
         )
         .unwrap_err();
 
     assert!(error.contains("session not found"));
+}
+
+#[test]
+fn an_interaction_for_another_conversation_is_passed_without_being_shown() {
+    let frames = RefCell::new(Vec::new());
+    let deliver = |frame| frames.borrow_mut().push(frame);
+
+    let mut streams = Streams::new("session-1");
+
+    streams
+        .process(
+            item(
+                "events",
+                json!({ "type": "ready", "clientId": "generation-1" }),
+            ),
+            &deliver,
+        )
+        .unwrap();
+
+    let passed = streams
+        .process(
+            item(
+                "events",
+                json!({
+                    "type": "waterfall", "event": "approval/request", "eventId": "approval-9",
+                    "agentId": "session-2", "request": { "toolName": "pwsh" },
+                }),
+            ),
+            &deliver,
+        )
+        .unwrap();
+
+    assert_eq!(
+        passed,
+        Some(PassedEvent {
+            client_id: "generation-1".into(),
+            event_id: "approval-9".into(),
+        })
+    );
+    assert!(frames.borrow().is_empty());
+}
+
+/// Regression: the reply that passes an interaction on used to run on the
+/// reader itself, so a host slow to answer it also stopped the heartbeat
+/// replies and had the socket dropped as dead.
+#[test]
+fn a_stalled_pass_reply_does_not_stop_heartbeat_answers() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let client = ApiClient::new(format!("http://{}", listener.local_addr().unwrap())).unwrap();
+    let (ponged_tx, ponged) = mpsc::channel();
+
+    let server = thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+
+        stream
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+
+        let mut socket = accept(stream).unwrap();
+
+        for _ in 0..3 {
+            socket.read().unwrap();
+        }
+
+        for frame in [
+            item(
+                "events",
+                json!({ "type": "ready", "clientId": "generation" }),
+            ),
+            item("control", json!({ "type": "baseline", "value": {} })),
+            item("follow", json!({ "type": "snapshot", "records": [] })),
+            item(
+                "events",
+                json!({
+                    "type": "waterfall", "event": "approval/request", "eventId": "approval-9",
+                    "agentId": "session-2", "request": {},
+                }),
+            ),
+        ] {
+            socket
+                .send(Message::Text(frame.to_string().into()))
+                .unwrap();
+        }
+
+        // The pass reply arrives as a second connection and is never answered.
+        let (stalled_reply, _) = listener.accept().unwrap();
+
+        socket.send(Message::Ping(Vec::new().into())).unwrap();
+
+        let ponged = loop {
+            match socket.read() {
+                Ok(Message::Pong(_)) => break true,
+                Ok(_) => {}
+                Err(_) => break false,
+            }
+        };
+
+        ponged_tx.send(ponged).unwrap();
+
+        drop(stalled_reply);
+    });
+
+    let (downlinks, _) = nmt_runtime::handle()
+        .block_on(Downlinks::open(
+            client,
+            Weak::new(),
+            "session-1".into(),
+            Arc::new(|_: Value| {}),
+        ))
+        .unwrap();
+
+    assert!(
+        ponged.recv_timeout(Duration::from_secs(5)).unwrap(),
+        "the reader stopped answering heartbeats while a reply was outstanding"
+    );
+
+    drop(downlinks);
+
+    server.join().unwrap();
 }

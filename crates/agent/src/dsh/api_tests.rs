@@ -111,8 +111,8 @@ fn startup_token_authenticates_rpc_and_stream_without_corrupting_the_path() {
     let client = ApiClient::new(format!("http://{address}/?token=startup-secret")).unwrap();
 
     assert_eq!(
-        client
-            .request("session/create", json!({ "cwd": "project" }))
+        nmt_runtime::handle()
+            .block_on(client.request("session/create", json!({ "cwd": "project" })))
             .unwrap()["sessionId"],
         "session-1"
     );
@@ -153,12 +153,12 @@ fn event_reply_keeps_the_generation_and_event_ids() {
 
     let client = ApiClient::new(format!("http://{address}")).unwrap();
 
-    client
-        .respond_event(
+    nmt_runtime::handle()
+        .block_on(client.respond_event(
             "generation-1",
             "approval-1",
             json!({ "kind": "result", "value": "allowed-once" }),
-        )
+        ))
         .unwrap();
 
     server.join().unwrap();
@@ -216,7 +216,9 @@ fn commands_submit_an_empty_attachment_list_for_every_command_line() {
 
     for line in lines {
         assert_eq!(
-            catalogs::execute_command(&client, "session-1", line).unwrap(),
+            nmt_runtime::handle()
+                .block_on(catalogs::execute_command(&client, "session-1", line))
+                .unwrap(),
             value
         );
     }
@@ -245,7 +247,9 @@ fn commands_retry_the_older_attachment_name_after_argument_rejection() {
     ]);
 
     assert_eq!(
-        catalogs::execute_command(&client, "session-1", line).unwrap(),
+        nmt_runtime::handle()
+            .block_on(catalogs::execute_command(&client, "session-1", line))
+            .unwrap(),
         value
     );
 
@@ -265,7 +269,11 @@ fn commands_return_unrelated_failures_without_retrying() {
         )]);
 
         assert_eq!(
-            catalogs::execute_command(&client, "session-1", "/permission dangerously"),
+            nmt_runtime::handle().block_on(catalogs::execute_command(
+                &client,
+                "session-1",
+                "/permission dangerously"
+            )),
             Err(CallError::Business {
                 code: code.into(),
                 message: message.into()

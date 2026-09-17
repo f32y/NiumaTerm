@@ -176,15 +176,17 @@ pub(crate) fn agent_args(session_id: &str) -> Value {
 /// The attachment list is required even when empty. Older hosts name it
 /// `images`; retry only their exact argument rejection, which occurs before
 /// the command runs. Other errors may follow execution and cannot be retried.
-pub(super) fn execute_command(
+pub(super) async fn execute_command(
     client: &ApiClient,
     session_id: &str,
     line: &str,
 ) -> Result<Value, CallError> {
-    let result = client.call(
-        EXECUTE_METHOD,
-        json!({ "agentId": session_id, "line": line, "submittedAttachments": [] }),
-    );
+    let result = client
+        .call(
+            EXECUTE_METHOD,
+            json!({ "agentId": session_id, "line": line, "submittedAttachments": [] }),
+        )
+        .await;
 
     match result {
         Err(CallError::Business { code, message })
@@ -192,10 +194,12 @@ pub(super) fn execute_command(
                 && message
                     == "typert gateway: commands/execute: args fields do not match the descriptor: missing \"images\"; unexpected \"submittedAttachments\"" =>
         {
-            client.call(
-                EXECUTE_METHOD,
-                json!({ "agentId": session_id, "line": line, "images": [] }),
-            )
+            client
+                .call(
+                    EXECUTE_METHOD,
+                    json!({ "agentId": session_id, "line": line, "images": [] }),
+                )
+                .await
         }
         result => result,
     }

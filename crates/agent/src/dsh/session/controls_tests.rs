@@ -78,8 +78,7 @@ fn stalled_http_accepts_large_payloads_and_a_burst_of_distinct_controls() {
         Arc::new(move |value| {
             let _ = done_tx.send(value);
         }),
-    )
-    .unwrap();
+    );
 
     assert!(controls.submit(Operation::Interrupt, "session/cancel", json!({}), None));
 
@@ -144,8 +143,7 @@ fn failure_releases_admission_for_retry_and_old_completion_is_ignored() {
         Arc::new(move |value| {
             tx.send(value).unwrap();
         }),
-    )
-    .unwrap();
+    );
 
     assert!(controls.submit(Operation::Interrupt, "session/cancel", json!({}), None));
 
@@ -212,8 +210,7 @@ fn cancelled_approval_reports_stop_failure_without_rejecting_the_answer() {
         Arc::new(move |value| {
             tx.send(value).unwrap();
         }),
-    )
-    .unwrap();
+    );
 
     assert!(controls.submit(
         Operation::Approval(ApprovalRequest { client_id: "generation".into(), event_id: "event".into(), description: "Run".into() }),

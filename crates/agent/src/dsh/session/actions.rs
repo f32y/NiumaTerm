@@ -1,7 +1,6 @@
 //! User commands and interaction answers for a session.
 
 use std::sync::Arc;
-use std::thread;
 use std::time::Duration;
 
 use base64::Engine as _;
@@ -10,14 +9,15 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::chat::{ForkAnchor, MessageImage, QuestionResponse, SendOutcome, SlashCommandOutcome};
-use crate::dsh::api::{ApiClient, CallError};
+use crate::dsh::api::ApiClient;
 use crate::dsh::catalogs;
-use crate::dsh::session::Session;
 use crate::dsh::session::controls::{Operation, question_id};
 use crate::dsh::session::loads::{
-    load_commands, load_fork_checkpoints, load_search, load_sessions, load_skills,
-    load_subagent_transcript, load_subagents, load_workflow_transcript,
+    load_agent_presets, load_commands, load_fork_checkpoints, load_search, load_sessions,
+    load_skills, load_subagent_transcript, load_subagents, load_workflow_transcript,
 };
+use crate::dsh::session::switch::Target;
+use crate::dsh::session::{Session, settled};
 
 impl Session {
     /// Answer the approval the harness is blocked on.
@@ -158,13 +158,15 @@ impl Session {
     }
 
     /// Point the session at another model, optionally pinning a reasoning
-    /// effort. Returns why the harness refused, because a picker that silently
-    /// keeps showing a value the session never adopted is worse than an error.
+    /// effort. The answer arrives as [`crate::chat::Event::ModelSelection`],
+    /// carrying why the harness refused when it did, because a picker that
+    /// silently keeps showing a value the session never adopted is worse than
+    /// an error.
     ///
     /// An absent `effort` is how the adapter's own default is asked for, which
     /// is what a model switch wants: the levels belong to the exact model, so
     /// carrying the previous one over could pin a level this route rejects.
-    pub(crate) fn select_model(&mut self, model: &str, effort: Option<&str>) -> Result<(), String> {
+    pub(crate) fn select_model(&mut self, model: &str, effort: Option<&str>) {
         let (provider, id) = self.models.route(model);
 
         let mut payload = json!({
@@ -177,21 +179,24 @@ impl Session {
             payload["reasoningEffort"] = json!(effort);
         }
 
-        let selected = self
-            .client
-            .request("session/selectModel", payload)
-            .map_err(|error| error.message().to_string())?;
+        let client = self.client.clone();
+        let deliver = Arc::clone(&self.deliver);
+        let session_id = self.session_id.clone();
+        let model = model.to_string();
 
-        // The harness answers with the selection it committed, which is what
-        // the directory records: an effort it declined to pin is absent there.
-        self.models.set_selected(
-            model.to_string(),
-            selected["selected"]["reasoningEffort"]
-                .as_str()
-                .map(str::to_string),
-        );
+        self.lane.run(async move {
+            let command = match client.request("session/selectModel", payload).await {
+                Ok(selected) => json!({
+                    "kind": "modelSelected", "model": model,
+                    "reasoningEffort": selected["selected"]["reasoningEffort"],
+                }),
+                Err(error) => json!({
+                    "kind": "modelSelected", "model": model, "error": error.message(),
+                }),
+            };
 
-        Ok(())
+            deliver(settled(&session_id, command));
+        });
     }
 
     /// What the session is actually set to, for a caller restoring its pickers
@@ -205,11 +210,29 @@ impl Session {
     /// The harness exposes the switch only as its `/permission` command, and
     /// selecting the preset already in effect records nothing, so sending a
     /// pick that already holds is harmless.
-    pub fn select_permission(&mut self, preset: &str) -> Result<(), String> {
-        match self.execute_slash_command("permission", preset) {
-            SlashCommandOutcome::Rejected { message } => Err(message),
-            _ => Ok(()),
-        }
+    ///
+    /// Nobody typed this command: it restores a remembered pick when a
+    /// conversation opens. A switch that took is already visible as the
+    /// permission projection it moved, so only a refusal is reported.
+    pub fn select_permission(&mut self, preset: &str) {
+        let client = self.client.clone();
+        let deliver = Arc::clone(&self.deliver);
+        let session_id = self.session_id.clone();
+        let preset = preset.to_string();
+
+        self.lane.run(async move {
+            let command = run_slash(&client, &session_id, "permission", &preset).await;
+
+            let refused = command["error"].is_string()
+                || matches!(
+                    catalogs::command_outcome("permission", &preset, &command["value"]),
+                    SlashCommandOutcome::Rejected { .. }
+                );
+
+            if refused {
+                deliver(settled(&session_id, command));
+            }
+        });
     }
 
     /// Recompose this conversation's agent from another preset.
@@ -217,32 +240,43 @@ impl Session {
     /// The harness allows this only while no turn has run: the logged history
     /// was produced under the previous composition's tools, and a new one may
     /// not be able to make the calls that history records. Rather than
-    /// predicting that here, the refusal is returned for the picker to show —
-    /// the harness owns the rule and answers with its own reason.
-    pub fn select_agent_preset(&mut self, preset: &str) -> Result<(), String> {
+    /// predicting that here, the preset catalog is published again either way:
+    /// naming the new preset, or the one still in force beside the harness's
+    /// own reason for keeping it.
+    pub fn select_agent_preset(&mut self, preset: &str) {
         let payload = json!({ "agentId": self.session_id, "agentPreset": preset });
 
-        self.client
-            .call("agentPresets/select", payload)
-            .map_err(|error| error.message().to_string())?;
+        let client = self.client.clone();
+        let deliver = Arc::clone(&self.deliver);
+        let session_id = self.session_id.clone();
+        let previous = self.agent_preset.clone();
+        let preset = preset.to_string();
 
-        // A preset names the plugins the agent is built from, so the commands
-        // and skills it serves are the ones that just changed. Leaving the
-        // palette on the previous composition's would offer entries the new
-        // agent cannot run.
-        load_commands(
-            self.client.clone(),
-            self.session_id.clone(),
-            Arc::clone(&self.deliver),
-        );
+        self.lane.run(async move {
+            let refusal = client
+                .call("agentPresets/select", payload)
+                .await
+                .err()
+                .map(|error| error.message().to_string());
 
-        load_skills(
-            self.client.clone(),
-            self.session_id.clone(),
-            Arc::clone(&self.deliver),
-        );
+            // A preset names the plugins the agent is built from, so the
+            // commands and skills it serves are the ones that just changed.
+            // Leaving the palette on the previous composition's would offer
+            // entries the new agent cannot run.
+            if refusal.is_none() {
+                load_commands(client.clone(), session_id.clone(), Arc::clone(&deliver));
 
-        Ok(())
+                load_skills(client.clone(), session_id.clone(), Arc::clone(&deliver));
+            }
+
+            let current = if refusal.is_none() {
+                Some(preset)
+            } else {
+                previous
+            };
+
+            load_agent_presets(client, session_id, current, refusal, deliver);
+        });
     }
 
     /// Send a prompt and the images it carries.
@@ -252,25 +286,43 @@ impl Session {
     /// work it is correcting finishes. The harness treats a steer whose window
     /// has already closed as the next queued message, so both outcomes leave
     /// the message pending and the reply is reported as steered either way.
+    ///
+    /// The outcome names what was asked for. Admission is the harness's to
+    /// answer, and a refusal ends the turn this opened with its reason.
     pub fn send_user_message(&mut self, text: &str, images: &[MessageImage]) -> SendOutcome {
         let steering = self.running;
 
         let mode = if steering { "steer" } else { "queue" };
 
-        match self.prompt(text, mode, images) {
-            Ok(_) if steering => SendOutcome::Steered,
-            Ok(_) => SendOutcome::StartedTurn,
-            Err(error) => SendOutcome::Rejected {
-                message: error.message().to_string(),
-            },
+        let payload = prompt_payload(&self.session_id, text, mode, images);
+
+        let client = self.client.clone();
+        let deliver = Arc::clone(&self.deliver);
+        let session_id = self.session_id.clone();
+
+        self.lane.run(async move {
+            if let Err(error) = client.request("session/prompt", payload).await {
+                deliver(settled(
+                    &session_id,
+                    json!({
+                        "kind": "promptRefused", "steering": steering, "error": error.message(),
+                    }),
+                ));
+            }
+        });
+
+        if steering {
+            SendOutcome::Steered
+        } else {
+            SendOutcome::StartedTurn
         }
     }
 
     /// Drop one prompt the harness has accepted but not started.
     ///
-    /// Returns whether the harness took the removal, because a message it has
-    /// already claimed is one the transcript is about to show as sent and the
-    /// row must not disappear as though it never was.
+    /// Answers whether the removal was requested. A message the harness has
+    /// already claimed is one the transcript is about to show as sent, so a
+    /// refusal republishes the inbox and the row returns.
     pub fn remove_queued_prompt(&mut self, item_id: &str) -> bool {
         let payload = json!({
             "sessionId": self.session_id,
@@ -278,48 +330,50 @@ impl Session {
             "action": { "kind": "remove" },
         });
 
-        match self.client.request("session/updateQueue", payload) {
-            Ok(_) => {
-                self.queued_prompt_ids.retain(|queued| queued != item_id);
+        let client = self.client.clone();
+        let deliver = Arc::clone(&self.deliver);
+        let session_id = self.session_id.clone();
 
-                true
-            }
-            Err(error) => {
+        self.lane.run(async move {
+            if let Err(error) = client.request("session/updateQueue", payload).await {
                 tracing::warn!(
                     "deepseek queued prompt could not be removed: {}",
                     error.message()
                 );
 
-                false
+                deliver(settled(
+                    &session_id,
+                    json!({ "kind": "queueRemovalRefused", "error": error.message() }),
+                ));
             }
-        }
+        });
+
+        true
     }
 
     /// Pin this conversation's title.
     ///
-    /// The harness normalizes what it accepts and regenerates a title it chose
-    /// itself, so the accepted title is read back rather than assumed. The
-    /// recent list is re-read afterwards because the row it holds for this
-    /// conversation still carries the old one.
-    pub fn rename(&mut self, title: &str) -> Result<String, String> {
+    /// The harness normalizes what it accepts and republishes the title it
+    /// keeps, which is how the tab learns the final wording. The recent list
+    /// is re-read afterwards because the row it holds for this conversation
+    /// still carries the old one.
+    pub fn rename(&mut self, title: &str) {
         let payload = json!({ "sessionId": self.session_id, "title": title });
 
-        let renamed = self
-            .client
-            .request("session/rename", payload)
-            .map_err(|error| error.message().to_string())?;
+        let client = self.client.clone();
+        let deliver = Arc::clone(&self.deliver);
+        let session_id = self.session_id.clone();
+        let cwd = self.cwd.clone();
 
-        load_sessions(
-            self.client.clone(),
-            self.cwd.clone(),
-            Arc::clone(&self.deliver),
-        );
-
-        Ok(renamed["title"]
-            .as_str()
-            .unwrap_or(title)
-            .trim()
-            .to_string())
+        self.lane.run(async move {
+            match client.request("session/rename", payload).await {
+                Ok(_) => load_sessions(client, cwd, deliver),
+                Err(error) => deliver(settled(
+                    &session_id,
+                    json!({ "kind": "renameRefused", "error": error.message() }),
+                )),
+            }
+        });
     }
 
     /// Ask which prompts this conversation can be branched in front of.
@@ -335,10 +389,9 @@ impl Session {
     ///
     /// The harness cuts on whole turns: it takes the anchoring seq to mean the
     /// turn that seq falls in and keeps that turn entire, which is why the
-    /// anchor names the prompt ahead of the one the branch stops at. Omitting
-    /// it falls back to the last completed turn. The tab then moves to the
-    /// child the same way it moves to any other conversation, so the parent is
-    /// left exactly as it was.
+    /// anchor names the prompt ahead of the one the branch stops at. The tab
+    /// then moves to the child the same way it moves to any other
+    /// conversation, so the parent is left exactly as it was.
     pub fn fork(&mut self, anchor: Option<&ForkAnchor>) -> Result<(), String> {
         let at_seq = match anchor {
             Some(ForkAnchor::DeepSeekThrough(seq)) => Some(*seq),
@@ -346,25 +399,12 @@ impl Session {
             None => None,
         };
 
-        let mut payload = json!({ "sessionId": self.session_id });
+        self.switch_to(Target::BranchOf {
+            session_id: self.session_id.clone(),
+            at_seq,
+        });
 
-        if let Some(at_seq) = at_seq {
-            payload["atSeq"] = json!(at_seq);
-        }
-
-        let forked = self
-            .client
-            .request("session/fork", payload)
-            .map_err(|error| error.message().to_string())?;
-
-        let child = forked["sessionId"]
-            .as_str()
-            .ok_or_else(|| "the harness answered without a conversation id".to_string())?
-            .to_string();
-
-        self.resume_thread(&child)
-            .then_some(())
-            .ok_or_else(|| "the harness would not open the branched conversation".to_string())
+        Ok(())
     }
 
     /// Search the conversations this tab could resume for a phrase.
@@ -381,52 +421,26 @@ impl Session {
         );
     }
 
-    /// Run one of the harness's own commands.
+    /// Run one of the harness's own commands. The outcome arrives as
+    /// [`crate::chat::Event::SlashCommandResult`].
     ///
     /// The registry is reached directly rather than through a prompt: the host
     /// admits a prompt to the agent whatever it starts with, so a slash line
     /// sent that way would reach the model as text instead of running.
     pub fn execute_slash_command(&mut self, name: &str, arguments: &str) -> SlashCommandOutcome {
-        let line = match arguments.trim() {
-            "" => format!("/{name}"),
-            arguments => format!("/{name} {arguments}"),
-        };
+        let client = self.client.clone();
+        let deliver = Arc::clone(&self.deliver);
+        let session_id = self.session_id.clone();
+        let name = name.to_string();
+        let arguments = arguments.to_string();
 
-        let answer = catalogs::execute_command(&self.client, &self.session_id, &line);
+        self.lane.run(async move {
+            let command = run_slash(&client, &session_id, &name, &arguments).await;
 
-        match answer {
-            Ok(value) => catalogs::command_outcome(name, arguments, &value),
-            Err(error) => SlashCommandOutcome::Rejected {
-                message: error.message().to_string(),
-            },
-        }
-    }
+            deliver(settled(&session_id, command));
+        });
 
-    /// Image bytes travel inline rather than by reference: the harness's
-    /// attachment method reads what a conversation already holds and is no
-    /// route for putting something into one. A model that declines image
-    /// input refuses the whole prompt, which is a business error the composer
-    /// reports, so nothing is dropped silently to make a message fit.
-    fn prompt(&self, text: &str, mode: &str, images: &[MessageImage]) -> Result<Value, CallError> {
-        let mut content = vec![json!({ "type": "text", "text": text })];
-
-        content.extend(images.iter().map(|image| {
-            json!({
-                "type": "image",
-                "mediaType": image.media_type,
-                "data": BASE64_STANDARD.encode(&image.bytes),
-            })
-        }));
-
-        self.client.request(
-            "session/prompt",
-            json!({
-                "requestId": Uuid::new_v4().to_string(),
-                "sessionId": self.session_id,
-                "mode": mode,
-                "content": content,
-            }),
-        )
+        SlashCommandOutcome::Accepted
     }
 
     /// Stop the running turn. The harness keeps whatever the turn already
@@ -458,8 +472,9 @@ impl Drop for Session {
         self.controls.clear();
 
         let mut actions: Vec<CloseAction> = self
-            .queued_prompt_ids
+            .queued_prompts
             .drain(..)
+            .filter_map(|prompt| prompt.id)
             .map(CloseAction::RemoveQueued)
             .collect();
 
@@ -471,9 +486,51 @@ impl Drop for Session {
     }
 }
 
+/// Image bytes travel inline rather than by reference: the harness's
+/// attachment method reads what a conversation already holds and is no route
+/// for putting something into one. A model that declines image input refuses
+/// the whole prompt, which is a business error the transcript reports, so
+/// nothing is dropped silently to make a message fit.
+fn prompt_payload(session_id: &str, text: &str, mode: &str, images: &[MessageImage]) -> Value {
+    let mut content = vec![json!({ "type": "text", "text": text })];
+
+    content.extend(images.iter().map(|image| {
+        json!({
+            "type": "image",
+            "mediaType": image.media_type,
+            "data": BASE64_STANDARD.encode(&image.bytes),
+        })
+    }));
+
+    json!({
+        "requestId": Uuid::new_v4().to_string(),
+        "sessionId": session_id,
+        "mode": mode,
+        "content": content,
+    })
+}
+
+/// Run one command line against the session's registry and describe the
+/// harness's answer as the settled command a frame carries.
+async fn run_slash(client: &ApiClient, session_id: &str, name: &str, arguments: &str) -> Value {
+    let line = match arguments.trim() {
+        "" => format!("/{name}"),
+        arguments => format!("/{name} {arguments}"),
+    };
+
+    let mut command = json!({ "kind": "slash", "name": name, "arguments": arguments });
+
+    match catalogs::execute_command(client, session_id, &line).await {
+        Ok(value) => command["value"] = value,
+        Err(error) => command["error"] = json!(error.message()),
+    }
+
+    command
+}
+
 // Remote cleanup for a tab that is releasing its Harness session.
 
-/// Close cleanup is detached from the UI thread and should give up quickly if
+/// Close cleanup is detached from the closing thread and should give up quickly if
 /// another tab no longer keeps the shared host reachable.
 const CLOSE_CALL_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -486,7 +543,7 @@ pub(crate) enum CloseAction {
 /// Apply the remote work needed before a tab forgets its session. Queue entries
 /// are removed before the active turn is cancelled because the Harness keeps
 /// its inbox on cancellation and would otherwise start another invisible turn.
-pub(crate) fn run_close_actions(
+pub(crate) async fn run_close_actions(
     client: &ApiClient,
     session_id: &str,
     actions: &[CloseAction],
@@ -506,8 +563,9 @@ pub(crate) fn run_close_actions(
             CloseAction::CancelTurn => ("session/cancel", json!({ "sessionId": session_id })),
         };
 
-        if let Err(error) =
-            client.call_with_timeout(method, json!({ "request": payload }), CLOSE_CALL_TIMEOUT)
+        if let Err(error) = client
+            .call_with_timeout(method, json!({ "request": payload }), CLOSE_CALL_TIMEOUT)
+            .await
         {
             failures.push(format!("{method}: {}", error.message()));
         }
@@ -521,15 +579,9 @@ fn schedule_close_actions(client: ApiClient, session_id: String, actions: Vec<Cl
         return;
     }
 
-    let spawn = thread::Builder::new()
-        .name("deepseek-close".to_string())
-        .spawn(move || {
-            for failure in run_close_actions(&client, &session_id, &actions) {
-                tracing::warn!("deepseek session close cleanup failed: {failure}");
-            }
-        });
-
-    if let Err(error) = spawn {
-        tracing::warn!("deepseek session close cleanup could not start: {error}");
-    }
+    nmt_runtime::handle().spawn(async move {
+        for failure in run_close_actions(&client, &session_id, &actions).await {
+            tracing::warn!("deepseek session close cleanup failed: {failure}");
+        }
+    });
 }

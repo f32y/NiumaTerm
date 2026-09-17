@@ -2009,9 +2009,9 @@ impl AgentPane {
             .into_owned()),
         };
 
-        // The accepted title is echoed rather than the requested one: the
-        // backend normalizes what it stores, and confirming text it did not
-        // keep would describe a rename that did not happen that way.
+        // The backend answers with the title it was asked for. What it keeps
+        // after its own normalization reaches the tab as a title update, and
+        // a refusal is reported in the transcript.
         match outcome {
             Ok(accepted) => {
                 self.palette.set_feedback(
@@ -2286,7 +2286,23 @@ impl AgentPane {
                     cx,
                 );
             }
-            SlashCommandOutcome::Completed { message, .. } => {
+            SlashCommandOutcome::Completed { message, approval } => {
+                // A backend that answers its commands later reports an
+                // accepted permission switch here, and it is remembered for
+                // the next conversation the same way an immediate answer is.
+                if let Some(preset) = approval {
+                    let session_profile = session_host.read(cx).profile.clone();
+
+                    self.session.borrow_mut().controls.settings.approval = Some(preset);
+
+                    remember_defaults(
+                        &self.session.borrow().controls,
+                        session_kind,
+                        &session_profile,
+                        cx,
+                    );
+                }
+
                 self.palette.set_feedback(
                     CommandFeedbackKind::Notice,
                     message.unwrap_or_else(|| {
@@ -3344,7 +3360,9 @@ impl AgentPane {
         };
 
         match outcome {
-            SettingsOutcome::Effective | SettingsOutcome::RidesNextSubmission => cx.notify(),
+            SettingsOutcome::Effective
+            | SettingsOutcome::Requested
+            | SettingsOutcome::RidesNextSubmission => cx.notify(),
             SettingsOutcome::Refused { message } => {
                 self.palette
                     .set_feedback(CommandFeedbackKind::Error, message, cx)
@@ -3368,7 +3386,9 @@ impl AgentPane {
         };
 
         match outcome {
-            SettingsOutcome::Effective | SettingsOutcome::RidesNextSubmission => {
+            SettingsOutcome::Effective
+            | SettingsOutcome::Requested
+            | SettingsOutcome::RidesNextSubmission => {
                 let Some(session_host) = self.host.upgrade() else {
                     return;
                 };
