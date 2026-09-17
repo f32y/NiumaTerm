@@ -1039,12 +1039,43 @@ impl TranscriptView {
             .count();
 
         let old_mid = start + prefix..self.rows.len() - suffix;
-        let new_mid = new.len() - suffix - prefix;
+        let new_mid = &new[prefix..new.len() - suffix];
 
-        if old_mid.len() == new_mid {
+        if old_mid.len() == new_mid.len() {
             self.transcript_list.remeasure_items(old_mid);
         } else {
-            self.transcript_list.splice(old_mid, new_mid);
+            // A row next to one arriving or leaving changes with it, because
+            // its gap is ranked against its neighbour, yet it is still the
+            // row the list holds. Splicing it would zero its height in the
+            // scrollbar's total until it is next laid out and reset a reading
+            // position inside it to its top, so only the rows that really
+            // came or went are spliced.
+            let same_row =
+                |(old, new): &(&TranscriptRow, &TranscriptRow)| old.spec.is_same_row(&new.spec);
+
+            let kept_above = self.rows[old_mid.clone()]
+                .iter()
+                .zip(new_mid)
+                .take_while(same_row)
+                .count();
+
+            let kept_below = self.rows[old_mid.start + kept_above..old_mid.end]
+                .iter()
+                .rev()
+                .zip(new_mid[kept_above..].iter().rev())
+                .take_while(same_row)
+                .count();
+
+            let replaced = old_mid.start + kept_above..old_mid.end - kept_below;
+
+            self.transcript_list
+                .remeasure_items(old_mid.start..replaced.start);
+
+            self.transcript_list
+                .remeasure_items(replaced.end..old_mid.end);
+
+            self.transcript_list
+                .splice(replaced, new_mid.len() - kept_above - kept_below);
         }
 
         self.rows.truncate(start);

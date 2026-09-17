@@ -1293,6 +1293,58 @@ mod row_rhythm_tests {
         });
     }
 
+    /// A step landing under a reply moves that reply's gap down a rank, so the
+    /// reply differs from the row the list holds while still being that row.
+    /// Replacing it would hand the list a row it has never measured: the
+    /// reader part-way through the reply is put back at its top, and its
+    /// height drops out of the scrollbar until it is next laid out.
+    #[gpui::test]
+    fn a_step_landing_under_the_reply_being_read_holds_the_readers_place(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = cx.new(|_| TranscriptView::new(AgentKind::Codex, None));
+
+            view.update(cx, |view, cx| {
+                // Pushed rather than replayed: a replayed turn has settled,
+                // and a settled turn is headed by its work disclosure.
+                view.push(1, user("ask").item, Vec::new(), cx);
+                view.push(1, agent("reply").item, Vec::new(), cx);
+
+                let specs = view.build_row_specs(CollapseRows::Off);
+
+                view.sync_transcript_list(specs);
+
+                let reading = ListOffset {
+                    item_ix: 1,
+                    offset_in_item: px(40.),
+                };
+
+                view.transcript_list.scroll_to(reading);
+
+                view.push(1, command("ls").item, Vec::new(), cx);
+
+                let specs = view.build_row_specs(CollapseRows::Off);
+
+                view.sync_transcript_list(specs);
+
+                assert_eq!(
+                    rhythm(view),
+                    vec![
+                        ("entry", RowGap::Group),
+                        ("entry", RowGap::Work),
+                        ("work", RowGap::Group),
+                    ]
+                );
+
+                let held = view.transcript_list.logical_scroll_top();
+
+                assert_eq!(
+                    (held.item_ix, held.offset_in_item),
+                    (reading.item_ix, reading.offset_in_item)
+                );
+            });
+        });
+    }
+
     /// Reduced motion is read where a disclosure opens rather than where its
     /// progress is reported, so nothing is ever in flight: the content is on
     /// screen at once and the transcript asks for no frames of its own.
