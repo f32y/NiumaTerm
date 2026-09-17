@@ -1126,3 +1126,7 @@ git-toggle-files = "显示/隐藏文件树"
 "settings-appearance-tab-shape" = "水平标签样式"
 "settings-appearance-tab-shape-rounded" = "圆角"
 "settings-appearance-tab-shape-attached" = "贴合"
+
+"app-update-notice-available-title" = "NiumaTerm 有新版本"
+"app-update-notice-installing-title" = "正在更新 NiumaTerm"
+"app-update-notice-failed-title" = "NiumaTerm 更新失败"

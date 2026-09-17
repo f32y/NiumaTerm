@@ -1,6 +1,13 @@
+use nmt_agent::update::{ProviderKind, UpdatePhase};
 use rust_i18n::t;
 
+use crate::agent_updates::{
+    FocusedVisibleLifetime, NotificationPrimaryAction, UpdateNotificationView,
+};
+use crate::ui::notification_card::{NotificationAction, NotificationCard};
 use crate::ui::shell::*;
+#[cfg(windows)]
+use crate::update::UpdateNotification;
 
 /// One on-screen provider-update notification: the reduced view it was built
 /// from, the card entity presenting it, and, for the auto-hiding phases, the
@@ -12,27 +19,21 @@ pub(super) struct UpdateCard {
     elapsed: Option<FocusedVisibleLifetime>,
 }
 
-/// The on-screen provider-update notifications: one card per coordinator key
-/// plus the single polling task that retires the auto-hiding ones. The task
-/// flag belongs beside the cards because it may only run while some card still
-/// has a clock, and it is what stops a second task being spawned.
+/// Provider and application updates share one stack so their cards cannot
+/// overlap. Provider cards have one entry per coordinator key and one polling
+/// task for auto-hiding phases; the task flag prevents duplicate timers.
 #[derive(Default)]
 pub(super) struct UpdateNotificationLayer {
     cards: collections::HashMap<String, UpdateCard>,
     timer_running: bool,
+    #[cfg(windows)]
+    app: UpdateNotification,
 }
 
 fn update_notification_card(
     view: UpdateNotificationView,
     shell: gpui::WeakEntity<AppWindow>,
 ) -> Notification {
-    let tone = match view.tone {
-        UpdateNotificationTone::Info => NotificationType::Info,
-        UpdateNotificationTone::Success => NotificationType::Success,
-        UpdateNotificationTone::Warning => NotificationType::Warning,
-        UpdateNotificationTone::Error => NotificationType::Error,
-    };
-
     let icon = match view.provider {
         ProviderKind::Claude => Icon::new(ClaudeUpdateIcon),
         ProviderKind::Codex => Icon::new(CodexUpdateIcon),
@@ -41,91 +42,51 @@ fn update_notification_card(
     let close_key = view.installation.clone();
     let close_target = view.target.clone();
     let close_phase = view.phase;
-    let progress = view.progress.clone();
-    let progress_key = view.key.clone();
-    let settings_key = view.key.clone();
-    let settings_shell = shell.clone();
 
-    let mut notification = Notification::new()
-        .id1::<AgentUpdateNotification>(view.key.clone())
-        .placement(Anchor::TopRight)
-        .with_type(tone)
-        .icon(icon)
-        .title(view.title.clone())
-        .message(view.message.clone())
-        .autohide(false)
-        .content(move |_, _, _| {
-            let progress_bar = match progress {
-                NotificationProgress::None => None,
-                NotificationProgress::Indeterminate => Some(
-                    Progress::new(format!("{progress_key}-progress"))
-                        .loading(true)
-                        .into_any_element(),
-                ),
-                NotificationProgress::Determinate(value) => Some(
-                    Progress::new(format!("{progress_key}-progress"))
-                        .value(value)
-                        .into_any_element(),
-                ),
-            };
+    let primary = view.primary.map(|action| {
+        let label = match action {
+            NotificationPrimaryAction::Update => t!("shell-updates-update"),
+            NotificationPrimaryAction::Retry => t!("shell-updates-retry"),
+        };
 
-            let has_progress = progress_bar.is_some();
-
-            v_flex()
-                .w_full()
-                .when(has_progress, |this| this.pt_2())
-                .children(progress_bar)
-                .into_any_element()
+        NotificationAction::new(label, move |window, cx| {
+            agent_updates::request_update(view.installation.clone(), window, cx);
         })
-        .secondary_action(move |_, _, _| {
-            let settings_shell = settings_shell.clone();
+    });
 
-            Button::new(format!("{settings_key}-settings"))
-                .ghost()
-                .label(t!("shell-updates-settings"))
-                .on_click(move |_, window, cx| {
-                    let _ = settings_shell.update(cx, |shell, cx| {
-                        shell.on_show_settings(&ShowSettings, window, cx)
-                    });
-                })
-        })
-        .on_close(move |_, cx| {
-            let Some(updates) = cx.try_global::<AgentUpdates>() else {
-                return;
-            };
-
-            if close_phase == UpdatePhase::Available {
-                if let Some(target) = close_target.as_ref() {
-                    updates.coordinator.dismiss_available(&close_key, target);
-                }
-            } else {
-                updates.coordinator.hide_notification(&close_key);
-            }
-
-            AgentUpdates::notify_changed(cx);
-        });
-
-    if let Some(primary) = view.primary {
-        let action_key = view.installation.clone();
-
-        notification = notification.action(move |_, _, _| {
-            Button::new(format!("{}-primary", action_key.as_str()))
-                .primary()
-                .label(match primary {
-                    NotificationPrimaryAction::Update => t!("shell-updates-update"),
-                    NotificationPrimaryAction::Retry => t!("shell-updates-retry"),
-                })
-                .on_click({
-                    let action_key = action_key.clone();
-
-                    move |_, window, cx| {
-                        agent_updates::request_update(action_key.clone(), window, cx)
-                    }
-                })
-        });
+    NotificationCard {
+        title: view.title.into(),
+        message: view.message.into(),
+        tone: view.tone,
+        icon: Some(icon),
+        progress: view.progress,
+        primary,
+        secondary: Some(NotificationAction::new(
+            t!("shell-updates-settings"),
+            move |window, cx| {
+                let _ = shell.update(cx, |shell, cx| {
+                    shell.on_show_settings(&ShowSettings, window, cx)
+                });
+            },
+        )),
     }
+    .build()
+    .id1::<AgentUpdateNotification>(view.key)
+    .on_close(move |_, cx| {
+        let Some(updates) = cx.try_global::<AgentUpdates>() else {
+            return;
+        };
 
-    notification
+        if close_phase == UpdatePhase::Available {
+            if let Some(target) = close_target.as_ref() {
+                updates.coordinator.dismiss_available(&close_key, target);
+            }
+        } else {
+            updates.coordinator.hide_notification(&close_key);
+        }
+
+        AgentUpdates::notify_changed(cx);
+    })
 }
 
 impl UpdateNotificationLayer {
@@ -192,6 +153,9 @@ impl UpdateNotificationLayer {
         }
 
         self.ensure_timer(cx);
+
+        #[cfg(windows)]
+        cards.extend(self.app.render(cx));
 
         (!cards.is_empty()).then(|| {
             v_flex()

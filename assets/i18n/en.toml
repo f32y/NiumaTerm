@@ -1127,3 +1127,7 @@ git-toggle-files = "Toggle file tree"
 "settings-appearance-tab-shape" = "Horizontal Tab Style"
 "settings-appearance-tab-shape-rounded" = "Rounded"
 "settings-appearance-tab-shape-attached" = "Attached"
+
+"app-update-notice-available-title" = "NiumaTerm update available"
+"app-update-notice-installing-title" = "Updating NiumaTerm"
+"app-update-notice-failed-title" = "NiumaTerm update failed"

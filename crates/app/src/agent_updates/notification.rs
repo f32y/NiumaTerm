@@ -4,25 +4,12 @@ use nmt_agent::update::{InstallationKey, InstallationSnapshot, ProviderKind, Upd
 use rust_i18n::t;
 use semver::Version;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum UpdateNotificationTone {
-    Info,
-    Success,
-    Warning,
-    Error,
-}
+use crate::ui::notification_card::{NotificationProgress, NotificationTone};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum NotificationPrimaryAction {
     Update,
     Retry,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum NotificationProgress {
-    None,
-    Indeterminate,
-    Determinate(f32),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -64,7 +51,7 @@ pub(crate) struct UpdateNotificationView {
     pub target: Option<Version>,
     pub title: String,
     pub message: String,
-    pub tone: UpdateNotificationTone,
+    pub tone: NotificationTone,
     pub primary: Option<NotificationPrimaryAction>,
     pub show_settings: bool,
     pub progress: NotificationProgress,
@@ -112,7 +99,7 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
         UpdatePhase::Available => (
             t!("agent-update-notice-available-title", provider = provider).into_owned(),
             format!("{current} → {target_text}"),
-            UpdateNotificationTone::Info,
+            NotificationTone::Info,
             versions
                 .is_some_and(|status| status.can_update)
                 .then_some(NotificationPrimaryAction::Update),
@@ -122,7 +109,7 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
         UpdatePhase::WaitingForIdle => (
             t!("agent-update-notice-waiting-title", provider = provider).into_owned(),
             t!("agent-update-notice-waiting-message").to_string(),
-            UpdateNotificationTone::Info,
+            NotificationTone::Info,
             None,
             NotificationProgress::Indeterminate,
             false,
@@ -130,7 +117,7 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
         UpdatePhase::Suspending => (
             t!("agent-update-notice-stopping-title", provider = provider).into_owned(),
             t!("agent-update-notice-stopping-message").to_string(),
-            UpdateNotificationTone::Info,
+            NotificationTone::Info,
             None,
             progress_view(snapshot),
             false,
@@ -142,7 +129,7 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
                 target = &target_text
             )
             .into_owned(),
-            UpdateNotificationTone::Info,
+            NotificationTone::Info,
             None,
             NotificationProgress::Indeterminate,
             false,
@@ -150,7 +137,7 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
         UpdatePhase::Verifying => (
             t!("agent-update-notice-verifying-title", provider = provider).into_owned(),
             t!("agent-update-notice-verifying-message").to_string(),
-            UpdateNotificationTone::Info,
+            NotificationTone::Info,
             None,
             NotificationProgress::Indeterminate,
             false,
@@ -158,7 +145,7 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
         UpdatePhase::Restoring => (
             t!("agent-update-notice-restoring-title", provider = provider).into_owned(),
             t!("agent-update-notice-restoring-message").to_string(),
-            UpdateNotificationTone::Info,
+            NotificationTone::Info,
             None,
             progress_view(snapshot),
             false,
@@ -166,7 +153,7 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
         UpdatePhase::Updated => (
             t!("agent-update-notice-updated-title", provider = provider).into_owned(),
             t!("agent-update-notice-updated-message", version = &current).into_owned(),
-            UpdateNotificationTone::Success,
+            NotificationTone::Success,
             None,
             NotificationProgress::Determinate(100.0),
             true,
@@ -174,7 +161,7 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
         UpdatePhase::Unchanged => (
             t!("agent-update-notice-unchanged-title", provider = provider).into_owned(),
             bounded_error(snapshot, &t!("agent-update-notice-unchanged-message")),
-            UpdateNotificationTone::Warning,
+            NotificationTone::Warning,
             Some(NotificationPrimaryAction::Retry),
             NotificationProgress::Determinate(100.0),
             true,
@@ -182,7 +169,7 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
         UpdatePhase::Failed => (
             t!("agent-update-notice-failed-title", provider = provider).into_owned(),
             bounded_error(snapshot, &t!("agent-update-notice-failed-message")),
-            UpdateNotificationTone::Error,
+            NotificationTone::Error,
             Some(NotificationPrimaryAction::Retry),
             NotificationProgress::None,
             false,
