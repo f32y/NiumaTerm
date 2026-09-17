@@ -5,56 +5,60 @@
 mod events_tests;
 
 use std::collections::HashMap;
-use std::io::ErrorKind;
-use std::net::{Shutdown, TcpStream};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak, mpsc};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use parking_lot::Mutex;
-use reqwest::Url;
+use futures::{SinkExt as _, StreamExt as _};
 use serde_json::{Value, json};
+use tokio::net::TcpStream;
+use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
+use tokio::sync::oneshot;
+use tokio::task::AbortHandle;
+use tokio::time::{sleep, timeout};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 use tracing::warn;
-use tungstenite::stream::MaybeTlsStream;
-use tungstenite::{Error, Message, WebSocket, client, connect};
+use tungstenite::{Error, Message};
 
 use crate::dsh::api::{ApiClient, CallError};
 use crate::dsh::host::Host;
 
 const RECONNECT_DELAY: Duration = Duration::from_millis(500);
-const STOP_POLL_INTERVAL: Duration = Duration::from_millis(200);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
-type Socket = WebSocket<MaybeTlsStream<TcpStream>>;
+/// How long closing waits for the cancelled reader to let go of the delivery
+/// callback. Cancellation lands at the reader's next suspension point, and it
+/// never blocks between two of them, so this only bounds a stalled runtime.
+const CLOSE_TIMEOUT: Duration = Duration::from_secs(1);
+
+type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 pub(crate) struct Downlinks {
-    control: Arc<DownlinkControl>,
-    worker: Option<thread::JoinHandle<()>>,
-}
+    reader: AbortHandle,
 
-#[derive(Default)]
-struct DownlinkControl {
-    stopped: AtomicBool,
-    socket: Mutex<Option<TcpStream>>,
+    /// Disconnects once the reader has released everything it held.
+    exited: mpsc::Receiver<()>,
 }
 
 impl Downlinks {
     /// Wait for the event generation, control baseline, and log snapshot before
     /// admitting prompts. A successful socket upgrade alone does not establish
     /// the Host listeners and can otherwise lose the first turn's events.
-    pub(crate) fn open(
+    pub(crate) async fn open(
         client: ApiClient,
         host: Weak<Host>,
         session_id: String,
         deliver: Arc<dyn Fn(Value) + Send + Sync>,
     ) -> Result<(Self, Value), String> {
-        let (downlinks, connected) = Self::spawn(client, host, session_id, deliver)?;
+        let (downlinks, connected) = Self::spawn(client, host, session_id, deliver);
 
-        match connected.recv_timeout(CONNECT_TIMEOUT) {
-            Ok(Ok(snapshot)) => Ok((downlinks, snapshot)),
-            Ok(Err(message)) => Err(message),
-            Err(_) => Err("the harness streams did not become ready in time".to_string()),
+        match timeout(CONNECT_TIMEOUT, connected).await {
+            Ok(Ok(Ok(snapshot))) => Ok((downlinks, snapshot)),
+            Ok(Ok(Err(message))) => Err(message),
+            // The reader ending without an answer is the same outcome as one
+            // that never gave it.
+            Ok(Err(_)) | Err(_) => {
+                Err("the harness streams did not become ready in time".to_string())
+            }
         }
     }
 
@@ -63,53 +67,39 @@ impl Downlinks {
         host: Weak<Host>,
         session_id: String,
         deliver: Arc<dyn Fn(Value) + Send + Sync>,
-    ) -> Result<(Self, mpsc::Receiver<Result<Value, String>>), String> {
-        let control = Arc::new(DownlinkControl::default());
-        let worker_control = Arc::clone(&control);
-        let (connected_tx, connected) = mpsc::channel();
+    ) -> (Self, oneshot::Receiver<Result<Value, String>>) {
+        let (connected_tx, connected) = oneshot::channel();
+        let (exited_tx, exited) = mpsc::channel();
 
-        let worker = thread::Builder::new()
-            .name("deepseek-downlink".into())
-            .spawn(move || {
-                run_downlink(
-                    client,
-                    host,
-                    session_id,
-                    deliver,
-                    worker_control,
-                    connected_tx,
-                )
-            })
-            .map_err(|error| error.to_string())?;
+        let reader = nmt_runtime::handle().spawn(async move {
+            // Declared ahead of the reader so it is released after it: by the
+            // time the owner sees the disconnect, the callback is gone too.
+            let _exited = exited_tx;
 
-        Ok((
+            run_downlink(client, host, session_id, deliver, connected_tx).await;
+        });
+
+        (
             Self {
-                control,
-                worker: Some(worker),
+                reader: reader.abort_handle(),
+                exited,
             },
             connected,
-        ))
+        )
     }
 }
 
-fn run_downlink(
+async fn run_downlink(
     client: ApiClient,
     host: Weak<Host>,
     session_id: String,
     deliver: Arc<dyn Fn(Value) + Send + Sync>,
-    control: Arc<DownlinkControl>,
-    connected_tx: mpsc::Sender<Result<Value, String>>,
+    connected_tx: oneshot::Sender<Result<Value, String>>,
 ) {
     let mut connected_tx = Some(connected_tx);
 
-    while !control.stopped.load(Ordering::Relaxed) {
-        let result = read_downlink(
-            &client,
-            &session_id,
-            deliver.as_ref(),
-            &control,
-            &mut connected_tx,
-        );
+    loop {
+        let result = read_downlink(&client, &session_id, deliver.as_ref(), &mut connected_tx).await;
 
         if let Err(message) = result {
             if let Some(sender) = connected_tx.take() {
@@ -118,17 +108,11 @@ fn run_downlink(
                 return;
             }
 
-            if !control.stopped.load(Ordering::Relaxed) {
-                warn!("deepseek stream disconnected: {message}");
-            }
-        }
-
-        if control.stopped.load(Ordering::Relaxed) {
-            return;
+            warn!("deepseek stream disconnected: {message}");
         }
 
         // Every later call on this session targets a port nobody serves, so
-        // the tab must learn the host is gone; ending the thread quietly would
+        // the tab must learn the host is gone; ending the reader quietly would
         // leave it looking ready while each action fails. A missing host is
         // reported the same way because no replacement can reach this session.
         let host = host.upgrade();
@@ -149,102 +133,39 @@ fn run_downlink(
             "type": "nmt/connection-reset", "sessionId": session_id,
         } }));
 
-        thread::park_timeout(RECONNECT_DELAY);
+        sleep(RECONNECT_DELAY).await;
     }
 }
 
 impl Drop for Downlinks {
     fn drop(&mut self) {
-        self.control.stopped.store(true, Ordering::Relaxed);
+        self.reader.abort();
 
-        if let Some(socket) = self.control.socket.lock().take() {
-            let _ = socket.shutdown(Shutdown::Both);
-        }
-
-        if let Some(worker) = self.worker.take() {
-            worker.thread().unpark();
-
-            if worker.join().is_err() {
-                warn!("deepseek downlink thread panicked");
-            }
+        // A frame delivered after this returns would reach a tab that has
+        // already moved to another conversation, so the reader is waited out.
+        if self.exited.recv_timeout(CLOSE_TIMEOUT) == Err(mpsc::RecvTimeoutError::Timeout) {
+            warn!("deepseek downlink reader did not stop in time");
         }
     }
 }
 
-fn connect_downlink(api: &ApiClient, control: &DownlinkControl) -> Result<Socket, String> {
+async fn connect_downlink(api: &ApiClient) -> Result<Socket, String> {
     let request = api.stream_request()?;
-    let url = Url::parse(&request.uri().to_string()).map_err(|error| error.to_string())?;
 
-    if url.scheme() != "ws" {
-        return Err("the local harness requires a ws address".into());
+    match timeout(CONNECT_TIMEOUT, connect_async(request)).await {
+        Ok(Ok((socket, _))) => Ok(socket),
+        Ok(Err(error)) => Err(error.to_string()),
+        Err(_) => Err("the harness stream did not connect in time".to_string()),
     }
-
-    let addresses = url
-        .socket_addrs(|| Some(80))
-        .map_err(|error| error.to_string())?;
-
-    let deadline = Instant::now() + CONNECT_TIMEOUT;
-
-    let mut last_error = "the harness address has no usable socket".to_string();
-
-    for address in addresses {
-        loop {
-            if control.stopped.load(Ordering::Relaxed) {
-                return Err("the harness stream was stopped".into());
-            }
-
-            let remaining = deadline.saturating_duration_since(Instant::now());
-
-            if remaining.is_zero() {
-                return Err(last_error);
-            }
-
-            match TcpStream::connect_timeout(&address, remaining.min(STOP_POLL_INTERVAL)) {
-                Ok(stream) => {
-                    stream
-                        .set_read_timeout(Some(remaining))
-                        .map_err(|error| error.to_string())?;
-
-                    stream
-                        .set_write_timeout(Some(remaining))
-                        .map_err(|error| error.to_string())?;
-
-                    let mut registered = control.socket.lock();
-
-                    if control.stopped.load(Ordering::Relaxed) {
-                        return Err("the harness stream was stopped".into());
-                    }
-
-                    *registered = Some(stream.try_clone().map_err(|error| error.to_string())?);
-
-                    drop(registered);
-
-                    return client(request, MaybeTlsStream::Plain(stream))
-                        .map(|(socket, _)| socket)
-                        .map_err(|error| error.to_string());
-                }
-                Err(error) => {
-                    last_error = error.to_string();
-
-                    if error.kind() != ErrorKind::TimedOut {
-                        break;
-                    }
-                }
-            }
-        }
-    }
-
-    Err(last_error)
 }
 
-fn read_downlink(
+async fn read_downlink(
     client: &ApiClient,
     session_id: &str,
-    deliver: &dyn Fn(Value),
-    control: &DownlinkControl,
-    connected: &mut Option<mpsc::Sender<Result<Value, String>>>,
+    deliver: &(dyn Fn(Value) + Send + Sync),
+    connected: &mut Option<oneshot::Sender<Result<Value, String>>>,
 ) -> Result<(), String> {
-    let mut socket = connect_downlink(client, control)?;
+    let mut socket = connect_downlink(client).await?;
 
     for (id, endpoint, args) in [
         ("events", "$events", json!({})),
@@ -255,22 +176,50 @@ fn read_downlink(
             follow_args(session_address(session_id), 200),
         ),
     ] {
-        open_stream(&mut socket, id, endpoint, args)?;
+        open_stream(&mut socket, id, endpoint, args).await?;
     }
 
     let mut streams = Streams::new(session_id);
 
-    pump(&mut socket, &control.stopped, None, |frame| {
-        streams.process(frame, client, deliver)?;
+    let (failed_tx, mut failed) = unbounded_channel();
+
+    loop {
+        let message = tokio::select! {
+            message = socket.next() => message,
+            Some(message) = failed.recv() => return Err(message),
+        };
+
+        let Some(frame) = read_message(&mut socket, message).await? else {
+            continue;
+        };
+
+        if let Some(pass) = streams.process(frame, deliver)? {
+            pass_event(client.clone(), pass, failed_tx.clone());
+        }
 
         if let Some(snapshot) = streams.ready_snapshot()
             && let Some(sender) = connected.take()
         {
             let _ = sender.send(Ok(snapshot.clone()));
         }
+    }
+}
 
-        Ok(())
-    })
+/// Decline an interaction this tab does not present, without holding up the
+/// reader: the host drops a socket that misses two of its two-second
+/// heartbeats, and a reply is a call the host may take longer than that to
+/// answer. A reply that fails is reported back so the connection is replaced,
+/// which makes the host offer the still-pending interaction again.
+fn pass_event(client: ApiClient, pass: PassedEvent, failed: UnboundedSender<String>) {
+    nmt_runtime::handle().spawn(async move {
+        let reply = client
+            .respond_event(&pass.client_id, &pass.event_id, json!({ "kind": "next" }))
+            .await;
+
+        if let Err(error) = reply {
+            let _ = failed.send(error.message().to_string());
+        }
+    });
 }
 
 pub(crate) fn session_address(session_id: &str) -> Value {
@@ -281,7 +230,12 @@ fn follow_args(address: Value, max_messages: u64) -> Value {
     json!({ "request": { "address": address, "maxMessages": max_messages } })
 }
 
-fn open_stream(socket: &mut Socket, id: &str, endpoint: &str, args: Value) -> Result<(), String> {
+async fn open_stream(
+    socket: &mut Socket,
+    id: &str,
+    endpoint: &str,
+    args: Value,
+) -> Result<(), String> {
     socket
         .send(Message::Text(
             json!({
@@ -291,36 +245,35 @@ fn open_stream(socket: &mut Socket, id: &str, endpoint: &str, args: Value) -> Re
             .to_string()
             .into(),
         ))
+        .await
         .map_err(|error| error.to_string())
 }
 
 /// The follow opening is a consistent, cold-readable history window with its
 /// projection cursor. Closing immediately after it avoids maintaining another
 /// subscription for child transcripts or branch-point pickers.
-pub(crate) fn snapshot(
+pub(crate) async fn snapshot(
     client: &ApiClient,
     address: Value,
     max_messages: u64,
 ) -> Result<Value, CallError> {
-    let read = || -> Result<Value, String> {
-        let (mut socket, _) =
-            connect(client.stream_request()?).map_err(|error| error.to_string())?;
-
-        set_poll_interval(&mut socket)?;
+    let read = async {
+        let mut socket = connect_downlink(client).await?;
 
         open_stream(
             &mut socket,
             "snapshot",
             "session/follow",
             follow_args(address, max_messages),
-        )?;
+        )
+        .await?;
 
-        let deadline = Instant::now() + CONNECT_TIMEOUT;
+        loop {
+            let message = socket.next().await;
 
-        while Instant::now() < deadline {
-            match read_message(&mut socket)? {
+            match read_message(&mut socket, message).await? {
                 Some(frame) if frame["type"] == "item" && frame["value"]["type"] == "snapshot" => {
-                    let _ = socket.close(None);
+                    let _ = socket.close(None).await;
 
                     return Ok(frame["value"].clone());
                 }
@@ -333,83 +286,44 @@ pub(crate) fn snapshot(
                 _ => {}
             }
         }
-
-        Err("the harness history snapshot did not arrive in time".to_string())
     };
 
-    read().map_err(CallError::Transport)
-}
-
-fn set_poll_interval(socket: &mut Socket) -> Result<(), String> {
-    if let MaybeTlsStream::Plain(stream) = socket.get_mut() {
-        stream
-            .set_read_timeout(Some(STOP_POLL_INTERVAL))
-            .map_err(|error| error.to_string())?;
+    match timeout(CONNECT_TIMEOUT, read).await {
+        Ok(page) => page,
+        Err(_) => Err("the harness history snapshot did not arrive in time".to_string()),
     }
-
-    Ok(())
+    .map_err(CallError::Transport)
 }
 
-fn read_message(socket: &mut Socket) -> Result<Option<Value>, String> {
-    match socket.read() {
-        Ok(Message::Text(text)) => serde_json::from_str(&text)
+async fn read_message(
+    socket: &mut Socket,
+    message: Option<Result<Message, Error>>,
+) -> Result<Option<Value>, String> {
+    match message {
+        Some(Ok(Message::Text(text))) => serde_json::from_str(&text)
             .map(Some)
             .map_err(|error| error.to_string()),
-        Ok(Message::Close(_)) => Err("the harness closed the stream".to_string()),
-        // Reading queues Ping replies; flush them before an idle read timeout
-        // so the Host's heartbeat does not discard a healthy connection.
-        Ok(Message::Ping(_)) => socket
+        Some(Ok(Message::Close(_))) | None => Err("the harness closed the stream".to_string()),
+        // Reading queues the Ping reply; flushing sends it now rather than
+        // with the next outgoing message, which an idle stream never has.
+        Some(Ok(Message::Ping(_))) => socket
             .flush()
+            .await
             .map(|_| None)
             .map_err(|error| error.to_string()),
-        Ok(_) => Ok(None),
-        Err(Error::Io(error))
-            if matches!(error.kind(), ErrorKind::TimedOut | ErrorKind::WouldBlock) =>
-        {
-            Ok(None)
-        }
-        Err(error) => Err(error.to_string()),
+        Some(Ok(_)) => Ok(None),
+        Some(Err(error)) => Err(error.to_string()),
     }
-}
-
-fn pump(
-    socket: &mut Socket,
-    stopped: &AtomicBool,
-    read_started: Option<&mpsc::Sender<()>>,
-    mut deliver: impl FnMut(Value) -> Result<(), String>,
-) -> Result<(), String> {
-    set_poll_interval(socket)?;
-
-    if let Some(sender) = read_started {
-        let _ = sender.send(());
-    }
-
-    while !stopped.load(Ordering::Relaxed) {
-        if let Some(frame) = read_message(socket)? {
-            deliver(frame)?;
-        }
-    }
-
-    let _ = socket.close(None);
-
-    Ok(())
-}
-
-#[cfg(test)]
-pub(crate) fn pump_for_test(
-    mut socket: Socket,
-    deliver: &impl Fn(Value),
-    stopped: &AtomicBool,
-    read_started: &mpsc::Sender<()>,
-) {
-    let _ = pump(&mut socket, stopped, Some(read_started), |frame| {
-        deliver(frame);
-
-        Ok(())
-    });
 }
 
 // Decode logical streams into the adapter's local delivery messages.
+
+/// An interaction the stream offered that this tab leaves to other clients.
+#[derive(Debug, PartialEq, Eq)]
+struct PassedEvent {
+    client_id: String,
+    event_id: String,
+}
 
 struct Streams {
     session_id: String,
@@ -438,12 +352,13 @@ impl Streams {
         }
     }
 
+    /// Deliver what one stream message means to the tab, and name the
+    /// interaction it offered when that one is for other clients to answer.
     fn process(
         &mut self,
         frame: Value,
-        client: &ApiClient,
         deliver: &dyn Fn(Value),
-    ) -> Result<(), String> {
+    ) -> Result<Option<PassedEvent>, String> {
         let id = frame["streamId"].as_str().unwrap_or_default();
 
         match frame["type"].as_str() {
@@ -463,13 +378,13 @@ impl Streams {
         let value = &frame["value"];
 
         match id {
-            "events" => self.on_event(value, client, deliver)?,
+            "events" => return self.on_event(value, deliver),
             "control" => self.on_control(value, deliver),
             "follow" => self.on_follow(value, deliver),
             _ => {}
         }
 
-        Ok(())
+        Ok(None)
     }
 
     fn on_follow(&mut self, value: &Value, deliver: &dyn Fn(Value)) {
@@ -531,9 +446,8 @@ impl Streams {
     fn on_event(
         &mut self,
         value: &Value,
-        client: &ApiClient,
         deliver: &dyn Fn(Value),
-    ) -> Result<(), String> {
+    ) -> Result<Option<PassedEvent>, String> {
         match value["type"].as_str() {
             Some("ready") => {
                 self.client_id = Some(
@@ -568,15 +482,14 @@ impl Streams {
                     _ => None,
                 };
 
-                if value["agentId"] != self.session_id || kind.is_none() {
-                    client
-                        .respond_event(client_id, event_id, json!({ "kind": "next" }))
-                        .map_err(|error| error.message().to_string())?;
-
-                    return Ok(());
-                }
-
-                let (requested, resolved) = kind.unwrap();
+                let Some((requested, resolved)) =
+                    kind.filter(|_| value["agentId"] == self.session_id)
+                else {
+                    return Ok(Some(PassedEvent {
+                        client_id: client_id.to_string(),
+                        event_id: event_id.to_string(),
+                    }));
+                };
 
                 let mut payload = value["request"].clone();
 
@@ -606,6 +519,6 @@ impl Streams {
             _ => {}
         }
 
-        Ok(())
+        Ok(None)
     }
 }

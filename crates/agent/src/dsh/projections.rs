@@ -31,6 +31,10 @@ pub(crate) struct ProjectionTracker {
 
     /// Execution-permission preset reported for this exact session.
     permission: Option<String>,
+
+    /// The preset table that report came with, kept so a refused switch can
+    /// put a picker back on what the session still runs under.
+    presets: Option<Event>,
 }
 
 impl ProjectionTracker {
@@ -118,6 +122,8 @@ impl ProjectionTracker {
             "permissions" => {
                 let event = permission_presets(value);
 
+                self.presets = event.clone();
+
                 self.permission = match &event {
                     Some(Event::ApprovalPresets { current, .. }) => current.clone(),
                     _ => None,
@@ -201,6 +207,10 @@ impl ProjectionTracker {
 
     pub(crate) fn permission(&self) -> Option<&str> {
         self.permission.as_deref()
+    }
+
+    pub(crate) fn approval_presets(&self) -> Option<Event> {
+        self.presets.clone()
     }
 }
 

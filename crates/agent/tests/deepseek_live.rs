@@ -904,21 +904,155 @@ fn permission_commands_update_the_session_preset() {
     assert_ne!(initial, "danger-full-access");
 
     for preset in ["danger-full-access", initial.as_str()] {
-        let outcome = session.execute_slash_command("permission", preset);
-
-        assert!(
-            matches!(outcome, SlashCommandOutcome::Completed { .. }),
-            "switching to {preset} failed: {outcome:?}"
+        assert_eq!(
+            session.execute_slash_command("permission", preset),
+            SlashCommandOutcome::Accepted
         );
 
-        let (seen, updated) = collect_until(
-            &mut session,
-            &frames,
-            Duration::from_secs(15),
-            |event| matches!(event, Event::ApprovalPresets { current: Some(current), .. } if current == preset),
-        );
+        // The command's answer and the projection it moved travel on separate
+        // paths, so either may arrive first.
+        let mut completed = false;
+        let mut published = false;
 
-        assert!(updated, "the host did not publish {preset}: {seen:?}");
+        let (seen, settled) =
+            collect_until(&mut session, &frames, Duration::from_secs(15), |event| {
+                match event {
+                    Event::SlashCommandResult {
+                        outcome: SlashCommandOutcome::Completed { approval, .. },
+                        ..
+                    } => completed = approval.as_deref() == Some(preset),
+                    Event::ApprovalPresets {
+                        current: Some(current),
+                        ..
+                    } if current == preset => published = true,
+                    _ => {}
+                }
+
+                completed && published
+            });
+
+        assert!(settled, "switching to {preset} did not settle: {seen:?}");
         assert!(!session.has_active_operation());
     }
+
+    // A remembered pick restored on the user's behalf says nothing when it
+    // takes: the projection it moved is the whole report.
+    session.select_permission("danger-full-access");
+
+    let (seen, published) = collect_until(
+        &mut session,
+        &frames,
+        Duration::from_secs(15),
+        |event| matches!(event, Event::ApprovalPresets { current: Some(current), .. } if current == "danger-full-access"),
+    );
+
+    assert!(published, "the restored pick was not applied: {seen:?}");
+
+    // The answer trails the projection by the length of one reply, so the
+    // window below is what would catch a report of the success.
+    let (trailing, _) = collect_until(&mut session, &frames, Duration::from_secs(2), |_| false);
+
+    assert!(
+        !seen
+            .iter()
+            .chain(&trailing)
+            .any(|event| matches!(event, Event::SlashCommandResult { .. })),
+        "a restored pick that took was reported: {seen:?} {trailing:?}"
+    );
+
+    // One the deployment does not serve is refused out loud, and the picker
+    // is put back on the preset still in force.
+    session.select_permission("no-such-preset");
+
+    let mut refused = false;
+    let mut reverted = false;
+
+    let (seen, settled) = collect_until(&mut session, &frames, Duration::from_secs(15), |event| {
+        match event {
+            Event::SlashCommandResult {
+                outcome: SlashCommandOutcome::Rejected { .. },
+                ..
+            } => refused = true,
+            Event::ApprovalPresets {
+                current: Some(current),
+                ..
+            } if current == "danger-full-access" => reverted = true,
+            _ => {}
+        }
+
+        refused && reverted
+    });
+
+    assert!(settled, "the refused pick was not reported: {seen:?}");
+}
+
+/// A conversation change is a call and a stream handshake, and the thread that
+/// asks for it draws the window, so the request has to return at once and the
+/// tab has to arrive on the conversation through the frames that follow.
+#[test]
+#[ignore = "starts an isolated harness host without sending a prompt"]
+fn a_conversation_change_is_requested_without_waiting() {
+    let isolated = TempDir::new().unwrap();
+
+    let launch = LaunchConfig {
+        env: vec![
+            ("DSH_HOME".into(), isolated.path().display().to_string()),
+            ("DEEPSEEK_API_KEY".into(), "local-probe".into()),
+        ],
+        ..launch()
+    };
+
+    let (tx, frames) = channel();
+
+    let mut session = Session::create(&launch, &AgentWorkspace::default(), move |frame| {
+        let _ = tx.send(frame);
+    })
+    .expect("the isolated harness should open a conversation");
+
+    let id = session.session_id().unwrap().to_string();
+
+    // The opening replay is set aside first, so the one awaited below can only
+    // be the reopened conversation's.
+    let (seen, opened) = collect_until(&mut session, &frames, Duration::from_secs(15), |event| {
+        matches!(event, Event::Replay(_))
+    });
+
+    assert!(opened, "the new conversation never replayed: {seen:?}");
+
+    let asked = Instant::now();
+
+    assert!(session.resume_thread(&id));
+    assert!(
+        asked.elapsed() < Duration::from_millis(100),
+        "the request waited on the harness for {:?}",
+        asked.elapsed()
+    );
+
+    let (seen, replayed) = collect_until(&mut session, &frames, Duration::from_secs(15), |event| {
+        matches!(event, Event::Replay(_))
+    });
+
+    assert!(
+        replayed,
+        "the reopened conversation never replayed: {seen:?}"
+    );
+    assert_eq!(session.session_id(), Some(id.as_str()));
+
+    // The reopened streams serve commands like the first ones did.
+    assert_eq!(
+        session.execute_slash_command("permission", "danger-full-access"),
+        SlashCommandOutcome::Accepted
+    );
+
+    let (seen, answered) = collect_until(&mut session, &frames, Duration::from_secs(15), |event| {
+        matches!(
+            event,
+            Event::SlashCommandResult {
+                outcome: SlashCommandOutcome::Completed { .. },
+                ..
+            }
+        )
+    });
+
+    assert!(answered, "the command was not answered: {seen:?}");
 }

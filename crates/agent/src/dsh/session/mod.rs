@@ -16,7 +16,9 @@ pub(super) use crate::dsh::session::loads::{
 
 mod actions;
 mod controls;
+mod lane;
 mod loads;
+mod switch;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -28,8 +30,8 @@ use crate::background_task::{
 };
 use crate::chat::{
     Event, Item, Question, QuestionMode, QuestionRequest as ChatQuestionRequest,
-    QuestionResolution, SlashCommandArguments, SlashCommandInfo, SlashCommandRunPolicy,
-    SlashCommandSource, ThreadSettings,
+    QuestionResolution, QueuedPrompt, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome,
+    SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
 };
 use crate::dsh::api::ApiClient;
 use crate::dsh::events::Downlinks;
@@ -38,7 +40,9 @@ use crate::dsh::mapping::{self, ApprovalRequest, QuestionRequest, ToolTracker};
 use crate::dsh::models::ModelDirectory;
 use crate::dsh::projections::ProjectionTracker;
 use crate::dsh::session::controls::{COMPLETED_FRAME, Controls, Operation, question_id};
+use crate::dsh::session::lane::CommandLane;
 use crate::dsh::session::loads::{ModelProfile, failed_read_events, load_conversation};
+use crate::dsh::session::switch::{Switch, SwitchSlot, Switching, Target, switch_conversation};
 use crate::dsh::workflows::WorkflowTracker;
 use crate::dsh::{catalogs, frames, history};
 use crate::workspace::AgentWorkspace;
@@ -73,9 +77,21 @@ pub struct Session {
     /// turn is actually running.
     running: bool,
 
-    /// Pending prompt identities from the Harness's latest whole-inbox
-    /// snapshot. Closing removes them before cancelling the current turn.
-    queued_prompt_ids: Vec<String>,
+    /// The Harness's latest whole-inbox snapshot. Closing removes its entries
+    /// before cancelling the current turn, and a refused change to the inbox
+    /// republishes it so the composer shows what is still pending.
+    queued_prompts: Vec<QueuedPrompt>,
+
+    /// The composition this conversation was built from, as the preset
+    /// catalog last reported it. A refused recomposition reports it again so
+    /// the picker returns to it.
+    agent_preset: Option<String>,
+
+    /// Commands issued on this conversation's behalf, answered by frames.
+    lane: CommandLane,
+
+    /// Where a conversation change leaves the streams it opened.
+    switch: SwitchSlot,
 
     /// The approval the harness is currently blocked on. Held because the
     /// answer has to carry identities the transcript vocabulary does not.
@@ -134,6 +150,7 @@ const SKILLS_FRAME: &str = "nmt/skills";
 const PRESETS_FRAME: &str = "nmt/agent-presets";
 const WORKFLOW_TRANSCRIPT_FRAME: &str = "nmt/workflow-transcript";
 const FORK_CHECKPOINTS_FRAME: &str = "nmt/fork-checkpoints";
+const SETTLED_FRAME: &str = "nmt/command-settled";
 
 /// The pending-inbox snapshot is the one frame type the harness itself
 /// publishes under its own name rather than through the nmt bridge.
@@ -211,7 +228,14 @@ pub(crate) fn session_create_payload(
     payload
 }
 
-fn open_conversation(
+/// The frame answering a command issued for `session_id`.
+fn settled(session_id: &str, command: Value) -> Value {
+    json!({ "payload": {
+        "type": SETTLED_FRAME, "sessionId": session_id, "command": command,
+    } })
+}
+
+async fn open_conversation(
     client: &ApiClient,
     cwd: Option<&str>,
     session_id: Option<&str>,
@@ -222,6 +246,7 @@ fn open_conversation(
             "session/create",
             session_create_payload(cwd, session_id, agent_preset),
         )
+        .await
         .map_err(|error| error.message().to_string())?;
 
     let session_id = created["sessionId"]
@@ -242,23 +267,25 @@ fn open_conversation(
 /// it or lost the ability to compose it. Failing the tab for that would leave
 /// every new conversation of the profile unable to start, so a refused preset
 /// is retried once on the deployment's default composition.
-pub(super) fn open_new_conversation(
+pub(super) async fn open_new_conversation(
     client: &ApiClient,
     cwd: Option<&str>,
     agent_preset: Option<&str>,
 ) -> Result<(OpenedConversation, Option<String>), String> {
     match (
-        open_conversation(client, cwd, None, agent_preset),
+        open_conversation(client, cwd, None, agent_preset).await,
         agent_preset,
     ) {
-        (Err(error), Some(preset)) => open_conversation(client, cwd, None, None).map(|opened| {
+        (Err(error), Some(preset)) => {
+            let opened = open_conversation(client, cwd, None, None).await?;
+
             let refusal = format!(
                 "The agent preset \"{preset}\" could not be used, so this conversation \
                  runs on the default one: {error}"
             );
 
-            (opened, Some(refusal))
-        }),
+            Ok((opened, Some(refusal)))
+        }
         (opened, _) => opened.map(|opened| (opened, None)),
     }
 }
@@ -325,28 +352,37 @@ impl Session {
         let host = host::shared(launch)?;
         let client = host.client().clone();
 
-        let (opened, preset_refusal) =
-            open_new_conversation(&client, cwd.as_deref(), launch.agent_preset.as_deref())
-                .map_err(|error| {
-                    HostError::FailedToStart(format!(
-                        "the harness could not open a conversation: {error}"
-                    ))
-                })?;
-
-        let session_id = opened.session_id.clone();
-
-        // Opening the downlinks after the session exists means its first frames
-        // cannot be missed: the stream replays a baseline for every attached
-        // session when it opens.
         let deliver: Arc<dyn Fn(Value) + Send + Sync> = Arc::new(deliver);
 
-        let (downlinks, snapshot) = Downlinks::open(
-            client.clone(),
-            Arc::downgrade(&host),
-            session_id.clone(),
-            Arc::clone(&deliver),
-        )
-        .map_err(HostError::FailedToStart)?;
+        // A session starts on a worker thread that exists to wait for it, so
+        // unlike every later command this one is waited out in place.
+        let opening = async {
+            let (opened, preset_refusal) =
+                open_new_conversation(&client, cwd.as_deref(), launch.agent_preset.as_deref())
+                    .await
+                    .map_err(|error| {
+                        format!("the harness could not open a conversation: {error}")
+                    })?;
+
+            // Opening the downlinks after the session exists means its first
+            // frames cannot be missed: the stream replays a baseline for every
+            // attached session when it opens.
+            let (downlinks, snapshot) = Downlinks::open(
+                client.clone(),
+                Arc::downgrade(&host),
+                opened.session_id.clone(),
+                Arc::clone(&deliver),
+            )
+            .await?;
+
+            Ok((opened, preset_refusal, downlinks, snapshot))
+        };
+
+        let (opened, preset_refusal, downlinks, snapshot) = nmt_runtime::handle()
+            .block_on(opening)
+            .map_err(HostError::FailedToStart)?;
+
+        let session_id = opened.session_id.clone();
 
         let profile = ModelProfile {
             model: launch.model.clone(),
@@ -365,8 +401,7 @@ impl Session {
         );
 
         Ok(Self {
-            controls: Controls::new(client.clone(), Arc::clone(&deliver))
-                .map_err(HostError::FailedToStart)?,
+            controls: Controls::new(client.clone(), Arc::clone(&deliver)),
             client,
             session_id,
             cwd,
@@ -375,7 +410,10 @@ impl Session {
             deliver,
             profile,
             running: false,
-            queued_prompt_ids: Vec::new(),
+            queued_prompts: Vec::new(),
+            agent_preset: None,
+            lane: CommandLane::new(),
+            switch: SwitchSlot::default(),
             pending_approval: None,
             pending_questions: None,
             tools: ToolTracker::default(),
@@ -389,67 +427,76 @@ impl Session {
 
     /// Continue an earlier conversation in place.
     ///
-    /// The tab keeps its host and replaces its session-specific subscriptions.
-    /// The new streams must open successfully before releasing the old ones,
-    /// so a rejected resume leaves the current conversation usable.
+    /// Answers whether the change was requested. It completes when the opened
+    /// streams are taken over in [`Self::process`], and a refusal arrives there
+    /// as an error against the conversation the tab is still on.
     pub fn resume_thread(&mut self, thread_id: &str) -> bool {
-        match open_conversation(&self.client, self.cwd.as_deref(), Some(thread_id), None) {
-            Ok(opened) => {
-                let (downlinks, snapshot) = match Downlinks::open(
-                    self.client.clone(),
-                    Arc::downgrade(&self.host),
-                    opened.session_id.clone(),
-                    Arc::clone(&self.deliver),
-                ) {
-                    Ok(opened) => opened,
-                    Err(message) => {
-                        tracing::warn!("deepseek could not follow {thread_id}: {message}");
+        self.switch_to(Target::Existing(thread_id.to_string()));
 
-                        return false;
-                    }
-                };
+        true
+    }
 
-                self.session_id = opened.session_id.clone();
+    fn switch_to(&mut self, target: Target) {
+        self.lane.run(switch_conversation(
+            Switching {
+                client: self.client.clone(),
+                host: Arc::downgrade(&self.host),
+                cwd: self.cwd.clone(),
+                current: self.session_id.clone(),
+                deliver: Arc::clone(&self.deliver),
+                slot: Arc::clone(&self.switch),
+            },
+            target,
+        ));
+    }
 
-                self.controls.clear();
+    /// Take over the conversation a finished change left in the slot. The tab
+    /// keeps its host and replaces its session-specific subscriptions.
+    fn on_switched(&mut self) {
+        // An empty slot means a later change already replaced this one's
+        // streams, and its own announcement is still to come.
+        let Some(Switch {
+            opened,
+            downlinks,
+            snapshot,
+        }) = self.switch.lock().take()
+        else {
+            return;
+        };
 
-                self._downlinks = downlinks;
+        self.session_id = opened.session_id.clone();
 
-                // Everything below describes the conversation this tab just
-                // left; carrying it over would attribute it to the new one.
-                self.running = false;
+        self.controls.clear();
 
-                self.queued_prompt_ids.clear();
+        self._downlinks = downlinks;
 
-                self.pending_approval = None;
-                self.pending_questions = None;
-                self.tools = ToolTracker::default();
-                self.usage = ProjectionTracker::default();
-                self.models = ModelDirectory::default();
-                self.subagent_activity = 0;
+        // Everything below describes the conversation this tab just
+        // left; carrying it over would attribute it to the new one.
+        self.running = false;
 
-                self.subagent_modes.clear();
+        self.queued_prompts.clear();
 
-                self.workflows = WorkflowTracker::default();
+        self.agent_preset = None;
+        self.pending_approval = None;
+        self.pending_questions = None;
+        self.tools = ToolTracker::default();
+        self.usage = ProjectionTracker::default();
+        self.models = ModelDirectory::default();
+        self.subagent_activity = 0;
 
-                load_conversation(
-                    &self.client,
-                    &opened,
-                    None,
-                    self.cwd.clone(),
-                    &snapshot,
-                    &self.profile,
-                    &self.deliver,
-                );
+        self.subagent_modes.clear();
 
-                true
-            }
-            Err(error) => {
-                tracing::warn!("deepseek could not continue {thread_id}: {error}");
+        self.workflows = WorkflowTracker::default();
 
-                false
-            }
-        }
+        load_conversation(
+            &self.client,
+            &opened,
+            None,
+            self.cwd.clone(),
+            &snapshot,
+            &self.profile,
+            &self.deliver,
+        );
     }
 
     /// Map one delivered frame into transcript events. Frames for other
@@ -461,6 +508,10 @@ impl Session {
 
         if frame["payload"]["type"] == COMPLETED_FRAME {
             return self.control_completed(&frame["payload"]);
+        }
+
+        if frame["payload"]["type"] == SETTLED_FRAME {
+            return self.on_settled(&frame["payload"]);
         }
 
         // An approval is answerable, so recognizing it means recording what an
@@ -716,7 +767,7 @@ impl Session {
         vec![Event::Skills(catalogs::skill_catalog(&frame.skills))]
     }
 
-    fn on_presets(&self, payload: &Value) -> Vec<Event> {
+    fn on_presets(&mut self, payload: &Value) -> Vec<Event> {
         let Some(frame) = frames::parse::<frames::PresetsFrame>(PRESETS_FRAME, payload) else {
             return Vec::new();
         };
@@ -724,6 +775,8 @@ impl Session {
         if frame.session_id != self.session_id {
             return Vec::new();
         }
+
+        self.agent_preset.clone_from(&frame.current);
 
         let mut events = vec![Event::AgentPresets {
             presets: catalogs::preset_catalog(&frame.presets),
@@ -735,6 +788,96 @@ impl Session {
         }
 
         events
+    }
+
+    /// Report what a command issued from this tab came to.
+    fn on_settled(&mut self, payload: &Value) -> Vec<Event> {
+        let Some(frame) = frames::parse::<frames::SettledFrame>(SETTLED_FRAME, payload) else {
+            return Vec::new();
+        };
+
+        // The one answer addressed to a conversation the tab is not on yet.
+        if let frames::SettledCommand::Switched = frame.command {
+            self.on_switched();
+
+            return Vec::new();
+        }
+
+        if frame.session_id != self.session_id {
+            return Vec::new();
+        }
+
+        match frame.command {
+            frames::SettledCommand::Switched => Vec::new(),
+            // The send opened a turn on the strength of an answer still to
+            // come, so the refusal is what ends it.
+            frames::SettledCommand::PromptRefused {
+                steering: false,
+                error,
+            } => vec![Event::TurnCompleted { error: Some(error) }],
+            // Neither refusal below concerns a conversation change, so they
+            // are shown without settling one that may be under way.
+            frames::SettledCommand::PromptRefused {
+                steering: true,
+                error,
+            }
+            | frames::SettledCommand::QueueRemovalRefused { error } => vec![
+                Event::QueuedPrompts(self.queued_prompts.clone()),
+                Event::ItemStarted(Item::Error { text: error }),
+            ],
+            frames::SettledCommand::RenameRefused { error } => {
+                vec![Event::ItemStarted(Item::Error { text: error })]
+            }
+            frames::SettledCommand::ModelSelected {
+                model,
+                reasoning_effort,
+                error,
+            } => {
+                // The harness answers with the selection it committed, which
+                // is what the directory records: an effort it declined to pin
+                // is absent there.
+                if error.is_none() {
+                    self.models.set_selected(model, reasoning_effort);
+                }
+
+                vec![Event::ModelSelection {
+                    model: self.models.selected().map(str::to_string),
+                    effort: self.models.effort().map(str::to_string),
+                    refusal: error,
+                }]
+            }
+            frames::SettledCommand::Slash {
+                name,
+                arguments,
+                value,
+                error,
+            } => {
+                let outcome = match error {
+                    Some(message) => SlashCommandOutcome::Rejected { message },
+                    None => catalogs::command_outcome(&name, &arguments, &value),
+                };
+
+                // A refused permission switch leaves the session on its
+                // earlier preset, which a picker that showed the pick ahead of
+                // the answer has to be told.
+                let reverted = (name == "permission"
+                    && matches!(outcome, SlashCommandOutcome::Rejected { .. }))
+                .then(|| self.usage.approval_presets())
+                .flatten();
+
+                let mut events = vec![Event::SlashCommandResult { name, outcome }];
+
+                events.extend(reverted);
+
+                events
+            }
+            // A conversation change is what the restore and branch flows wait
+            // on, and an error event is what releases them.
+            frames::SettledCommand::SwitchFailed { error } => vec![Event::Error {
+                message: format!("DeepSeek could not open the conversation: {error}"),
+                fatal: false,
+            }],
+        }
     }
 
     fn on_commands(&self, payload: &Value) -> Vec<Event> {
@@ -757,14 +900,9 @@ impl Session {
             return Vec::new();
         };
 
-        let prompts = queued_prompts(&frame.items);
+        self.queued_prompts = queued_prompts(&frame.items);
 
-        self.queued_prompt_ids = prompts
-            .iter()
-            .filter_map(|prompt| prompt.id.clone())
-            .collect();
-
-        vec![Event::QueuedPrompts(prompts)]
+        vec![Event::QueuedPrompts(self.queued_prompts.clone())]
     }
 
     fn on_replay(&mut self, payload: &Value) -> Vec<Event> {

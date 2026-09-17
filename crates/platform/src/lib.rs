@@ -79,9 +79,9 @@ pub trait ProcessReadWrite {
     fn set_winsize(&mut self, _: WinsizeBuilder) -> Result<(), io::Error>;
 
     /// Register the PTY's sources with the event loop's `Poll`, pulling tokens from
-    /// the iterator. `waker` is the loop's `mio::Waker`: the Windows ConPTY worker
-    /// threads have no real OS readiness source, so they signal "data ready" through
-    /// this waker. The Unix path registers real fds and ignores the waker.
+    /// the iterator. Windows output reads use IOCP directly; input completion
+    /// and child exit signal this `waker`. The Unix path registers fds and
+    /// ignores the waker. Read callers must drive the registered poller.
     fn register(
         &mut self,
         _: &Poll,
@@ -94,16 +94,16 @@ pub trait ProcessReadWrite {
 
     fn deregister(&mut self, _: &Poll) -> io::Result<()>;
 
-    /// Tokens whose soft-ready flag is currently set (Windows ConPTY worker-thread
-    /// readiness). The Unix path has real OS readiness and returns an empty iterator.
+    /// Tokens with locally retained readiness (Windows buffered output, input
+    /// completion, and child exit). The Unix path returns an empty iterator.
     /// The event loop feeds these through the same `match token` arms it uses for
     /// real `Poll` events.
     fn drain_ready(&self) -> Vec<Token>;
 
-    /// Whether any soft-ready flag is currently set (Windows ConPTY level readiness),
+    /// Whether any source has locally retained work (Windows ConPTY readiness),
     /// without allocating or clearing it. The event loop checks this before blocking
     /// in `poll()`: a `pty_read` capped by `MAX_LOCKED_READ` can return with data still
-    /// in the ring (flag left set), and the worker only wakes on the clear→set edge, so
+    /// buffered, and mio only reports the initial read completion, so
     /// a blocking `poll(None)` would sleep forever on already-signalled data. The Unix
     /// path has real OS readiness (re-armed by `EPOLL_CTL_MOD`) and returns `false`.
     fn has_ready(&self) -> bool {

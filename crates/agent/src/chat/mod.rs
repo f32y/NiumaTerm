@@ -358,6 +358,14 @@ pub enum Event {
         message: String,
         effort: Option<String>,
     },
+    /// The backend answered a model pick sent as a request of its own. It
+    /// carries what the session runs under now, which is the pick when it was
+    /// taken and the earlier selection beside the reason when it was refused.
+    ModelSelection {
+        model: Option<String>,
+        effort: Option<String>,
+        refusal: Option<String>,
+    },
     /// Replacement snapshot of the execution-permission presets this thread can
     /// switch between, and the one it is on. Reported only by a backend whose
     /// preset table belongs to its deployment rather than to this UI.

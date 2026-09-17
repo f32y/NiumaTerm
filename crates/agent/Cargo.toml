@@ -36,5 +36,9 @@ reqwest = { workspace = true, features = [
     "system-proxy",
 ] }
 tungstenite.workspace = true
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+futures.workspace = true
+nmt_runtime.workspace = true
 smallvec.workspace = true
 nmt_profile.workspace = true

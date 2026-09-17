@@ -5,12 +5,12 @@
 mod controls_tests;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
-use std::thread;
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
+use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 
 use crate::dsh::api::ApiClient;
 use crate::dsh::mapping::{ApprovalRequest, QuestionRequest};
@@ -50,35 +50,31 @@ struct Call {
 }
 
 pub(super) struct Controls {
-    sender: mpsc::Sender<Call>,
+    sender: UnboundedSender<Call>,
     pending: HashMap<u64, Pending>,
     next_id: u64,
 }
 
 impl Controls {
-    pub(super) fn new(
-        client: ApiClient,
-        deliver: Arc<dyn Fn(Value) + Send + Sync>,
-    ) -> Result<Self, String> {
-        let (sender, receiver) = mpsc::channel::<Call>();
+    /// Controls run one at a time, in the order they were submitted, on a
+    /// task that ends when this side is dropped.
+    pub(super) fn new(client: ApiClient, deliver: Arc<dyn Fn(Value) + Send + Sync>) -> Self {
+        let (sender, mut receiver) = unbounded_channel::<Call>();
 
-        thread::Builder::new()
-            .name("deepseek-controls".to_string())
-            .spawn(move || {
-                for call in receiver {
-                    Self::run_control(&client, call, deliver.as_ref());
-                }
-            })
-            .map_err(|error| format!("could not start DeepSeek control worker: {error}"))?;
+        nmt_runtime::handle().spawn(async move {
+            while let Some(call) = receiver.recv().await {
+                Self::run_control(&client, call, deliver.as_ref()).await;
+            }
+        });
 
-        Ok(Self {
+        Self {
             sender,
             pending: HashMap::new(),
             next_id: 0,
-        })
+        }
     }
 
-    fn run_control(client: &ApiClient, call: Call, deliver: &dyn Fn(Value)) {
+    async fn run_control(client: &ApiClient, call: Call, deliver: &(dyn Fn(Value) + Send + Sync)) {
         if call.cancelled.load(Ordering::Acquire) {
             return;
         }
@@ -86,6 +82,7 @@ impl Controls {
         let result = match call.deadline.checked_duration_since(Instant::now()) {
             Some(timeout) => client
                 .call_with_timeout(call.method, call.args, timeout)
+                .await
                 .map(|_| ())
                 .map_err(|error| format!(
                     "DeepSeek control failed; a transport failure may have an unknown outcome: {}",
@@ -110,6 +107,7 @@ impl Controls {
                         json!({"request": {"sessionId": session_id}}),
                         timeout,
                     )
+                    .await
                     .err()
                     .map(|error| error.message().to_string()),
                 None => Some(

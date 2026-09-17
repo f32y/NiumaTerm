@@ -885,6 +885,21 @@ impl SessionController {
 
                 SessionEffect::EffortRejected { message }
             }
+            // An answered pick makes the session's selection the authority,
+            // so a refusal puts the pickers back.
+            Event::ModelSelection {
+                model,
+                effort,
+                refusal,
+            } => {
+                self.controls.settings.model = model;
+                self.controls.settings.effort = effort;
+
+                match refusal {
+                    Some(message) => SessionEffect::EffortRejected { message },
+                    None => SessionEffect::Changed,
+                }
+            }
             Event::Commands(commands) => {
                 self.command_catalog = Some(commands);
 
@@ -1308,7 +1323,9 @@ impl SessionController {
         let outcome = self.runtime.backend_mut()?.select_agent_preset(&preset);
 
         match outcome {
-            SettingsOutcome::Effective | SettingsOutcome::RidesNextSubmission => {
+            SettingsOutcome::Effective
+            | SettingsOutcome::Requested
+            | SettingsOutcome::RidesNextSubmission => {
                 self.controls.settings.agent_preset = Some(preset);
             }
             SettingsOutcome::Refused { .. } => {}

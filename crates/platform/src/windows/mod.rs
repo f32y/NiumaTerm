@@ -33,7 +33,6 @@ mod pipes;
 mod process_exit;
 mod readiness;
 mod shell_integration;
-mod spsc;
 
 #[cfg(test)]
 mod tests;
@@ -46,7 +45,7 @@ use std::{io, sync};
 
 use crate::windows::child::ChildExitWatcher;
 use crate::windows::conpty::Conpty as Backend;
-use crate::windows::pipes::{EventedAnonRead as ReadPipe, EventedAnonWrite as WritePipe};
+use crate::windows::pipes::{ConinPipe as WritePipe, ConoutPipe as ReadPipe};
 use crate::windows::process::{KillOnCloseJob, ProcessTree};
 use crate::{
     EventedPty, Interest, Poll, ProcessReadWrite, PtyOptions, Token, Waker, Winsize, WinsizeBuilder,
@@ -105,7 +104,7 @@ impl ProcessReadWrite for Pty {
     #[inline]
     fn register(
         &mut self,
-        _poll: &Poll,
+        poll: &Poll,
         token: &mut dyn Iterator<Item = Token>,
         _interest: Interest,
         waker: &sync::Arc<Waker>,
@@ -114,10 +113,9 @@ impl ProcessReadWrite for Pty {
         self.write_token = token.next().unwrap();
         self.child_event_token = token.next().unwrap();
 
-        // ConPTY anon pipes have no real OS readiness source; the worker threads and
-        // the child-exit callback signal the loop through this `Waker` instead.
-        self.conout.soft().set_waker(waker.clone());
+        self.conout.register(poll, self.read_token)?;
 
+        // Input completion and child exit use callbacks outside the poll set.
         self.conin.soft().set_waker(waker.clone());
 
         self.child_watcher.set_waker(waker.clone());
@@ -127,16 +125,16 @@ impl ProcessReadWrite for Pty {
 
     #[inline]
     fn reregister(&mut self, _poll: &Poll, _interest: Interest) -> io::Result<()> {
-        // Nothing to re-arm: the per-source soft-ready flags are level-like and the
-        // worker threads keep them current. Write interest is implicit — the
-        // conin flag is set whenever the buffer has space.
+        // Mio starts the next read when its buffer is consumed. Registering it
+        // again would also post unused writable events on this input-only
+        // handle, keeping an idle loop awake. Buffered output remains ready
+        // locally until drained; input completion keeps its soft-ready flag.
         Ok(())
     }
 
     #[inline]
-    fn deregister(&mut self, _poll: &Poll) -> io::Result<()> {
-        // No real OS sources were registered (the `Waker` is owned by the loop).
-        Ok(())
+    fn deregister(&mut self, poll: &Poll) -> io::Result<()> {
+        self.conout.deregister(poll)
     }
 
     #[inline]
@@ -163,7 +161,7 @@ impl ProcessReadWrite for Pty {
     fn drain_ready(&self) -> Vec<Token> {
         let mut ready = Vec::with_capacity(3);
 
-        if self.conout.soft().is_ready() {
+        if self.conout.is_ready() {
             ready.push(self.read_token);
         }
 
@@ -182,12 +180,12 @@ impl ProcessReadWrite for Pty {
     fn has_ready(&self) -> bool {
         // Only sources with *unconsumed work* may force a zero-timeout spin: buffered
         // read data (conout) and a pending child-exit. Writability (conin) is excluded
-        // on purpose — its flag is level-set to "buffer has space", which is true in
-        // steady state, so including it would keep `has_ready()` permanently true and
-        // make the event loop never block (100% CPU busy-spin). The write side is
-        // re-armed by the worker's clear->set edge waker when the buffer drains, so it
-        // does not need this spin path.
-        self.conout.soft().is_ready() || self.child_watcher.soft().is_ready()
+        // on purpose — its flag is level-set to "no native write is running", which is
+        // true in steady state, so including it would keep `has_ready()` permanently
+        // true and make the event loop never block (100% CPU busy-spin). The write
+        // side is re-armed by the completion's clear->set edge waker, so it does not
+        // need this spin path.
+        self.conout.is_ready() || self.child_watcher.soft().is_ready()
     }
 
     #[inline]

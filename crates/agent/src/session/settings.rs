@@ -147,7 +147,8 @@ impl ConversationSettings {
     /// Hand the model and effort picks to the session when they differ from
     /// what it runs under. A request the harness answered, either way, makes
     /// the session's selection the authority, so a refusal puts the pickers
-    /// back. A pick that rides the next submission leaves them as chosen.
+    /// back. A pick still waiting for its answer, or one that rides the next
+    /// submission, leaves them as chosen.
     pub(crate) fn apply_model(&mut self, session: &mut Backend) -> Option<SettingsOutcome> {
         let model = self.settings.model.as_deref()?;
 
@@ -168,7 +169,7 @@ impl ConversationSettings {
                 self.settings.model = model.map(str::to_owned);
                 self.settings.effort = effort.map(str::to_owned);
             }
-            SettingsOutcome::RidesNextSubmission => {}
+            SettingsOutcome::Requested | SettingsOutcome::RidesNextSubmission => {}
         }
 
         Some(outcome)
