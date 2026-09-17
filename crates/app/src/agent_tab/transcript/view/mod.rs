@@ -140,7 +140,12 @@ impl TranscriptView {
                 // to the newest row until the user scrolls up, re-engaging when
                 // they return to the bottom. The overdraw keeps a viewport's
                 // worth of offscreen rows measured so scrolling doesn't pop.
-                let state = ListState::new(0, ListAlignment::Bottom, px(512.));
+                // A resumed conversation arrives as hundreds of rows of which
+                // only the last screenful is laid out; estimating the rest
+                // keeps the scrollbar from starting at one screen and jumping
+                // by a whole row each time scrolling back measures another.
+                let state = ListState::new(0, ListAlignment::Bottom, px(512.))
+                    .estimate_unmeasured_heights();
 
                 state.set_follow_mode(FollowMode::Tail);
 
