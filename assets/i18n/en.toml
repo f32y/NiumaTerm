@@ -1131,3 +1131,7 @@ git-toggle-files = "Toggle file tree"
 "app-update-notice-available-title" = "NiumaTerm update available"
 "app-update-notice-installing-title" = "Updating NiumaTerm"
 "app-update-notice-failed-title" = "NiumaTerm update failed"
+
+"agent-status-generation-speed" = "%{value} tok/s"
+"agent-status-generation-tooltip" = "Average model generation speed for this turn. Updated after each sampled response; tool execution and approval waits are excluded."
+"agent-status-generation-estimated-tooltip" = "Estimated model generation speed for this turn, based on received output chunks. Hidden reasoning and stream buffering can affect the estimate. Tool execution and approval waits are excluded."

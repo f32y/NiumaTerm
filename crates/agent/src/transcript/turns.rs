@@ -1,7 +1,49 @@
 //! Retained turn timing, usage and observed completion outcomes.
 
 use std::collections::{HashMap, HashSet};
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+use crate::chat::GenerationSample;
+
+/// Completed response samples for the current or most recently finished turn.
+#[derive(Default)]
+pub struct GenerationStats {
+    responses: HashSet<String>,
+    output_tokens: u64,
+    elapsed: Duration,
+    estimated: bool,
+}
+
+/// Weighted speed over completed responses with matching usage and timing.
+#[derive(Clone, Copy, Debug)]
+pub struct GenerationSpeed {
+    pub tokens_per_second: f64,
+    pub estimated: bool,
+}
+
+impl GenerationStats {
+    pub(crate) fn record(&mut self, sample: GenerationSample) -> bool {
+        if sample.output_tokens == 0
+            || sample.elapsed.is_zero()
+            || !self.responses.insert(sample.response_id)
+        {
+            return false;
+        }
+
+        self.output_tokens = self.output_tokens.saturating_add(sample.output_tokens);
+        self.elapsed = self.elapsed.saturating_add(sample.elapsed);
+        self.estimated |= sample.estimated;
+
+        true
+    }
+
+    pub fn speed(&self) -> Option<GenerationSpeed> {
+        (!self.elapsed.is_zero()).then(|| GenerationSpeed {
+            tokens_per_second: self.output_tokens as f64 / self.elapsed.as_secs_f64(),
+            estimated: self.estimated,
+        })
+    }
+}
 
 /// The running turn: when it started, what it has produced, and what it is
 /// doing right now.

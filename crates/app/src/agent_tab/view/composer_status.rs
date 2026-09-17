@@ -6,9 +6,11 @@ use std::time::Duration;
 
 use gpui::prelude::*;
 use gpui::{AnyElement, AsyncApp, Context, WeakEntity, div, px};
+use gpui_component::tooltip::Tooltip;
 use gpui_component::{ActiveTheme as _, Icon, IconName, h_flex};
 use nmt_agent::git;
 use nmt_agent::session::controller::SessionController;
+use nmt_agent::transcript::turns::GenerationSpeed;
 use rust_i18n::t;
 
 use crate::agent_tab::AgentPane;
@@ -156,6 +158,8 @@ impl ComposerStatusBar {
             .map(|stats| stats.turns)
             .unwrap_or(session.turn());
 
+        let speed = conversation.generation_stats.speed();
+
         let stats = composer_stats_label(
             turns,
             steps,
@@ -163,6 +167,7 @@ impl ComposerStatusBar {
             conversation
                 .context_window_usage
                 .and_then(cache_hit_percent),
+            speed,
         );
 
         h_flex()
@@ -208,6 +213,19 @@ impl ComposerStatusBar {
                                 t!("agent-status-accessibility", stats = &stats).into_owned(),
                             )
                             .text_color(cx.theme().muted_foreground.opacity(0.72))
+                            .when_some(speed, |this, speed| {
+                                this.tooltip(move |window, cx| {
+                                    Tooltip::new(
+                                        t!(if speed.estimated {
+                                            "agent-status-generation-estimated-tooltip"
+                                        } else {
+                                            "agent-status-generation-tooltip"
+                                        })
+                                        .into_owned(),
+                                    )
+                                    .build(window, cx)
+                                })
+                            })
                             .child(stats)
                     }))
                     .children(usage),
@@ -241,20 +259,25 @@ pub(crate) async fn poll_git_branch(this: WeakEntity<AgentPane>, cx: &mut AsyncA
 
 /// The composer's one-line account of the conversation: how many turns it has
 /// run, how many actions the newest turn took, how long that turn waited for
-/// its first output, and how much of the input the provider had cached. Each
-/// part is dropped rather than shown as a zero when nothing reports it, and a
-/// conversation that has not run a turn yet reports nothing at all.
+/// its first output, how much of the input the provider had cached, and the
+/// model's generation speed. Missing readings are omitted. A generation sample
+/// can precede the backend's first completed-turn counter.
 pub(super) fn composer_stats_label(
     turns: u64,
     steps: usize,
     first_output: Option<Duration>,
     cache_hit: Option<u64>,
+    speed: Option<GenerationSpeed>,
 ) -> Option<String> {
-    if turns == 0 {
+    if turns == 0 && speed.is_none() {
         return None;
     }
 
-    let mut parts = vec![t!("agent-status-turns", count = turns).into_owned()];
+    let mut parts = Vec::new();
+
+    if turns > 0 {
+        parts.push(t!("agent-status-turns", count = turns).into_owned());
+    }
 
     if steps > 0 {
         parts.push(t!("agent-status-steps", count = steps).into_owned());
@@ -272,6 +295,18 @@ pub(super) fn composer_stats_label(
 
     if let Some(percent) = cache_hit {
         parts.push(t!("agent-status-cache-hit", percent = percent).into_owned());
+    }
+
+    if let Some(speed) = speed {
+        let prefix = if speed.estimated { "~" } else { "" };
+
+        parts.push(
+            t!(
+                "agent-status-generation-speed",
+                value = format!("{prefix}{:.1}", speed.tokens_per_second)
+            )
+            .into_owned(),
+        );
     }
 
     Some(parts.join(" · "))

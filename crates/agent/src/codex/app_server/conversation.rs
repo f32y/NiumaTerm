@@ -1,6 +1,12 @@
+#[cfg(test)]
+#[path = "generation_tests.rs"]
+mod generation_tests;
+
+use std::time::Instant;
+
 use serde_json::Value;
 
-use crate::chat::Event;
+use crate::chat::{Event, GenerationSample};
 use crate::codex::app_server::compaction::{
     CompactionState, compaction_completed, compaction_started,
 };
@@ -50,6 +56,7 @@ pub(super) struct ThreadState {
     pub(super) questions: QuestionState,
     pub(super) compaction: CompactionState,
     turn_output_usage: TurnOutputUsage,
+    generation_span: Option<(Instant, Instant)>,
     pub(super) goal_revision: u64,
     pub(super) plan_revision: u64,
 }
@@ -62,11 +69,28 @@ impl ThreadState {
         self.current_turn = None;
         self.pending_approval = None;
         self.questions = QuestionState::default();
+        self.generation_span = None;
 
         self.compaction.reset_thread();
     }
 
     pub(super) fn on_notification(&mut self, method: &str, params: &Value) -> Vec<Event> {
+        if self.current_turn.is_some()
+            && matches!(
+                method,
+                "item/agentMessage/delta"
+                    | "item/reasoning/summaryTextDelta"
+                    | "item/reasoning/textDelta"
+            )
+            && params["delta"]
+                .as_str()
+                .is_some_and(|delta| !delta.is_empty())
+        {
+            let now = Instant::now();
+
+            self.generation_span.get_or_insert((now, now)).1 = now;
+        }
+
         match method {
             "turn/plan/updated" => {
                 self.plan_revision += 1;
@@ -93,6 +117,7 @@ impl ThreadState {
                 vec![Event::GoalUpdated(None)]
             }
             "turn/started" => {
+                self.generation_span = None;
                 self.current_turn = params["turn"]["id"].as_str().map(str::to_owned);
 
                 self.turn_output_usage.begin_turn();
@@ -106,6 +131,8 @@ impl ThreadState {
                 events
             }
             "turn/completed" => {
+                self.generation_span = None;
+
                 let mut events = self
                     .questions
                     .end_turn(params["turn"]["id"].as_str().unwrap_or_default());
@@ -148,6 +175,8 @@ impl ThreadState {
                     .as_str()
                     .is_some_and(|turn_id| self.current_turn.as_deref() == Some(turn_id));
 
+                let previous_total = self.turn_output_usage.latest_total;
+
                 let turn_output_tokens = usage
                     .cumulative
                     .and_then(|usage| usage.breakdown.output_tokens)
@@ -160,12 +189,37 @@ impl ThreadState {
                     events.push(Event::TurnOutputTokensUpdated(output_tokens));
                 }
 
+                // Usage can be repeated by quota updates while the next
+                // response is streaming. Only a new total closes a sample.
+                if active
+                    && let Some(total) = self.turn_output_usage.latest_total
+                    && previous_total != Some(total)
+                    && let Some((started, ended)) = self.generation_span.take()
+                    && let Some(output_tokens) = usage.current.output_tokens
+                    && previous_total.is_none_or(|previous| total > previous)
+                {
+                    events.push(Event::GenerationCompleted(GenerationSample {
+                        response_id: format!(
+                            "{}:{total}",
+                            self.current_turn.as_deref().unwrap_or_default()
+                        ),
+                        output_tokens,
+                        // Tool execution can overlap a response and delay
+                        // usage delivery. End at the last model delta so
+                        // waiting for tools cannot lower the reading.
+                        elapsed: ended.saturating_duration_since(started),
+                        estimated: true,
+                    }));
+                }
+
                 events
             }
             "item/started" => {
                 let item = &params["item"];
 
                 if item["type"].as_str() == Some("contextCompaction") {
+                    self.generation_span = None;
+
                     return compaction_started(&mut self.compaction, item);
                 }
 
@@ -233,6 +287,8 @@ impl ThreadState {
                 Vec::new()
             }
             "error" => {
+                self.generation_span = None;
+
                 let message = params["error"]["message"]
                     .as_str()
                     .or_else(|| params["message"].as_str())

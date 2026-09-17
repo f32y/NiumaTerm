@@ -5,6 +5,19 @@
 //! a long conversation affordable, and a reader judging cost needs to see the
 //! two separately.
 
+use std::time::Duration;
+
+/// One completed model response with matching output usage and generation time.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GenerationSample {
+    pub response_id: String,
+    pub output_tokens: u64,
+    pub elapsed: Duration,
+
+    /// Visible stream timing can omit hidden reasoning and is only an estimate.
+    pub estimated: bool,
+}
+
 /// Whole-log conversation counters, independent of how much history has been
 /// paged in. Reported only by a backend that folds them from its complete log;
 /// a count derived from the visible transcript would disagree with it.

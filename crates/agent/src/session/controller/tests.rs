@@ -1,10 +1,10 @@
 use std::path::Path;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::background_task::{BackgroundTaskKey, BackgroundTaskLoadState, BackgroundTaskSnapshot};
 use crate::chat::{
-    Event, Item, ModelInfo, Question, QuestionInput, QuestionMode, QuestionRequest,
-    QuestionResolution, SendOutcome, SlashCommandOutcome, ThreadSettings,
+    Event, GenerationSample, Item, ModelInfo, Question, QuestionInput, QuestionMode,
+    QuestionRequest, QuestionResolution, SendOutcome, SlashCommandOutcome, ThreadSettings,
 };
 use crate::progress::{GoalStatus, Task, TaskList, TaskStatus};
 use crate::session::controller::{SessionController, SessionEffect};
@@ -14,6 +14,117 @@ use crate::session::lifecycle::{InterruptOutcome, StartOutcome, Status};
 use crate::session::restore::SettingsSeed;
 use crate::session::test_support::TestBackend;
 use crate::session::{AgentKind, Backend, PromptRequest, SettingsOutcome};
+
+#[test]
+fn generation_speed_weights_responses_ignores_duplicates_and_resets_next_turn() {
+    let mut session = started(
+        AgentKind::Codex,
+        "speed",
+        vec![SendOutcome::StartedTurn, SendOutcome::StartedTurn],
+    );
+
+    send(&mut session, "prompt");
+    apply(&mut session, Event::TurnStarted);
+
+    let sample = |id: &str, tokens, millis| {
+        Event::GenerationCompleted(GenerationSample {
+            response_id: id.into(),
+            output_tokens: tokens,
+            elapsed: Duration::from_millis(millis),
+            estimated: true,
+        })
+    };
+
+    assert!(matches!(
+        apply(&mut session, sample("first", 100, 500)),
+        SessionEffect::Changed
+    ));
+    assert!(matches!(
+        apply(&mut session, sample("first", 100, 500)),
+        SessionEffect::Unchanged
+    ));
+
+    apply(&mut session, sample("second", 100, 1500));
+
+    assert!(matches!(
+        apply(&mut session, sample("missing-time", 1000, 0)),
+        SessionEffect::Unchanged
+    ));
+
+    apply(
+        &mut session,
+        Event::ApprovalRequested {
+            description: "Allow command".into(),
+        },
+    );
+
+    let speed = session
+        .conversation
+        .borrow()
+        .generation_stats
+        .speed()
+        .unwrap();
+
+    assert!((speed.tokens_per_second - 100.0).abs() < 0.001);
+    assert!(speed.estimated);
+
+    apply(&mut session, Event::TurnCompleted { error: None });
+
+    assert!(matches!(
+        apply(&mut session, sample("late", 1000, 1000)),
+        SessionEffect::Unchanged
+    ));
+    assert!(
+        (session
+            .conversation
+            .borrow()
+            .generation_stats
+            .speed()
+            .unwrap()
+            .tokens_per_second
+            - 100.0)
+            .abs()
+            < 0.001
+    );
+
+    send(&mut session, "next");
+    apply(&mut session, Event::TurnStarted);
+
+    assert!(
+        session
+            .conversation
+            .borrow()
+            .generation_stats
+            .speed()
+            .is_none()
+    );
+
+    apply(&mut session, sample("first", 30, 1000));
+
+    assert!(
+        (session
+            .conversation
+            .borrow()
+            .generation_stats
+            .speed()
+            .unwrap()
+            .tokens_per_second
+            - 30.0)
+            .abs()
+            < 0.001
+    );
+
+    session.conversation.borrow_mut().clear();
+
+    assert!(
+        session
+            .conversation
+            .borrow()
+            .generation_stats
+            .speed()
+            .is_none()
+    );
+}
 
 #[test]
 fn progress_survives_turns_but_clears_with_the_conversation_for_every_provider() {
