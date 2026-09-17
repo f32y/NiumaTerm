@@ -4370,6 +4370,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "nmt_runtime"
+version = "1.5.1"
+dependencies = [
+ "tokio",
+]
+
+[[package]]
 name = "nmt_shell_extension"
 version = "1.5.1"
 dependencies = [
