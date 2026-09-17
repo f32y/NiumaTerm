@@ -149,7 +149,7 @@ impl MessageDelivery {
         Some(prompt)
     }
 
-    pub fn completed(&mut self) {
+    pub(crate) fn completed(&mut self) {
         self.active = false;
         self.unanswered = None;
 
@@ -195,7 +195,7 @@ impl MessageDelivery {
 
     /// Only the oldest matching pending prompt can be acknowledged by an echo.
     /// Removing it here also prevents a later snapshot from publishing it twice.
-    pub fn echoed(&mut self, text: &str) -> Option<String> {
+    pub(crate) fn echoed(&mut self, text: &str) -> Option<String> {
         // The opening prompt is already in the transcript. Its echo must not
         // consume a later queued message with identical text.
         if self.policy == QueuedPromptDelivery::ProviderEcho
@@ -247,7 +247,7 @@ impl MessageDelivery {
 
     /// Called only after the provider accepts removal; rejected requests leave
     /// the pending list unchanged.
-    pub fn removed(&mut self, id: &str) {
+    pub(crate) fn removed(&mut self, id: &str) {
         self.pending
             .retain(|prompt| prompt.id.as_deref() != Some(id));
     }

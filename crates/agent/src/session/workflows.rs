@@ -70,7 +70,7 @@ impl WorkflowData {
 
     /// What the chrome derives from this tab: whether a control is warranted
     /// at all, and the number it shows.
-    pub fn activity(&self) -> (bool, usize) {
+    pub(crate) fn activity(&self) -> (bool, usize) {
         (!self.runs().is_empty(), self.running_agents())
     }
 
@@ -138,7 +138,7 @@ impl WorkflowData {
         true
     }
 
-    pub fn agent_ids(&self, task_id: &str) -> Vec<String> {
+    pub(crate) fn agent_ids(&self, task_id: &str) -> Vec<String> {
         self.runs()
             .iter()
             .find(|run| run.task_id == task_id)
@@ -154,7 +154,7 @@ impl WorkflowData {
     /// An open conversation with nothing read yet reports itself unavailable
     /// once its run has settled, because no further content is coming.
     /// Reports whether that answer changed.
-    pub fn mark_open_availability(&mut self) -> bool {
+    pub(crate) fn mark_open_availability(&mut self) -> bool {
         let runs = self
             .snapshot
             .as_ref()
@@ -219,7 +219,7 @@ impl WorkflowData {
     }
 
     /// Acknowledge only results accepted for the current session and reader.
-    pub fn accept_revision(&mut self, result: &WorkflowRefreshResult) {
+    pub(crate) fn accept_revision(&mut self, result: &WorkflowRefreshResult) {
         let Some(transcript) = result.transcript.as_ref() else {
             return;
         };
@@ -238,7 +238,7 @@ impl WorkflowData {
 
     /// Claim the one restore this session gets, so a resumed conversation
     /// reads its stored runs once rather than on every reopen.
-    pub fn claim_restore(&mut self, session_id: &str) -> bool {
+    pub(crate) fn claim_restore(&mut self, session_id: &str) -> bool {
         if self.restored_session.as_deref() == Some(session_id) {
             return false;
         }
@@ -249,11 +249,11 @@ impl WorkflowData {
     }
 
     /// Give the claim back after a failed read, so the next open retries.
-    pub fn forget_restore(&mut self) {
+    pub(crate) fn forget_restore(&mut self) {
         self.restored_session = None;
     }
 
-    pub fn refresh_plan(
+    pub(crate) fn refresh_plan(
         &self,
         runtime: &SessionRuntime,
         cwd: Option<String>,

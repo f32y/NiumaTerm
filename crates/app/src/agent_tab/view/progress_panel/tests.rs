@@ -60,7 +60,7 @@ fn progress_panel_is_narrower_and_expands_above_the_composer(cx: &mut TestAppCon
             .with_recovery(AgentKind::Codex, "progress");
 
         session.install(epoch, Ok(Backend::Test(backend)));
-        session.runtime.ready();
+        session.runtime_mut().ready();
 
         pane.history_ui.mode = RecentSessionsMode::Hidden;
 

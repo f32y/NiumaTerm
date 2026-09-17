@@ -4,7 +4,7 @@ pub use nmt_profile::AgentKind;
 
 pub use crate::session::backend::{
     Backend, ConversationTitleRequest, PromptRequest, RecoveryIdentity, RenameOutcome,
-    ResumeOutcome, SettingsOutcome,
+    ResumeOutcome, SettingsOutcome, TaskHistory, TaskHistoryRead,
 };
 pub use crate::session::lifecycle::{RecoverySnapshot, RestorationReadiness, SessionRuntime};
 

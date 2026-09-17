@@ -428,7 +428,7 @@ impl TeamRuntime {
 
             let state = session.controller.borrow();
 
-            if let Some(backend) = state.runtime.backend()
+            if let Some(backend) = state.runtime().backend()
                 && let Some(provider) = backend.recovery_identity()
             {
                 let member = self
@@ -440,15 +440,15 @@ impl TeamRuntime {
 
                 let registered = member.moderator_registered()
                     || backend
-                        .team_capabilities(session.kind, state.runtime.epoch())
-                        .check(state.runtime.epoch())
+                        .team_capabilities(session.kind, state.runtime().epoch())
+                        .check(state.runtime().epoch())
                         .is_ok();
 
                 self.session
                     .record_provider_identity(*id, &provider.id, registered)?;
             }
 
-            if state.runtime.update_suspension().is_some() {
+            if state.runtime().update_suspension().is_some() {
                 for discussion in &discussion_ids {
                     self.session
                         .pause_discussion(*discussion, PauseReason::Maintenance(id.to_string()))?;
@@ -457,8 +457,8 @@ impl TeamRuntime {
                 host.ready_epoch = None;
             }
 
-            match state.runtime.status() {
-                Status::Idle if state.runtime.update_suspension().is_none() => {
+            match state.runtime().status() {
+                Status::Idle if state.runtime().update_suspension().is_none() => {
                     for discussion in &discussion_ids {
                         self.session.resolve_pause(
                             *discussion,
@@ -494,7 +494,7 @@ impl TeamRuntime {
 
                     host.ready_epoch = None;
 
-                    if let Some(message) = state.runtime.start_failure() {
+                    if let Some(message) = state.runtime().start_failure() {
                         self.error = Some(message.to_owned());
                     }
                 }
@@ -510,7 +510,8 @@ impl TeamRuntime {
             let session = host.owner.session().read(cx);
             let state = session.controller.borrow();
 
-            if state.runtime.status() != Status::Idle || state.runtime.update_suspension().is_some()
+            if state.runtime().status() != Status::Idle
+                || state.runtime().update_suspension().is_some()
             {
                 continue;
             }
@@ -527,14 +528,14 @@ impl TeamRuntime {
                     .set_member_settings(*id, state.controls.settings.clone())?;
             }
 
-            let epoch = state.runtime.epoch();
+            let epoch = state.runtime().epoch();
 
             if host.ready_epoch == Some(epoch) {
                 continue;
             }
 
             let capabilities = state
-                .runtime
+                .runtime()
                 .backend()
                 .map(|backend| backend.team_capabilities(session.kind, epoch))
                 .unwrap_or_else(|| ModeratorAdmission::unverified(session.kind));
@@ -721,11 +722,11 @@ impl TeamRuntime {
 
             let state = session.controller.borrow();
 
-            if state.runtime.status() != Status::Idle {
+            if state.runtime().status() != Status::Idle {
                 continue;
             }
 
-            let Some(backend) = state.runtime.backend() else {
+            let Some(backend) = state.runtime().backend() else {
                 continue;
             };
 

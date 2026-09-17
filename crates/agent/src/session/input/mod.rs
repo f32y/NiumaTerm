@@ -108,7 +108,11 @@ impl SessionInput {
         }
     }
 
-    pub fn receive(&mut self, runtime: &SessionRuntime, request: QuestionRequest) -> Option<usize> {
+    pub(crate) fn receive(
+        &mut self,
+        runtime: &SessionRuntime,
+        request: QuestionRequest,
+    ) -> Option<usize> {
         let existing = self.batches.iter().position(|draft| draft.id == request.id);
 
         if let Some(index) = existing
@@ -158,7 +162,7 @@ impl SessionInput {
         self.batches.len() - 1
     }
 
-    pub fn can_submit(&self, runtime: &SessionRuntime, key: QuestionKey) -> bool {
+    pub(crate) fn can_submit(&self, runtime: &SessionRuntime, key: QuestionKey) -> bool {
         self.epoch == runtime.epoch()
             && !self.disconnected
             && matches!(runtime.status(), Status::Idle | Status::Running)
@@ -170,7 +174,7 @@ impl SessionInput {
                 .is_some_and(|draft| draft.key == key && draft.status == QuestionStatus::Pending)
     }
 
-    pub fn submit(
+    pub(crate) fn submit(
         &mut self,
         runtime: &mut SessionRuntime,
         key: QuestionKey,
@@ -236,7 +240,7 @@ impl SessionInput {
         }
     }
 
-    pub fn resolve(
+    pub(crate) fn resolve(
         &mut self,
         epoch: u64,
         id: &str,
@@ -292,13 +296,13 @@ impl SessionInput {
         true
     }
 
-    pub fn starting(&mut self, epoch: u64) {
+    pub(crate) fn starting(&mut self, epoch: u64) {
         self.epoch = epoch;
 
         self.disconnect();
     }
 
-    pub fn disconnect(&mut self) {
+    pub(crate) fn disconnect(&mut self) {
         self.disconnected = true;
         self.approval = None;
 
@@ -316,7 +320,7 @@ impl SessionInput {
         }
     }
 
-    pub fn restore(&mut self, runtime: &mut SessionRuntime) {
+    pub(crate) fn restore(&mut self, runtime: &mut SessionRuntime) {
         let Some(backend) = runtime.backend_mut() else {
             return;
         };
@@ -356,7 +360,7 @@ impl SessionInput {
         self.disconnected = false;
     }
 
-    pub fn clear_questions(&mut self) {
+    pub(crate) fn clear_questions(&mut self) {
         self.batches.clear();
     }
 
@@ -381,7 +385,7 @@ impl SessionInput {
         epoch == self.epoch && !self.disconnected && self.approval.take().is_some()
     }
 
-    pub fn respond_approval(
+    pub(crate) fn respond_approval(
         &mut self,
         runtime: &mut SessionRuntime,
         decision: &str,

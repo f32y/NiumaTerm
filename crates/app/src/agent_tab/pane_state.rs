@@ -23,7 +23,7 @@ impl TurnPresentation {
 
                     this.session
                         .borrow()
-                        .conversation
+                        .conversation()
                         .borrow()
                         .last_response_at
                         .and_then(|at| response_age_tick(at.elapsed()))

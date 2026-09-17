@@ -86,9 +86,13 @@ fn user_rows(pane: &AgentPane, cx: &App) -> Vec<String> {
 }
 
 fn install_backend(pane: &mut AgentPane) {
-    let epoch = pane.session.borrow_mut().runtime.begin_start();
+    let epoch = pane.session.borrow_mut().runtime_mut().begin_start();
 
-    pane.session.borrow_mut().restore.starting(epoch, None);
+    pane.session
+        .borrow_mut()
+        .restore_parts()
+        .0
+        .starting(epoch, None);
 
     let mut backend = TestBackend::new([], SlashCommandOutcome::NotReady, Vec::new());
 
@@ -97,18 +101,18 @@ fn install_backend(pane: &mut AgentPane) {
     assert!(matches!(
         pane.session
             .borrow_mut()
-            .runtime
+            .runtime_mut()
             .install(epoch, Ok(Backend::Test(backend))),
         StartOutcome::Installed
     ));
 
-    pane.session.borrow_mut().runtime.ready();
+    pane.session.borrow_mut().runtime_mut().ready();
 }
 
 /// Make the installed backend answer like a harness that picks its
 /// conversation at launch, which is what sends a resume to the disk read.
 fn resume_by_reading_history(pane: &mut AgentPane) {
-    match pane.session.borrow_mut().runtime.backend_mut() {
+    match pane.session.borrow_mut().runtime_mut().backend_mut() {
         Some(Backend::Test(backend)) => backend.resume_outcome = ResumeOutcome::NeedsReplayRead,
         _ => panic!("the test backend must be installed"),
     }
@@ -119,33 +123,19 @@ fn prepare_local_replay(pane: &mut AgentPane, cx: &App) -> RecoveryIdentity {
 
     let cwd = pane.cwd(cx);
 
-    let ResumeStart::ReadReplay(request) = ({
-        let mut guard = pane.session.borrow_mut();
-
-        let state = &mut *guard;
-
-        state.restore.begin(
-            &mut state.runtime,
-            AgentKind::Claude,
-            &summary(),
-            cwd.as_deref(),
-        )
-    }) else {
+    let ResumeStart::ReadReplay(request) = pane
+        .session
+        .borrow_mut()
+        .begin_resume(&summary(), cwd.as_deref())
+    else {
         panic!("Claude restoration must read history");
     };
 
-    let ReplayLoaded::Restart(identity) = ({
-        let mut guard = pane.session.borrow_mut();
-
-        let state = &mut *guard;
-
-        state.restore.loaded(
-            &mut state.runtime,
-            request,
-            cwd.as_deref(),
-            Ok(replay("restored")),
-        )
-    }) else {
+    let ReplayLoaded::Restart(identity) =
+        pane.session
+            .borrow_mut()
+            .replay_loaded(request, cwd.as_deref(), Ok(replay("restored")))
+    else {
         panic!("loaded history must prepare a restart");
     };
 
@@ -201,7 +191,7 @@ fn failed_resume_keeps_the_transcript_and_current_controls(cx: &mut TestAppConte
     cx.update(|_, cx| {
         pane.update(cx, |pane, cx| {
             assert_eq!(pane.history_ui.mode, RecentSessionsMode::Open);
-            assert_eq!(pane.session.borrow().runtime.status(), Status::Idle);
+            assert_eq!(pane.session.borrow().runtime().status(), Status::Idle);
             assert_eq!(user_rows(pane, cx), ["current"]);
             assert_eq!(pane.session.borrow().controls.settings, settings);
         })
@@ -225,11 +215,12 @@ fn failed_replacement_keeps_old_rows_and_never_publishes_pending_history(cx: &mu
     cx.update(|_, cx| {
         pane.update(cx, |pane, cx| {
             let identity = prepare_local_replay(pane, cx);
-            let epoch = pane.session.borrow_mut().runtime.begin_start();
+            let epoch = pane.session.borrow_mut().runtime_mut().begin_start();
 
             pane.session
                 .borrow_mut()
-                .restore
+                .restore_parts()
+                .0
                 .starting(epoch, Some(&identity));
 
             assert_eq!(
@@ -240,15 +231,15 @@ fn failed_replacement_keeps_old_rows_and_never_publishes_pending_history(cx: &mu
             {
                 let mut guard = pane.session.borrow_mut();
 
-                let state = &mut *guard;
+                let (restore, runtime) = guard.restore_parts();
 
-                state.restore.failed(&mut state.runtime)
+                restore.failed(runtime)
             };
 
-            assert_eq!(pane.session.borrow().runtime.status(), Status::Exited);
+            assert_eq!(pane.session.borrow().runtime().status(), Status::Exited);
             assert_eq!(user_rows(pane, cx), ["current"]);
             assert!(!matches!(
-                pane.session.borrow_mut().restore.ready(epoch),
+                pane.session.borrow_mut().restore_parts().0.ready(epoch),
                 ReadyAction::Replay(_)
             ));
         })
@@ -274,11 +265,12 @@ fn local_history_waits_for_ready_and_repeated_ready_does_not_erase_new_rows(
     cx.update(|_, cx| {
         pane.update(cx, |pane, cx| {
             let identity = prepare_local_replay(pane, cx);
-            let epoch = pane.session.borrow_mut().runtime.begin_start();
+            let epoch = pane.session.borrow_mut().runtime_mut().begin_start();
 
             pane.session
                 .borrow_mut()
-                .restore
+                .restore_parts()
+                .0
                 .starting(epoch, Some(&identity));
 
             assert_eq!(user_rows(pane, cx), ["current"]);
@@ -382,18 +374,11 @@ fn old_backend_events_during_disk_read_leave_visible_rows_and_settings_untouched
 
             let cwd = pane.cwd(cx);
 
-            let ResumeStart::ReadReplay(request) = ({
-                let mut guard = pane.session.borrow_mut();
-
-                let state = &mut *guard;
-
-                state.restore.begin(
-                    &mut state.runtime,
-                    AgentKind::Claude,
-                    &summary(),
-                    cwd.as_deref(),
-                )
-            }) else {
+            let ResumeStart::ReadReplay(request) = pane
+                .session
+                .borrow_mut()
+                .begin_resume(&summary(), cwd.as_deref())
+            else {
                 panic!("Claude restoration must read history");
             };
 
@@ -416,21 +401,16 @@ fn old_backend_events_during_disk_read_leave_visible_rows_and_settings_untouched
 
     cx.update(|_, cx| {
         pane.update(cx, |pane, cx| {
-            assert_eq!(pane.session.borrow().runtime.status(), Status::Starting);
+            assert_eq!(pane.session.borrow().runtime().status(), Status::Starting);
             assert_eq!(pane.history_ui.mode, RecentSessionsMode::Loading);
             assert_eq!(user_rows(pane, cx), ["current"]);
             assert_eq!(pane.session.borrow().controls.settings, settings);
             assert!(matches!(
-                {
-                    let mut guard = pane.session.borrow_mut();
-                    let state = &mut *guard;
-                    state.restore.loaded(
-                        &mut state.runtime,
-                        request,
-                        cwd.as_deref(),
-                        Ok(replay("restored")),
-                    )
-                },
+                pane.session.borrow_mut().replay_loaded(
+                    request,
+                    cwd.as_deref(),
+                    Ok(replay("restored")),
+                ),
                 ReplayLoaded::Restart(_)
             ));
         })

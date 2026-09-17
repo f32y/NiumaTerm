@@ -236,7 +236,7 @@ impl QuestionPanel {
         let shared = session.clone();
         let state = shared.borrow();
 
-        let Some(prompt) = state.input.draft(batch) else {
+        let Some(prompt) = state.input().draft(batch) else {
             return;
         };
 
@@ -252,7 +252,7 @@ impl QuestionPanel {
             let shared = session.clone();
             let state = shared.borrow();
 
-            let Some(prompt) = state.input.draft(batch) else {
+            let Some(prompt) = state.input().draft(batch) else {
                 return;
             };
 
@@ -267,18 +267,19 @@ impl QuestionPanel {
 
             let text = prompt.text(index).to_string();
             let key = prompt.key();
-            let epoch = session.borrow().runtime.epoch();
+            let epoch = session.borrow().runtime().epoch();
 
             let on_change = move |this: &mut AgentPane,
                                   value: String,
                                   cx: &mut Context<AgentPane>| {
-                if !this.binding.is_current() || !this.session.borrow().runtime.is_current(epoch) {
+                if !this.binding.is_current() || !this.session.borrow().runtime().is_current(epoch)
+                {
                     return;
                 }
 
                 let mut state = this.session.borrow_mut();
 
-                let Some(prompt) = state.input.draft_mut(key) else {
+                let Some(prompt) = state.input_mut().draft_mut(key) else {
                     return;
                 };
 
@@ -336,7 +337,7 @@ impl QuestionPanel {
         window: &mut Window,
         cx: &mut Context<AgentPane>,
     ) -> Option<AnyElement> {
-        let count = session.borrow().input.pending_count();
+        let count = session.borrow().input().pending_count();
 
         if self.collapsed && count == 0 {
             return None;
@@ -347,16 +348,13 @@ impl QuestionPanel {
         let active = self.active?;
         let shared = session.clone();
         let state = shared.borrow();
-        let prompt = self.questions(&state.input)?;
+        let prompt = self.questions(state.input())?;
         let collapsed = self.collapsed;
         let pending = prompt.pending();
 
-        let enabled = session
-            .borrow()
-            .input
-            .can_submit(&session.borrow().runtime, prompt.key())
+        let enabled = session.borrow().can_submit_question(prompt.key())
             && composer_free
-            && !session.borrow().commands.awaiting_turn;
+            && !session.borrow().commands().awaiting_turn;
 
         let presentation = self.presentations.get(&active)?;
 
@@ -392,7 +390,7 @@ impl QuestionPanel {
 
         let candidates: Vec<QuestionKey> = session
             .borrow()
-            .input
+            .input()
             .batches()
             .iter()
             .filter_map(|prompt| {
@@ -471,7 +469,7 @@ impl QuestionPanel {
                 cx.listener(|this, _, _, cx| {
                     if let Some(prompt) = this
                         .prompts
-                        .questions_mut(&mut this.session.borrow_mut().input)
+                        .questions_mut(this.session.borrow_mut().input_mut())
                     {
                         prompt.touch();
                     }
@@ -482,7 +480,7 @@ impl QuestionPanel {
             .capture_key_down(cx.listener(|this, _, _, cx| {
                 if let Some(prompt) = this
                     .prompts
-                    .questions_mut(&mut this.session.borrow_mut().input)
+                    .questions_mut(this.session.borrow_mut().input_mut())
                 {
                     prompt.touch();
                 }
@@ -572,7 +570,7 @@ impl QuestionPanel {
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 if let Some(prompt) = this
                                     .prompts
-                                    .questions_mut(&mut this.session.borrow_mut().input)
+                                    .questions_mut(this.session.borrow_mut().input_mut())
                                 {
                                     if !prompt.choose_custom(index) {
                                         return;

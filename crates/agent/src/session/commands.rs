@@ -35,7 +35,7 @@ pub enum CommandAdmission {
 }
 
 impl CommandQueue {
-    pub fn while_busy(
+    pub(crate) fn while_busy(
         &mut self,
         command: PendingSlashCommand,
         policy: SlashCommandRunPolicy,
@@ -56,7 +56,7 @@ impl CommandQueue {
         }
     }
 
-    pub fn execute(
+    pub(crate) fn execute(
         &mut self,
         backend: Option<&mut Backend>,
         command: &PendingSlashCommand,

@@ -13,7 +13,7 @@ pub(super) fn deliver_session_event(pane: &Entity<AgentPane>, event: Event, cx: 
             .expect("pane has an execution session");
 
         host.update(cx, |session, cx| {
-            let epoch = session.controller.borrow().runtime.epoch();
+            let epoch = session.controller.borrow().runtime().epoch();
 
             session.on_event(epoch, event, cx);
         });

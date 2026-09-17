@@ -79,7 +79,7 @@ pub enum ReadyAction {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum ReplayAction {
+pub(crate) enum ReplayAction {
     Ignore,
     Append,
     Replace,
@@ -173,7 +173,7 @@ impl ConversationRestore {
         }
     }
 
-    pub fn loaded(
+    pub(crate) fn loaded(
         &mut self,
         runtime: &mut SessionRuntime,
         request: ReplayRead,
@@ -255,7 +255,7 @@ impl ConversationRestore {
         }
     }
 
-    pub fn replayed(&mut self, epoch: u64) -> ReplayAction {
+    pub(crate) fn replayed(&mut self, epoch: u64) -> ReplayAction {
         match &self.pending {
             None => ReplayAction::Append,
             Some(PendingRestore::AwaitingReplay { epoch: active, .. }) if *active == epoch => {
@@ -292,7 +292,7 @@ impl ConversationRestore {
         true
     }
 
-    pub fn cancel(&mut self) {
+    pub(crate) fn cancel(&mut self) {
         self.pending = None;
     }
 }

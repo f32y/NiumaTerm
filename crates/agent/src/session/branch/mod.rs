@@ -206,7 +206,7 @@ impl ConversationBranch {
         matches!(self.into(), BranchView::Working)
     }
 
-    pub fn cancel_picker(&mut self) -> bool {
+    pub(crate) fn cancel_picker(&mut self) -> bool {
         if !self.picker_is_open() {
             return false;
         }
@@ -685,7 +685,7 @@ impl ConversationBranch {
         Ok(())
     }
 
-    pub fn fork_checkpoints(
+    pub(crate) fn fork_checkpoints(
         &mut self,
         runtime: &mut SessionRuntime,
         result: Result<Vec<ForkCheckpoint>, String>,
