@@ -1,4 +1,4 @@
-rust_i18n::i18n!("locales", fallback = "en");
+rust_i18n::i18n!("../../assets/i18n", fallback = "en");
 
 // The translation macro reads outside Rust's dependency tracking. These inputs
 // let compiler caches invalidate this target when either catalog changes.
