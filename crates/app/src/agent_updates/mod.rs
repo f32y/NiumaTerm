@@ -1,8 +1,7 @@
 //! Provider update registration, test isolation, and presentation reduction.
 
 pub(crate) use crate::agent_updates::notification::{
-    FocusedVisibleLifetime, NotificationPrimaryAction, NotificationProgress,
-    UpdateNotificationTone, UpdateNotificationView, notification_view,
+    FocusedVisibleLifetime, NotificationPrimaryAction, UpdateNotificationView, notification_view,
 };
 pub(crate) use crate::agent_updates::transaction::{provider_for_profile, request_update};
 

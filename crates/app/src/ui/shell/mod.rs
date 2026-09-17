@@ -40,21 +40,18 @@ use app::terminal_tab::view::{AgentInterrupted, TerminalGridResized, TerminalPan
 use dirs::home_dir;
 use gpui::prelude::*;
 use gpui::{
-    Anchor, AnyElement, AnyView, AnyWindowHandle, App, AppContext, Axis, Bounds, Context, Div,
-    Entity, FocusHandle, Focusable, Global, KeyDownEvent, ObjectFit, Pixels, Render, SharedString,
+    AnyElement, AnyView, AnyWindowHandle, App, AppContext, Axis, Bounds, Context, Div, Entity,
+    FocusHandle, Focusable, Global, KeyDownEvent, ObjectFit, Pixels, Render, SharedString,
     TitlebarOptions, WeakEntity, Window, WindowAppearance, WindowBounds, WindowDecorations,
     WindowHandle, WindowId, WindowOptions, div, img, point, px, size, transparent_black,
 };
-use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::modern_menu::dispatch_modern_menu_key;
-use gpui_component::notification::{Notification, NotificationType};
-use gpui_component::progress::Progress;
+use gpui_component::notification::Notification;
 use gpui_component::resizable::PANEL_MIN_SIZE;
 use gpui_component::{
     ActiveTheme, Icon, IconNamed, Root, Theme as ComponentTheme, WindowExt, v_flex,
 };
 use nmt_agent::team::model::RoomId;
-use nmt_agent::update::{ProviderKind, UpdatePhase};
 use nmt_agent::{
     AgentActivityPolicy, AgentEvent, AgentMonitor, AgentNotification, AgentRoute,
     AgentRuntimeStatus, AgentWorkspace, MonitorMutation, agent_process, request_native_delivery,
@@ -69,10 +66,7 @@ use nmt_platform::{
 use rust_i18n::t;
 use tracing::warn;
 
-use crate::agent_updates::{
-    AgentUpdates, FocusedVisibleLifetime, NotificationPrimaryAction, NotificationProgress,
-    UpdateNotificationTone, UpdateNotificationView,
-};
+use crate::agent_updates::AgentUpdates;
 use crate::agent_usage::AgentUsageView;
 use crate::cli::CliAction;
 #[cfg(windows)]

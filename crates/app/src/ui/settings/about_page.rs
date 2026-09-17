@@ -1,5 +1,5 @@
 #[cfg(windows)]
-use nmt_updater::windows::{CheckError, InstallError, Status};
+use nmt_updater::windows::{CheckError, Status};
 use rust_i18n::t;
 
 use crate::ui::settings::*;
@@ -187,24 +187,10 @@ fn status_text(status: &Status) -> String {
             applications = &applications.join(", ")
         )
         .into_owned(),
-        Status::InstallFailed(error) => install_error_text(error),
+        Status::InstallFailed(error) => update::install_error_text(error),
         Status::Failed(CheckError::Unreachable) => {
             t!("settings-about-check-unreachable").to_string()
         }
         Status::Failed(CheckError::Unreadable) => t!("settings-about-check-unreadable").to_string(),
     }
-}
-
-#[cfg(windows)]
-fn install_error_text(error: &InstallError) -> String {
-    match error {
-        InstallError::NoPackage => t!("settings-about-install-no-package"),
-        InstallError::Unreachable => t!("settings-about-install-unreachable"),
-        InstallError::Checksum => t!("settings-about-install-checksum"),
-        InstallError::Unpack => t!("settings-about-install-unpack"),
-        InstallError::NotWritable => t!("settings-about-install-not-writable"),
-        InstallError::Replace => t!("settings-about-install-replace"),
-        InstallError::Relaunch => t!("settings-about-install-relaunch"),
-    }
-    .to_string()
 }

@@ -14,6 +14,7 @@ use nmt_agent::update::{
 use semver::Version;
 
 use crate::agent_updates::*;
+use crate::ui::notification_card::NotificationProgress;
 
 #[gpui::test]
 fn snapshot_reads_do_not_register_or_rediscover_profiles(cx: &mut TestAppContext) {

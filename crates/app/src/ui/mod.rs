@@ -26,6 +26,7 @@ pub(crate) use crate::ui::shell::{
 
 #[cfg(target_os = "macos")]
 pub(crate) mod macos_menu;
+pub(crate) mod notification_card;
 pub(crate) mod pane_tree;
 
 mod active_list;
