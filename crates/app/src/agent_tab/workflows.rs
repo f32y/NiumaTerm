@@ -83,7 +83,9 @@ impl WorkflowUi {
         let reader = self.reader.as_ref()?;
 
         Ref::filter_map(session.borrow(), |session| {
-            session.workflows.conversation(&reader.key.0, &reader.key.1)
+            session
+                .workflows()
+                .conversation(&reader.key.0, &reader.key.1)
         })
         .ok()
     }
@@ -98,7 +100,7 @@ impl WorkflowUi {
         agent_id: &str,
         cx: &mut Context<AgentPane>,
     ) {
-        self.reader = Some(session.borrow_mut().workflows.open_agent(task_id, agent_id));
+        self.reader = Some(session.borrow_mut().open_workflow_agent(task_id, agent_id));
 
         if let Some(host) = host.upgrade() {
             host.update(cx, |host, cx| {

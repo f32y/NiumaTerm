@@ -137,7 +137,7 @@ impl ComposerStatusBar {
     ) -> AnyElement {
         let (branch, branch_opacity) = self.branch.presentation();
 
-        let shared = session.conversation.clone();
+        let shared = session.conversation().clone();
         let conversation = shared.borrow();
 
         let usage = conversation.context_window_usage.map(|usage| {
@@ -154,7 +154,7 @@ impl ComposerStatusBar {
         let turns = conversation
             .session_stats
             .map(|stats| stats.turns)
-            .unwrap_or(session.delivery.turn());
+            .unwrap_or(session.turn());
 
         let stats = composer_stats_label(
             turns,

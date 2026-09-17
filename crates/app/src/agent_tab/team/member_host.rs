@@ -82,7 +82,8 @@ impl MemberHost {
         self.owner.session().update(cx, |session, cx| {
             let mut state = session.controller.borrow_mut();
 
-            if state.runtime.status() != Status::Idle || state.runtime.update_suspension().is_some()
+            if state.runtime().status() != Status::Idle
+                || state.runtime().update_suspension().is_some()
             {
                 return SendOutcome::NotReady;
             }
@@ -131,9 +132,10 @@ impl MemberHost {
         };
 
         self.owner.session().update(cx, |session, cx| {
-            if let Some(backend) = session.controller.borrow_mut().runtime.backend_mut() {
-                backend.respond_team_decision(request, accepted, explanation);
-            }
+            session
+                .controller
+                .borrow_mut()
+                .respond_team_decision(request, accepted, explanation);
 
             cx.notify();
         });

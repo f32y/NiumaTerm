@@ -121,7 +121,7 @@ async fn detached_session_retains_output_and_interaction_until_owner_close(
             assert!(pane.send_text_inner("accepted image".into(), None, None, cx));
 
             let state = pane.session.borrow();
-            let conversation = state.conversation.borrow();
+            let conversation = state.conversation().borrow();
             let image = &conversation.content.entries()[0].metadata.images[0];
             let scratch = scratch_dir(pane.agent_route(cx).unwrap().as_str());
 
@@ -180,11 +180,11 @@ async fn detached_session_retains_output_and_interaction_until_owner_close(
     let second = cx.update(|window, cx| cx.new(|cx| AgentPane::attach(&owner, window, cx)));
 
     second.update(&mut cx, |pane, cx| {
-        assert_eq!(pane.session.borrow().runtime.epoch(), epoch);
+        assert_eq!(pane.session.borrow().runtime().epoch(), epoch);
         assert_eq!(
             pane.session
                 .borrow()
-                .runtime
+                .runtime()
                 .backend()
                 .unwrap()
                 .recovery_identity()
@@ -203,7 +203,7 @@ async fn detached_session_retains_output_and_interaction_until_owner_close(
 
         let state = pane.session.borrow();
 
-        let Some(Backend::Test(backend)) = state.runtime.backend() else {
+        let Some(Backend::Test(backend)) = state.runtime().backend() else {
             panic!("test backend");
         };
 
@@ -257,7 +257,7 @@ async fn detached_session_retains_output_and_interaction_until_owner_close(
             host.read(cx)
                 .controller
                 .borrow()
-                .conversation
+                .conversation()
                 .borrow()
                 .content
                 .entries()

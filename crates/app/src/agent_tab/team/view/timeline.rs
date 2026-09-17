@@ -47,18 +47,15 @@ impl TimelineMirror {
 
             if !runtime.room().attempts().iter().any(|entry| {
                 entry.id == attempt
-                    && entry.intent.backend_generation == state.runtime.epoch()
+                    && entry.intent.backend_generation == state.runtime().epoch()
                     && matches!(entry.state, AttemptState::Sending | AttemptState::Accepted)
             }) {
                 continue;
             }
 
-            let conversation = state.conversation.borrow();
+            let conversation = state.conversation().borrow();
 
-            if let Some(text) = conversation
-                .content
-                .latest_agent_message(state.delivery.turn())
-            {
+            if let Some(text) = conversation.content.latest_agent_message(state.turn()) {
                 live.insert(attempt, text.to_owned());
             }
         }

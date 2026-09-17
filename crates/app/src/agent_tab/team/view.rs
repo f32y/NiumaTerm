@@ -477,7 +477,7 @@ impl TeamPane {
                     .read(cx)
                     .controller
                     .borrow()
-                    .runtime
+                    .runtime()
                     .status()
             });
 

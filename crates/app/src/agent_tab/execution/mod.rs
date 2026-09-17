@@ -36,7 +36,7 @@ use nmt_agent::session::update_readiness::{ConversationWork, Readiness};
 use nmt_agent::session::workflows::RefreshPlan;
 use nmt_agent::session::{Backend, RecoveryIdentity};
 use nmt_agent::update::InstallationKey;
-use nmt_agent::workflow::{WorkflowRefreshRequest, WorkflowRefreshResult, WorkflowRun};
+use nmt_agent::workflow::{WorkflowRefreshResult, WorkflowRun};
 use nmt_agent::{
     AgentEvent, AgentEventKind, AgentRoute, AgentWorkspace, agent_process, normalize_body,
     normalize_title,
@@ -164,7 +164,7 @@ impl SessionOwner {
 
     pub fn start(&self, recovery: Option<RecoveryIdentity>, cx: &mut App) {
         self.session.update(cx, |session, cx| {
-            if session.controller.borrow().runtime.epoch() == 0 {
+            if session.controller.borrow().runtime().epoch() == 0 {
                 session.start(recovery, false, |_, _| {}, cx);
             }
         });
@@ -191,15 +191,7 @@ impl SessionOwner {
         self.binding_generation
             .set(self.binding_generation.get() + 1);
 
-        let mut controller = self.controller.borrow_mut();
-
-        controller.starting(None);
-
-        let backend = controller.runtime.retire();
-
-        controller.failed("session closed", true);
-
-        controller.clear_conversation();
+        let backend = self.controller.borrow_mut().close();
 
         let scratch = self.scratch.clone();
 
@@ -310,7 +302,7 @@ impl AgentSession {
     }
 
     pub(super) fn publish(&self, effect: SessionEffect, cx: &mut Context<Self>) {
-        let epoch = self.controller.borrow().runtime.epoch();
+        let epoch = self.controller.borrow().runtime().epoch();
 
         match &effect {
             SessionEffect::ProviderTurnAccepted { id } => cx.emit(ExecutionSignal::Accepted {
@@ -321,10 +313,10 @@ impl AgentSession {
                 let state = self.controller.borrow();
 
                 let text = state
-                    .conversation
+                    .conversation()
                     .borrow()
                     .content
-                    .latest_agent_message(state.delivery.turn())
+                    .latest_agent_message(state.turn())
                     .unwrap_or_default()
                     .to_owned();
 
@@ -364,13 +356,10 @@ impl AgentSession {
                     return;
                 }
 
-                let update = {
-                    let mut state = this.controller.borrow_mut();
-
-                    let epoch = state.runtime.epoch();
-
-                    state.branch.checkpoints_loaded(epoch, request, result)
-                };
+                let update = this
+                    .controller
+                    .borrow_mut()
+                    .checkpoints_loaded(request, result);
 
                 this.on_branch_update(update, cx);
             },
@@ -395,19 +384,13 @@ impl AgentSession {
                         return;
                     }
 
-                    let update = {
-                        let mut state = this.controller.borrow_mut();
-
-                        let epoch = state.runtime.epoch();
-
-                        state.branch.fork_created(epoch, request, result)
-                    };
+                    let update = this.controller.borrow_mut().fork_created(request, result);
 
                     this.on_branch_update(update, cx);
                 },
             ),
             BranchUpdate::StartSession(identity) => {
-                self.controller.borrow_mut().commands.clear();
+                self.controller.borrow_mut().clear_commands();
 
                 self.start(identity, true, |_, _| {}, cx);
             }
@@ -428,56 +411,28 @@ impl AgentSession {
     /// read runs on a background thread and its failure never blocks the
     /// parent transcript or composer.
     pub(crate) fn restore_background_tasks(&mut self, cx: &mut Context<Self>) {
-        let Some(session_id) = self
-            .controller
-            .borrow()
-            .runtime
-            .backend()
-            .and_then(|session| session.session_id())
-            .map(str::to_owned)
-        else {
-            return;
-        };
-
-        if !self
-            .controller
-            .borrow_mut()
-            .children
-            .claim_restore(&session_id)
-        {
-            return;
-        }
-
         let cwd = self.active_workspace.primary();
 
-        let Some(read) = self
-            .controller
-            .borrow_mut()
-            .runtime
-            .backend_mut()
-            .and_then(|session| session.begin_task_restoration(cwd))
-        else {
+        let Some(read) = self.controller.borrow_mut().begin_task_restoration(cwd) else {
             return;
         };
 
-        let epoch = self.controller.borrow().runtime.epoch();
+        let epoch = self.controller.borrow().runtime().epoch();
 
         Self::read_in_background(
             cx,
             move || read.run(),
             move |this, history, cx| {
-                if !this.controller.borrow().runtime.is_current(epoch) {
+                if !this.controller.borrow().runtime().is_current(epoch) {
                     return;
                 }
 
-                let events = {
-                    let mut state = this.controller.borrow_mut();
-
-                    let Some(session) = state.runtime.backend_mut() else {
-                        return;
-                    };
-
-                    session.finish_task_restoration(history)
+                let Some(events) = this
+                    .controller
+                    .borrow_mut()
+                    .finish_task_restoration(history)
+                else {
+                    return;
                 };
 
                 for event in events {
@@ -496,7 +451,7 @@ impl AgentSession {
             return None;
         }
 
-        let reader_key = (self.controller.borrow().runtime.epoch(), key.clone());
+        let reader_key = (self.controller.borrow().runtime().epoch(), key.clone());
 
         let first = {
             let mut readers = self.child_refresh.readers.borrow_mut();
@@ -540,7 +495,7 @@ impl AgentSession {
                     .collect();
 
                 for (epoch, key) in keys {
-                    if !this.controller.borrow().runtime.is_current(epoch) {
+                    if !this.controller.borrow().runtime().is_current(epoch) {
                         continue;
                     }
 
@@ -572,19 +527,14 @@ impl AgentSession {
     }
 
     fn load_child(&mut self, key: &BackgroundTaskKey, cx: &mut Context<Self>) {
-        let (epoch, events) = {
-            let mut state = self.controller.borrow_mut();
+        let epoch = self.controller.borrow().runtime().epoch();
 
-            let epoch = state.runtime.epoch();
-
-            let Some(backend) = state.runtime.backend_mut() else {
-                return;
-            };
-
-            (
-                epoch,
-                backend.load_background_task_transcript(key, self.active_workspace.primary()),
-            )
+        let Some(events) = self
+            .controller
+            .borrow_mut()
+            .load_background_task_transcript(key, self.active_workspace.primary())
+        else {
+            return;
         };
 
         for event in events {
@@ -593,7 +543,7 @@ impl AgentSession {
     }
 
     pub(crate) fn on_event(&mut self, epoch: u64, event: Event, cx: &mut Context<Self>) {
-        if self.is_closed() || !self.controller.borrow().runtime.is_current(epoch) {
+        if self.is_closed() || !self.controller.borrow().runtime().is_current(epoch) {
             return;
         }
 
@@ -601,19 +551,9 @@ impl AgentSession {
 
         let event = match event {
             Event::HostExited { message } => {
-                let mut state = self.controller.borrow_mut();
-
-                let identity = state
-                    .runtime
-                    .backend()
-                    .and_then(|backend| backend.recovery_identity());
-
-                state.runtime.reconnect(Some(RecoverySnapshot {
-                    identity,
-                    profile_name: self.profile.name.clone(),
-                }));
-
-                state.runtime.recovery_failed(message.clone());
+                self.controller
+                    .borrow_mut()
+                    .host_exited(self.profile.name.clone(), message.clone());
 
                 Event::Error {
                     message,
@@ -644,11 +584,11 @@ impl AgentSession {
 
             let state = self.controller.borrow();
 
-            let mut conversation = state.conversation.borrow_mut();
+            let mut conversation = state.conversation().borrow_mut();
 
             conversation.live.set_detail(detail);
 
-            conversation.changed_turn(state.delivery.turn());
+            conversation.changed_turn(state.turn());
         }
 
         self.publish_activity(&effect, cx);
@@ -699,7 +639,7 @@ impl AgentSession {
             }
             SessionEffect::TurnCompleted { error, .. } => {
                 let state = self.controller.borrow();
-                let key = (state.runtime.epoch(), state.delivery.turn());
+                let key = (state.runtime().epoch(), state.turn());
 
                 if self.last_completed == Some(key) {
                     return;
@@ -709,7 +649,7 @@ impl AgentSession {
                     .clone()
                     .or_else(|| {
                         state
-                            .conversation
+                            .conversation()
                             .borrow()
                             .content
                             .latest_agent_message(key.1)
@@ -737,7 +677,7 @@ impl AgentSession {
                 let body = self
                     .controller
                     .borrow()
-                    .input
+                    .input()
                     .approval()
                     .unwrap_or_default()
                     .to_string();
@@ -751,7 +691,7 @@ impl AgentSession {
             }
             SessionEffect::InputRequested { index } => {
                 let state = self.controller.borrow();
-                let prompt = &state.input.batches()[*index];
+                let prompt = &state.input().batches()[*index];
 
                 if prompt.mode() == QuestionMode::Async {
                     return;
@@ -808,7 +748,7 @@ impl AgentSession {
             agent: agent.into(),
             session_id: self.id.0.to_string(),
             turn_id: (kind != AgentEventKind::SessionStarted)
-                .then(|| format!("turn-{}", state.delivery.turn())),
+                .then(|| format!("turn-{}", state.turn())),
             kind,
             title: normalize_title(title),
             body: normalize_body(body),
@@ -828,24 +768,17 @@ impl AgentSession {
                     return;
                 }
 
-                let result = {
-                    let mut guard = this.controller.borrow_mut();
-
-                    let state = &mut *guard;
-
-                    state.restore.loaded(
-                        &mut state.runtime,
-                        request,
-                        this.active_workspace.primary(),
-                        replay,
-                    )
-                };
+                let result = this.controller.borrow_mut().replay_loaded(
+                    request,
+                    this.active_workspace.primary(),
+                    replay,
+                );
 
                 match result {
                     ReplayLoaded::Stale => {}
                     ReplayLoaded::Cancelled => cx.notify(),
                     ReplayLoaded::Failed(message) => {
-                        let epoch = this.controller.borrow().runtime.epoch();
+                        let epoch = this.controller.borrow().runtime().epoch();
 
                         this.on_event(
                             epoch,
@@ -880,19 +813,19 @@ impl AgentSession {
     /// it as another blank conversation loses no conversation state.
     fn update_work(&self, _cx: &App) -> ConversationWork {
         ConversationWork {
-            approval_open: self.controller.borrow().input.approval().is_some(),
-            branch_pending: self.controller.borrow().branch.holds_composer(),
+            approval_open: self.controller.borrow().input().approval().is_some(),
+            branch_pending: self.controller.borrow().branch().holds_composer(),
             compacting: self
                 .controller
                 .borrow()
-                .conversation
+                .conversation()
                 .borrow()
                 .live
                 .is_compacting(),
             empty: self
                 .controller
                 .borrow()
-                .conversation
+                .conversation()
                 .borrow()
                 .content
                 .entries()
@@ -911,7 +844,7 @@ impl AgentSession {
     pub fn recovery_identity_snapshot(&self, cx: &App) -> RecoveryReadiness {
         self.present_readiness(
             self.update_work(cx)
-                .identity(self.controller.borrow().runtime.backend()),
+                .identity(self.controller.borrow().runtime().backend()),
         )
     }
 
@@ -947,38 +880,19 @@ impl AgentSession {
     }
 
     pub fn prepare_update_wait(&mut self, cx: &mut Context<Self>) {
-        self.controller.borrow_mut().runtime.wait_for_update();
+        self.controller.borrow_mut().wait_for_update();
 
         cx.notify();
     }
 
     pub fn cancel_update_wait(&mut self, cx: &mut Context<Self>) {
-        if self.controller.borrow_mut().runtime.cancel_update_wait() {
+        if self.controller.borrow_mut().cancel_update_wait() {
             cx.notify();
         }
     }
 
     pub fn stop_active_work_for_update(&mut self, cx: &mut Context<Self>) {
-        if self.controller.borrow().input.approval().is_some() {
-            self.controller.borrow_mut().respond_approval("cancel");
-        } else {
-            self.controller.borrow_mut().runtime.interrupt(None);
-        }
-
-        self.controller.borrow_mut().prepare_update_stop();
-
-        self.controller.borrow_mut().publish_confirmed();
-
-        self.controller.borrow_mut().branch.cancel_picker();
-
-        self.controller
-            .borrow()
-            .conversation
-            .borrow_mut()
-            .live
-            .set_compacting(false);
-
-        self.controller.borrow_mut().runtime.wait_for_update();
+        self.controller.borrow_mut().stop_active_work_for_update();
 
         cx.notify();
     }
@@ -995,7 +909,7 @@ impl AgentSession {
             return Task::ready(Ok(()));
         }
 
-        let (epoch, backend) = self.controller.borrow_mut().runtime.suspend_for_update();
+        let (epoch, backend) = self.controller.borrow_mut().suspend_for_update();
 
         cx.emit(AgentPaneEvent::Interrupted);
 
@@ -1024,12 +938,7 @@ impl AgentSession {
 
         if result.is_err() {
             let _ = this.update(cx, |this, cx| {
-                if let Err(orphan) = this
-                    .controller
-                    .borrow_mut()
-                    .runtime
-                    .shutdown_failed(epoch, backend)
-                {
+                if let Err(orphan) = this.controller.borrow_mut().shutdown_failed(epoch, backend) {
                     shutdown_in_background(orphan, Duration::from_secs(5), cx);
                 }
 
@@ -1041,7 +950,7 @@ impl AgentSession {
     }
 
     pub fn mark_provider_updating(&mut self, cx: &mut Context<Self>) {
-        self.controller.borrow_mut().runtime.provider_updating();
+        self.controller.borrow_mut().provider_updating();
 
         cx.notify();
     }
@@ -1056,7 +965,6 @@ impl AgentSession {
 
         self.controller
             .borrow_mut()
-            .runtime
             .reconnect(Some(snapshot.clone()));
 
         self.start(snapshot.identity.clone(), true, |_, _| {}, cx);
@@ -1068,7 +976,7 @@ impl AgentSession {
         let snapshot = self
             .controller
             .borrow()
-            .runtime
+            .runtime()
             .last_recovery_snapshot()
             .cloned();
 
@@ -1078,20 +986,17 @@ impl AgentSession {
     }
 
     pub fn restoration_readiness(&self) -> RestorationReadiness {
-        self.controller.borrow().runtime.restoration_readiness()
+        self.controller.borrow().runtime().restoration_readiness()
     }
 
     pub fn fail_update_recovery(&mut self, message: String, cx: &mut Context<Self>) {
-        self.controller
-            .borrow_mut()
-            .runtime
-            .recovery_failed(message);
+        self.controller.borrow_mut().recovery_failed(message);
 
         cx.notify();
     }
 
     pub(crate) fn start_new_after_update_failure(&mut self, cx: &mut Context<Self>) {
-        self.controller.borrow_mut().runtime.reconnect(None);
+        self.controller.borrow_mut().reconnect(None);
 
         self.start(None, true, |_, _| {}, cx);
 
@@ -1101,7 +1006,7 @@ impl AgentSession {
     pub(crate) fn expire_optional_question(&mut self, index: usize, cx: &mut Context<Self>) {
         let (optional, key) = {
             let state = self.controller.borrow();
-            let prompt = &state.input.batches()[index];
+            let prompt = &state.input().batches()[index];
 
             (prompt.mode() == QuestionMode::Optional, prompt.key())
         };
@@ -1110,7 +1015,7 @@ impl AgentSession {
             return;
         }
 
-        let epoch = self.controller.borrow().runtime.epoch();
+        let epoch = self.controller.borrow().runtime().epoch();
 
         cx.spawn(async move |this, cx| {
             loop {
@@ -1118,11 +1023,11 @@ impl AgentSession {
 
                 let keep_running = this.update(cx, |this, cx| {
                     if this.is_closed()
-                        || !this.controller.borrow().runtime.is_current(epoch)
+                        || !this.controller.borrow().runtime().is_current(epoch)
                         || this
                             .controller
                             .borrow()
-                            .runtime
+                            .runtime()
                             .update_suspension()
                             .is_some()
                     {
@@ -1132,7 +1037,7 @@ impl AgentSession {
                     let state = this.controller.borrow();
 
                     let Some(prompt) = state
-                        .input
+                        .input()
                         .batches()
                         .iter()
                         .find(|prompt| prompt.key() == key)
@@ -1291,7 +1196,7 @@ impl AgentSession {
             policy.restore_transcript = self
                 .controller
                 .borrow()
-                .conversation
+                .conversation()
                 .borrow()
                 .content
                 .entries()
@@ -1370,7 +1275,7 @@ impl AgentSession {
 
                         for message in messages.by_ref() {
                             if this.is_closed()
-                                || !this.controller.borrow().runtime.is_current(epoch)
+                                || !this.controller.borrow().runtime().is_current(epoch)
                             {
                                 return false;
                             }
@@ -1380,7 +1285,7 @@ impl AgentSession {
                                 Err(error) => {
                                     events.flush(|event| this.on_event(epoch, event, cx));
 
-                                    if this.controller.borrow().runtime.is_current(epoch) {
+                                    if this.controller.borrow().runtime().is_current(epoch) {
                                         this.stop_for_output_failure(error, cx);
                                     }
 
@@ -1388,7 +1293,7 @@ impl AgentSession {
                                 }
                             };
 
-                            let next = this.controller.borrow_mut().runtime.process(epoch, message);
+                            let next = this.controller.borrow_mut().process(epoch, message);
 
                             let Some(next) = next else {
                                 return false;
@@ -1424,7 +1329,7 @@ impl AgentSession {
                 return;
             }
 
-            let events = this.controller.borrow_mut().runtime.process_exit(epoch);
+            let events = this.controller.borrow_mut().process_exit(epoch);
 
             let Some(events) = events else {
                 return;
@@ -1434,7 +1339,7 @@ impl AgentSession {
                 this.on_event(epoch, event, cx);
             }
 
-            if !this.controller.borrow().runtime.is_current(epoch) {
+            if !this.controller.borrow().runtime().is_current(epoch) {
                 return;
             }
 
@@ -1450,9 +1355,9 @@ impl AgentSession {
     }
 
     pub(crate) fn prepare_defaults(&self, cx: &Context<Self>) {
-        let mut session = self.controller.borrow_mut();
+        let seed = self.controller.borrow().controls.seed;
 
-        session.ready_defaults = match session.controls.seed {
+        let defaults = match seed {
             SettingsSeed::Defaults => ReadyDefaults {
                 stored: stored_thread_settings(self.kind, &self.profile, cx).cloned(),
                 model: launch_model(self.kind, &self.profile),
@@ -1464,6 +1369,8 @@ impl AgentSession {
             },
             SettingsSeed::None => ReadyDefaults::default(),
         };
+
+        self.controller.borrow_mut().set_ready_defaults(defaults);
     }
 
     pub(crate) fn install(
@@ -1494,14 +1401,11 @@ impl AgentSession {
                 if self
                     .controller
                     .borrow()
-                    .runtime
+                    .runtime()
                     .last_recovery_snapshot()
                     .is_some()
                 {
-                    self.controller
-                        .borrow_mut()
-                        .runtime
-                        .recovery_failed(text.clone());
+                    self.controller.borrow_mut().recovery_failed(text.clone());
                 }
 
                 self.controller
@@ -1527,8 +1431,8 @@ impl AgentSession {
     }
 
     pub(crate) fn stop_for_output_failure(&mut self, error: String, cx: &mut Context<Self>) {
-        let backend = self.controller.borrow_mut().runtime.retire();
-        let epoch = self.controller.borrow().runtime.epoch();
+        let backend = self.controller.borrow_mut().retire();
+        let epoch = self.controller.borrow().runtime().epoch();
 
         if let Some(mut backend) = backend {
             for event in backend.process_exit() {
@@ -1559,39 +1463,13 @@ impl AgentSession {
     pub(crate) fn restore_workflows(&mut self, cx: &mut Context<Self>) {
         // A harness that reports its runs live replays them with the rest of
         // the conversation, so there is no stored record to go looking for.
-        let source = self
-            .controller
-            .borrow()
-            .runtime
-            .backend()
-            .and_then(Backend::workflow_source);
-
-        let Some(source) = source else {
-            return;
-        };
-
-        let Some(session_id) = self
-            .controller
-            .borrow()
-            .runtime
-            .backend()
-            .and_then(Backend::session_id)
-            .map(str::to_owned)
+        let Some((source, session_id)) = self.controller.borrow_mut().begin_workflow_restoration()
         else {
             return;
         };
 
-        if !self
-            .controller
-            .borrow_mut()
-            .workflows
-            .claim_restore(&session_id)
-        {
-            return;
-        }
-
         let cwd = self.active_workspace.primary().map(str::to_owned);
-        let epoch = self.controller.borrow().runtime.epoch();
+        let epoch = self.controller.borrow().runtime().epoch();
 
         Self::read_in_background(
             cx,
@@ -1599,7 +1477,7 @@ impl AgentSession {
             move |this, restored, cx| {
                 // A restoration that outlived its session says nothing about
                 // the conversation now open.
-                if this.is_closed() || !this.controller.borrow().runtime.is_current(epoch) {
+                if this.is_closed() || !this.controller.borrow().runtime().is_current(epoch) {
                     return;
                 }
 
@@ -1613,26 +1491,13 @@ impl AgentSession {
         restored: Result<Vec<WorkflowRun>, String>,
         cx: &mut Context<Self>,
     ) {
-        // A failed read leaves whatever the live stream reported; the view is
-        // still usable and the next open retries.
-        let Ok(restored) = restored else {
-            self.controller.borrow_mut().workflows.forget_restore();
-
-            return;
-        };
-
-        let events = {
-            let mut state = self.controller.borrow_mut();
-
-            let Some(session) = state.runtime.backend_mut() else {
-                return;
-            };
-
-            session.restore_workflows(restored)
-        };
+        let events = self
+            .controller
+            .borrow_mut()
+            .merge_restored_workflows(restored);
 
         for event in events {
-            let epoch = self.controller.borrow().runtime.epoch();
+            let epoch = self.controller.borrow().runtime().epoch();
 
             self.on_event(epoch, event, cx);
         }
@@ -1685,14 +1550,8 @@ impl AgentSession {
     fn should_refresh_workflows(&self) -> bool {
         !self.is_closed()
             && self.workflow_refresh.readers.get() > 0
-            && self
-                .controller
-                .borrow()
-                .runtime
-                .backend()
-                .and_then(Backend::workflow_source)
-                .is_some()
-            && self.controller.borrow().workflows.has_active_run()
+            && self.controller.borrow().workflow_source().is_some()
+            && self.controller.borrow().workflows().has_active_run()
     }
 
     fn workflow_refresh_plan(&self) -> Option<RefreshPlan> {
@@ -1700,10 +1559,9 @@ impl AgentSession {
             return None;
         }
 
-        self.controller.borrow().workflows.refresh_plan(
-            &self.controller.borrow().runtime,
-            self.active_workspace.primary().map(str::to_owned),
-        )
+        self.controller
+            .borrow()
+            .workflow_refresh_plan(self.active_workspace.primary().map(str::to_owned))
     }
 
     /// Fold a tick's reads in. Returns whether the loop should keep running.
@@ -1714,28 +1572,17 @@ impl AgentSession {
         cx: &mut Context<Self>,
     ) -> bool {
         // A tick that outlived its session must not touch the new one.
-        if self.is_closed() || !self.controller.borrow().runtime.is_current(epoch) {
+        if self.is_closed() || !self.controller.borrow().runtime().is_current(epoch) {
             return false;
         }
 
         for result in results {
-            self.controller
-                .borrow_mut()
-                .workflows
-                .accept_revision(&result);
-
-            let events = {
-                let mut state = self.controller.borrow_mut();
-
-                let Some(session) = state.runtime.backend_mut() else {
-                    return false;
-                };
-
-                session.apply_workflow_refresh(result)
+            let Some(events) = self.controller.borrow_mut().apply_workflow_refresh(result) else {
+                return false;
             };
 
             for event in events {
-                let epoch = self.controller.borrow().runtime.epoch();
+                let epoch = self.controller.borrow().runtime().epoch();
 
                 self.on_event(epoch, event, cx);
             }
@@ -1744,8 +1591,7 @@ impl AgentSession {
         if self
             .controller
             .borrow_mut()
-            .workflows
-            .mark_open_availability()
+            .mark_open_workflow_availability()
         {
             cx.notify();
         }
@@ -1760,53 +1606,22 @@ impl AgentSession {
         agent_id: &str,
         cx: &mut Context<Self>,
     ) {
-        let task_id = task_id.to_owned();
-        let agent_id = agent_id.to_owned();
-
-        // A harness that reports its runs live has no stored record to read:
-        // the member is a conversation of its own on the host, and asking for
-        // it is one request whose answer arrives as an ordinary event.
-        let source = self
+        let Some((source, session_id, request)) = self
             .controller
-            .borrow()
-            .runtime
-            .backend()
-            .and_then(Backend::workflow_source);
-
-        let Some(source) = source else {
-            if let Some(session) = self.controller.borrow_mut().runtime.backend_mut() {
-                session.request_workflow_agent_transcript(&task_id, &agent_id);
-            }
-
-            return;
-        };
-
-        let Some(session_id) = self
-            .controller
-            .borrow()
-            .runtime
-            .backend()
-            .and_then(Backend::session_id)
-            .map(str::to_owned)
+            .borrow_mut()
+            .read_workflow_agent(task_id, agent_id)
         else {
             return;
         };
 
-        let request = WorkflowRefreshRequest {
-            task_id: task_id.clone(),
-            agent_ids: self.controller.borrow().workflows.agent_ids(&task_id),
-            open_agent: Some(agent_id),
-            transcript_revision: None,
-        };
-
         let cwd = self.active_workspace.primary().map(str::to_owned);
-        let epoch = self.controller.borrow().runtime.epoch();
+        let epoch = self.controller.borrow().runtime().epoch();
 
         Self::read_in_background(
             cx,
             move || source.refresh(cwd.as_deref(), &session_id, &request),
             move |this, result, cx| {
-                if this.is_closed() || !this.controller.borrow().runtime.is_current(epoch) {
+                if this.is_closed() || !this.controller.borrow().runtime().is_current(epoch) {
                     return;
                 }
 

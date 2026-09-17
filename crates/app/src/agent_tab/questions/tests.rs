@@ -48,9 +48,7 @@ fn open_pane(cx: &mut TestAppContext) -> (Entity<AgentPane>, WindowHandle<Root>)
 
     cx.update(|cx| {
         pane.update(cx, |pane, _| {
-            let epoch = pane.session.borrow_mut().runtime.begin_start();
-
-            pane.session.borrow_mut().input.starting(epoch);
+            let epoch = pane.session.borrow_mut().starting(None);
 
             let backend = TestBackend::new([], SlashCommandOutcome::NotReady, Vec::new())
                 .with_recovery(AgentKind::Codex, "question-thread");
@@ -58,12 +56,12 @@ fn open_pane(cx: &mut TestAppContext) -> (Entity<AgentPane>, WindowHandle<Root>)
             assert!(matches!(
                 pane.session
                     .borrow_mut()
-                    .runtime
+                    .runtime_mut()
                     .install(epoch, Ok(Backend::Test(backend))),
                 StartOutcome::Installed
             ));
 
-            pane.session.borrow_mut().runtime.ready();
+            pane.session.borrow_mut().runtime_mut().ready();
 
             pane.restore_question_drafts();
         })
@@ -145,7 +143,7 @@ fn question_editors_keep_multiline_text_and_mask_secrets(cx: &mut TestAppContext
     cx.read(|cx| {
         let pane = pane.read(cx);
         let state = pane.session.borrow();
-        let draft = pane.prompts.questions(&state.input).unwrap();
+        let draft = pane.prompts.questions(state.input()).unwrap();
 
         assert_eq!(draft.text(0), "first line\nsecond line");
         assert_eq!(draft.text(1), "test-token");
@@ -252,16 +250,16 @@ fn confirmed_secret_answer_releases_its_widget_and_reveals_the_next_batch(cx: &m
     cx.update(|window, cx| {
         pane.update(cx, |pane, cx| {
             pane.prompts
-                .questions_mut(&mut pane.session.borrow_mut().input)
+                .questions_mut(pane.session.borrow_mut().input_mut())
                 .unwrap()
                 .set_text(0, "sensitive".into());
 
             pane.prompts.prepare_editors(&pane.session, window, cx);
 
             assert!(
-                pane.prompts.presentations[&pane.session.borrow().input.batches()[0].key()].editors
-                    [0]
-                .is_some()
+                pane.prompts.presentations[&pane.session.borrow().input().batches()[0].key()]
+                    .editors[0]
+                    .is_some()
             );
         });
     });
@@ -280,13 +278,13 @@ fn confirmed_secret_answer_releases_its_widget_and_reveals_the_next_batch(cx: &m
         pane.update(cx, |pane, cx| {
             assert_eq!(
                 pane.prompts.active,
-                Some(pane.session.borrow().input.batches()[0].key())
+                Some(pane.session.borrow().input().batches()[0].key())
             );
 
             pane.submit_current_questions(cx);
 
             assert_eq!(
-                pane.session.borrow().input.batches()[0].status(),
+                pane.session.borrow().input().batches()[0].status(),
                 QuestionStatus::Submitting
             );
         });
@@ -307,16 +305,16 @@ fn confirmed_secret_answer_releases_its_widget_and_reveals_the_next_batch(cx: &m
     cx.update(|_, cx| {
         pane.update(cx, |pane, _| {
             assert!(
-                pane.prompts.presentations[&pane.session.borrow().input.batches()[0].key()].editors
-                    [0]
-                .is_none()
+                pane.prompts.presentations[&pane.session.borrow().input().batches()[0].key()]
+                    .editors[0]
+                    .is_none()
             );
-            assert_eq!(pane.session.borrow().input.batches()[0].text(0), "");
+            assert_eq!(pane.session.borrow().input().batches()[0].text(0), "");
             assert_eq!(
                 pane.prompts.active,
-                Some(pane.session.borrow().input.batches()[1].key())
+                Some(pane.session.borrow().input().batches()[1].key())
             );
-            assert_eq!(pane.session.borrow().input.pending_count(), 1);
+            assert_eq!(pane.session.borrow().input().pending_count(), 1);
         });
     });
 }
@@ -343,14 +341,14 @@ fn blocking_requests_reveal_without_discarding_async_drafts_and_duplicates_keep_
     let editor = cx.update(|window, cx| {
         pane.update(cx, |pane, cx| {
             pane.prompts
-                .questions_mut(&mut pane.session.borrow_mut().input)
+                .questions_mut(pane.session.borrow_mut().input_mut())
                 .unwrap()
                 .set_text(0, "keep this".into());
 
             pane.prompts.prepare_editors(&pane.session, window, cx);
 
             let QuestionEditorState::Text(editor) = &pane.prompts.presentations
-                [&pane.session.borrow().input.batches()[0].key()]
+                [&pane.session.borrow().input().batches()[0].key()]
                 .editors[0]
                 .as_ref()
                 .unwrap()
@@ -368,7 +366,7 @@ fn blocking_requests_reveal_without_discarding_async_drafts_and_duplicates_keep_
     cx.update(|_, cx| {
         pane.update(cx, |pane, _| {
             let QuestionEditorState::Text(current) = &pane.prompts.presentations
-                [&pane.session.borrow().input.batches()[0].key()]
+                [&pane.session.borrow().input().batches()[0].key()]
                 .editors[0]
                 .as_ref()
                 .unwrap()
@@ -395,10 +393,10 @@ fn blocking_requests_reveal_without_discarding_async_drafts_and_duplicates_keep_
         pane.update(cx, |pane, cx| {
             assert_eq!(
                 pane.prompts.active,
-                Some(pane.session.borrow().input.batches()[1].key())
+                Some(pane.session.borrow().input().batches()[1].key())
             );
             assert_eq!(
-                pane.session.borrow().input.batches()[0].text(0),
+                pane.session.borrow().input().batches()[0].text(0),
                 "keep this"
             );
 
@@ -419,11 +417,11 @@ fn blocking_requests_reveal_without_discarding_async_drafts_and_duplicates_keep_
         pane.update(cx, |pane, _| {
             assert_eq!(
                 pane.prompts.active,
-                Some(pane.session.borrow().input.batches()[0].key())
+                Some(pane.session.borrow().input().batches()[0].key())
             );
             assert_eq!(
                 pane.prompts
-                    .questions(&pane.session.borrow().input)
+                    .questions(pane.session.borrow().input())
                     .unwrap()
                     .text(0),
                 "keep this"
@@ -492,14 +490,14 @@ fn a_new_request_does_not_reuse_the_expired_answer(cx: &mut TestAppContext) {
         pane.update(cx, |pane, cx| {
             assert_ne!(
                 pane.prompts
-                    .questions(&pane.session.borrow().input)
+                    .questions(pane.session.borrow().input())
                     .unwrap()
                     .key(),
                 old_key
             );
 
             let QuestionEditorState::Text(editor) = &pane.prompts.presentations
-                [&pane.session.borrow().input.batches()[1].key()]
+                [&pane.session.borrow().input().batches()[1].key()]
                 .editors[0]
                 .as_ref()
                 .unwrap()
@@ -512,7 +510,7 @@ fn a_new_request_does_not_reuse_the_expired_answer(cx: &mut TestAppContext) {
             assert_eq!(editor.read(cx).value().as_ref(), "");
             assert_eq!(
                 pane.prompts
-                    .questions(&pane.session.borrow().input)
+                    .questions(pane.session.borrow().input())
                     .unwrap()
                     .text(0),
                 ""
@@ -534,7 +532,7 @@ fn question_editors_survive_unshown_batches_and_reused_positions(cx: &mut TestAp
         pane.update(cx, |pane, _| {
             pane.session
                 .borrow_mut()
-                .input
+                .input_mut()
                 .history("unshown", vec![prompt.clone()]);
         });
     });
@@ -558,7 +556,7 @@ fn question_editors_survive_unshown_batches_and_reused_positions(cx: &mut TestAp
             assert_eq!(pane.prompts.presentations.len(), 1);
             assert!(pane.prompts.presentations[&old_key].editors[0].is_some());
 
-            pane.session.borrow_mut().input.clear_questions();
+            pane.session.borrow_mut().clear_conversation();
 
             old_key
         })
@@ -581,7 +579,7 @@ fn question_editors_survive_unshown_batches_and_reused_positions(cx: &mut TestAp
             let key = pane.prompts.active.unwrap();
 
             assert_ne!(old_key, key);
-            assert!(pane.session.borrow().input.draft(old_key).is_none());
+            assert!(pane.session.borrow().input().draft(old_key).is_none());
             assert!(!pane.prompts.presentations.contains_key(&old_key));
             assert!(pane.prompts.presentations[&key].editors[0].is_some());
         });

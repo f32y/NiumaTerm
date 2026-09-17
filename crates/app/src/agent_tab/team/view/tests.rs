@@ -92,7 +92,7 @@ async fn claude_member_startup_retains_native_permission_selection(cx: &mut Test
 
     cx.condition(&host, |session, _| {
         matches!(
-            session.controller.borrow().runtime.status(),
+            session.controller.borrow().runtime().status(),
             Status::Idle | Status::Exited
         )
     })

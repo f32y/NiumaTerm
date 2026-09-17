@@ -15,7 +15,7 @@ use crate::transcript::conversation::ConversationState;
 
 /// Child-agent activity the provider adapter reports for this conversation.
 #[derive(Default)]
-pub struct ChildAgents {
+pub(crate) struct ChildAgents {
     /// Latest child-agent snapshot published by the provider adapter. The
     /// adapter owns child lifecycle; the pane keeps only this replacement
     /// copy so the right-side view never maintains a second mutable registry.
@@ -49,7 +49,10 @@ pub fn scoped_background_tasks<'a>(
 
 impl ChildAgents {
     /// The held snapshot, when it was produced for `parent`.
-    pub fn scoped(&self, parent: Option<&BackgroundTaskKey>) -> Option<&BackgroundTaskSnapshot> {
+    pub(crate) fn scoped(
+        &self,
+        parent: Option<&BackgroundTaskKey>,
+    ) -> Option<&BackgroundTaskSnapshot> {
         scoped_background_tasks(parent, self.background_tasks.as_ref())
     }
 
@@ -66,7 +69,7 @@ impl ChildAgents {
     }
 
     /// The children `parent` shows, and how many of them are still active.
-    pub fn activity(&self, parent: Option<&BackgroundTaskKey>) -> (usize, usize) {
+    pub(crate) fn activity(&self, parent: Option<&BackgroundTaskKey>) -> (usize, usize) {
         self.scoped(parent)
             .map_or((0, 0), |tasks| (tasks.tasks.len(), tasks.active_count()))
     }
@@ -108,7 +111,7 @@ impl ChildAgents {
         self.transcripts.clear();
     }
 
-    pub fn claim_restore(&mut self, session_id: &str) -> bool {
+    pub(crate) fn claim_restore(&mut self, session_id: &str) -> bool {
         if self.restored_session.as_deref() == Some(session_id) {
             return false;
         }

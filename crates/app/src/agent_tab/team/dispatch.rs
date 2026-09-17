@@ -19,12 +19,12 @@ pub(super) fn work_status(session: &AgentSession) -> WorkStatus {
     let state = session.controller.borrow();
 
     WorkStatus {
-        foreground: matches!(state.runtime.status(), Status::Running | Status::Starting)
+        foreground: matches!(state.runtime().status(), Status::Running | Status::Starting)
             || state
-                .runtime
+                .runtime()
                 .backend()
                 .is_some_and(|backend| backend.has_active_operation()),
         background: state.background_activity().1,
-        interaction: state.input.waiting(),
+        interaction: state.input().waiting(),
     }
 }

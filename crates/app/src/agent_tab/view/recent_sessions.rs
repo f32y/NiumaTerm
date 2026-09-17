@@ -378,11 +378,8 @@ impl SessionHistoryUi {
                             // The final page in view is the cue to fetch
                             // the next one (no-op without a cursor, and
                             // only Codex pages from the backend).
-                            if visible_range.end >= this.history_ui.data.sessions.len()
-                                && let Some(session) =
-                                    this.session.borrow_mut().runtime.backend_mut()
-                            {
-                                session.request_more_history();
+                            if visible_range.end >= this.history_ui.data.sessions.len() {
+                                this.session.borrow_mut().request_more_history();
                             }
 
                             let composer_empty = this.input.read(cx).text().len() == 0;
@@ -627,7 +624,7 @@ async fn load_history_passes(
             match this.history_ui.publish_filesystem_count(
                 &request,
                 cwd.as_deref(),
-                this.session.borrow().runtime.epoch(),
+                this.session.borrow().runtime().epoch(),
                 count,
             ) {
                 CountPublication::Stale => false,
@@ -668,7 +665,7 @@ async fn load_history_passes(
         if this.history_ui.publish_filesystem_rows(
             &request,
             cwd.as_deref(),
-            this.session.borrow().runtime.epoch(),
+            this.session.borrow().runtime().epoch(),
             sessions,
         ) {
             cx.notify();
