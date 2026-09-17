@@ -3,6 +3,7 @@
 //! Ignored by default: it starts `dsh`, spends a model call, and therefore
 //! needs both a resolvable installation and a working credential. Run it with
 //! `cargo test -p nmt_agent --test deepseek_live -- --ignored --nocapture`.
+//! Set `NMT_DSH_TEST_LAUNCHER` to `pnpm-dlx` or `npx` for package launchers.
 
 #![cfg(target_os = "windows")]
 
@@ -13,7 +14,9 @@ use std::{env, fs};
 
 use nmt_agent::chat::{Event, Item, SendOutcome, SlashCommandOutcome};
 use nmt_agent::dsh::{Host, Session};
+use nmt_agent::profile::agent_launch;
 use nmt_agent::{AgentWorkspace, LaunchConfig};
+use nmt_profile::{AgentKind, AgentProfile, AgentProfileLauncher};
 use tempfile::TempDir;
 use uuid::Uuid;
 
@@ -36,10 +39,22 @@ const LONG_PROMPT: &str =
     "Count from 1 to 400, one number per line, with a short remark on each. Do not stop early.";
 
 fn launch() -> LaunchConfig {
-    LaunchConfig {
+    let launcher = match env::var("NMT_DSH_TEST_LAUNCHER")
+        .as_deref()
+        .unwrap_or("custom")
+    {
+        "custom" => AgentProfileLauncher::Custom,
+        "pnpm-dlx" => AgentProfileLauncher::PnpmDlx,
+        "npx" => AgentProfileLauncher::Npx,
+        other => panic!("unsupported test launcher: {other}"),
+    };
+
+    agent_launch(&AgentProfile {
+        kind: AgentKind::DeepSeek,
         executable: "dsh".to_string(),
-        ..LaunchConfig::default()
-    }
+        launcher,
+        ..AgentProfile::default()
+    })
 }
 
 /// Drain events until `stop` accepts one, or the deadline passes. Returns every
@@ -92,6 +107,200 @@ fn item_text(item: &Item) -> &str {
         Item::Reasoning { summary, .. } => summary.as_deref().unwrap_or_default(),
         _ => "",
     }
+}
+
+#[test]
+#[ignore = "requires the local provider runner"]
+fn a_steered_message_is_consumed_without_another_submission() {
+    assert!(env::var("DEEPSEEK_BASE_URL").is_ok_and(|url| url.starts_with("http://127.0.0.1:")));
+
+    let (tx, frames) = channel();
+
+    let mut session = Session::create(&launch(), &AgentWorkspace::default(), move |frame| {
+        let _ = tx.send(frame);
+    })
+    .unwrap();
+
+    session
+        .send_user_message("queue-probe first", &[])
+        .assert_started_a_turn();
+
+    let (before, started) = collect_until(
+        &mut session,
+        &frames,
+        Duration::from_secs(30),
+        |event| matches!(event, Event::ItemStarted(Item::UserMessage { text: Some(text) }) if text == "queue-probe first"),
+    );
+
+    assert!(started, "the first prompt was not consumed: {before:?}");
+
+    assert_eq!(
+        session.send_user_message("queue-probe second", &[]),
+        SendOutcome::Steered
+    );
+
+    let (after, ended) = collect_until(&mut session, &frames, Duration::from_secs(30), |event| {
+        matches!(event, Event::TurnCompleted { .. })
+    });
+
+    assert!(ended, "the steered turn did not complete: {after:?}");
+    assert!(
+        after.iter().any(|event| matches!(event,
+            Event::ItemCompleted(Item::AgentMessage { text: Some(text), .. })
+                if text.contains("queue-probe consumed"))),
+        "steering was not consumed: {after:?}"
+    );
+    assert!(
+        after
+            .iter()
+            .any(|event| matches!(event, Event::QueuedPrompts(prompts) if prompts.is_empty()))
+    );
+}
+
+/// The profile is a JSON copy of one persisted agent profile entry. Its normal
+/// deserializer reads encrypted credentials without printing them to the log.
+#[test]
+#[ignore = "requires NMT_DSH_TEST_PROFILE_PATH and spends real model calls"]
+fn a_configured_profile_consumes_steering_without_resubmission() {
+    let profile_path =
+        env::var_os("NMT_DSH_TEST_PROFILE_PATH").expect("provide a persisted profile JSON path");
+
+    let profile: AgentProfile = serde_json::from_slice(&fs::read(profile_path).unwrap()).unwrap();
+
+    assert_eq!(profile.kind, AgentKind::DeepSeek);
+
+    let isolated = TempDir::new().unwrap();
+    let workspace = isolated.path().join("workspace");
+
+    fs::create_dir(&workspace).unwrap();
+
+    let mut launch = agent_launch(&profile);
+
+    launch
+        .env
+        .retain(|(name, _)| !name.eq_ignore_ascii_case("DSH_HOME"));
+
+    launch.env.push((
+        "DSH_HOME".into(),
+        isolated.path().join("home").display().to_string(),
+    ));
+
+    let (tx, frames) = channel();
+
+    let mut session = Session::create(
+        &launch,
+        &AgentWorkspace::single(Some(workspace.display().to_string())),
+        move |frame| {
+            let _ = tx.send(frame);
+        },
+    )
+    .unwrap();
+
+    let (_, ready) = collect_until(
+        &mut session,
+        &frames,
+        Duration::from_secs(30),
+        |event| matches!(event, Event::Ready(settings) if settings.model == launch.model),
+    );
+
+    assert!(ready, "the configured model was not selected");
+
+    println!("profile={} model={}", profile.name, profile.model);
+
+    let first = "Do not use tools or inspect files. Count from 1 to 60, one number per line, with a short sentence about each number. If a later user message arrives, follow it instead.";
+
+    session
+        .send_user_message(first, &[])
+        .assert_started_a_turn();
+
+    let (_, consumed) = collect_until(
+        &mut session,
+        &frames,
+        Duration::from_secs(30),
+        |event| matches!(event, Event::ItemStarted(Item::UserMessage { text: Some(text) }) if text == first),
+    );
+
+    assert!(consumed, "the first prompt was not consumed");
+
+    // Leave time for the first model request to begin before adding its correction.
+    let _ = collect_until(&mut session, &frames, Duration::from_secs(1), |_| false);
+
+    assert!(
+        session.has_active_operation(),
+        "the first turn ended before steering"
+    );
+
+    let marker = format!("NMT_QUEUE_OK_{}", Uuid::new_v4().simple());
+
+    let queued =
+        format!("Stop counting. Do not use tools or inspect files. Reply with exactly: {marker}");
+
+    let started = Instant::now();
+
+    assert_eq!(
+        session.send_user_message(&queued, &[]),
+        SendOutcome::Steered
+    );
+
+    println!("steered while the first turn was active");
+
+    let mut queued_seen = false;
+    let mut latest_queue_empty = false;
+    let mut user_echo = false;
+    let mut model_replied = false;
+    let mut turn_ends = 0;
+    let mut turn_running = true;
+
+    let (_, finished) = collect_until(&mut session, &frames, Duration::from_secs(180), |event| {
+        match event {
+            Event::QueuedPrompts(prompts) => {
+                queued_seen |= prompts.iter().any(|prompt| prompt.text == queued);
+                latest_queue_empty = prompts.is_empty();
+
+                println!(
+                    "+{:.1}s pending={}",
+                    started.elapsed().as_secs_f32(),
+                    prompts.len()
+                );
+            }
+            Event::ItemStarted(Item::UserMessage { text: Some(text) }) if text == &queued => {
+                user_echo = true;
+
+                println!(
+                    "+{:.1}s queued prompt consumed",
+                    started.elapsed().as_secs_f32()
+                );
+            }
+            Event::ItemCompleted(Item::AgentMessage {
+                text: Some(text), ..
+            }) => {
+                model_replied |= text.contains(&marker);
+
+                println!(
+                    "+{:.1}s assistant completed marker={model_replied}",
+                    started.elapsed().as_secs_f32()
+                );
+            }
+            Event::TurnCompleted { error } => {
+                assert!(error.is_none(), "the turn failed: {error:?}");
+
+                turn_ends += 1;
+                turn_running = false;
+                println!("+{:.1}s turn ended", started.elapsed().as_secs_f32());
+            }
+            Event::TurnStarted => turn_running = true,
+            Event::Error { message, .. } => panic!("the provider failed: {message}"),
+            _ => {}
+        }
+
+        user_echo && model_replied && latest_queue_empty && !turn_running
+    });
+
+    assert!(
+        finished,
+        "queued_seen={queued_seen} user_echo={user_echo} model_replied={model_replied} queue_empty={latest_queue_empty} turn_ends={turn_ends}"
+    );
+    assert!(!session.has_active_operation());
 }
 
 #[test]

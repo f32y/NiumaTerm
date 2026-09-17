@@ -1028,6 +1028,14 @@ mod queued_prompt_placement_tests {
         // The CLI answers the held prompt in a turn nothing here sent.
         deliver_session_event(&pane, SessionEvent::TurnStarted, &cx);
 
+        deliver_session_event(
+            &pane,
+            SessionEvent::ItemStarted(SessionItem::UserMessage {
+                text: Some("queued behind it".into()),
+            }),
+            &cx,
+        );
+
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
                 assert_eq!(

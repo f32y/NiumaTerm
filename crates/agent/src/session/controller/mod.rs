@@ -264,12 +264,6 @@ impl SessionController {
             self.note_visible_output();
         }
 
-        if matches!(item, Item::AgentMessage { .. }) {
-            self.delivery.agent_message();
-
-            self.publish_confirmed();
-        }
-
         self.push_item(item);
     }
 

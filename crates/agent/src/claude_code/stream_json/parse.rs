@@ -10,6 +10,36 @@ use crate::chat::{
 };
 use crate::claude_code::records::tool_title;
 
+/// Only parent user input acknowledges a submitted prompt. Tool output,
+/// generated context, and child conversations cannot consume the parent's queue.
+pub(super) fn user_prompt_text(message: &Value) -> Option<String> {
+    if message["type"] != "user"
+        || !message["parent_tool_use_id"].is_null()
+        || message["isSynthetic"] == true
+    {
+        return None;
+    }
+
+    match &message["message"]["content"] {
+        Value::String(text) => Some(text.clone()),
+        Value::Array(blocks) => {
+            let mut texts = blocks
+                .iter()
+                .filter(|block| block["type"] == "text")
+                .filter_map(|block| block["text"].as_str());
+
+            let mut text = texts.next()?.to_owned();
+
+            for part in texts {
+                text.push_str(part);
+            }
+
+            Some(text)
+        }
+        _ => None,
+    }
+}
+
 pub(super) fn parse_claude_usage(usage: &Value) -> Option<TokenUsageBreakdown> {
     let direct_input = usage["input_tokens"].as_u64();
     let cache_write_input_tokens = usage["cache_creation_input_tokens"].as_u64();

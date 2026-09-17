@@ -51,6 +51,7 @@ use crate::claude_code::stream_json::control::{
 use crate::claude_code::stream_json::parse::{
     approval_description, claude_result_error, compaction_progress, initialize_command_catalog,
     legacy_command_catalog, parse_models, slash_command_text, ui_owns_slash_command,
+    user_prompt_text,
 };
 #[cfg(test)]
 use crate::claude_code::stream_json::parse::{
@@ -350,7 +351,7 @@ impl Session {
             Some("system") => events.extend(self.on_system(&message)),
             Some("stream_event") => events.extend(self.transcript.on_stream_event(&message)),
             Some("assistant") => events.extend(self.transcript.on_assistant(&message)),
-            Some("user") => events.extend(self.transcript.on_tool_results(&message)),
+            Some("user") => events.extend(self.transcript.on_user_message(&message)),
             Some("result") => events.extend(self.on_result(&message)),
             Some("control_request") => events.extend(self.on_control_request(&message)),
             Some("control_response") => events.extend(self.on_control_response(&message)),
@@ -1420,6 +1421,7 @@ fn claude_command(
         "--permission-prompt-tool",
         "stdio",
         "--allow-dangerously-skip-permissions",
+        "--replay-user-messages",
     ]);
 
     // File snapshots are opt-in for stream-json SDK clients. This is
@@ -1559,13 +1561,12 @@ impl TurnTracker {
 
     /// Read one line from the CLI.
     ///
-    /// A message written while a turn was still running is queued by the CLI
-    /// and then run as a turn of its own, opened with no send from this side.
-    /// Model output is the only announcement that turn makes, so it has to be
-    /// adopted here; otherwise it is never reported as started, and everything
-    /// it produces is filed under the turn that preceded it.
+    /// The CLI may consume an extra prompt in the active turn or start another
+    /// turn for it. An echoed prompt can precede that next turn's model output,
+    /// so it must open the transcript before the prompt is published.
     fn observe(&mut self, message: &Value) -> TurnObservation {
-        let adopted = self.state == TurnState::Idle && carries_model_output(message);
+        let adopted = self.state == TurnState::Idle
+            && (carries_model_output(message) || user_prompt_text(message).is_some());
 
         if adopted {
             self.accepted = None;

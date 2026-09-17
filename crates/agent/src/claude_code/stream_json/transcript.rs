@@ -8,6 +8,7 @@ use crate::claude_code::records::{
 };
 use crate::claude_code::stream_json::parse::{
     claude_context_window, context_window_usage, parse_claude_usage, update_claude_output,
+    user_prompt_text,
 };
 
 #[derive(Default)]
@@ -347,14 +348,22 @@ impl TranscriptState {
         events
     }
 
-    /// `user` messages in the stream carry tool results; each one completes
-    /// its started tool item with output and success/failure status.
-    pub(super) fn on_tool_results(&mut self, message: &Value) -> Vec<Event> {
-        let Some(blocks) = message["message"]["content"].as_array() else {
+    /// User input echoes acknowledge queued prompts, while tool-result blocks
+    /// complete existing tool rows. Both arrive under the same message type.
+    pub(super) fn on_user_message(&mut self, message: &Value) -> Vec<Event> {
+        if !message["parent_tool_use_id"].is_null() {
             return Vec::new();
-        };
+        }
 
         let mut events = Vec::new();
+
+        if let Some(text) = user_prompt_text(message) {
+            events.push(Event::ItemStarted(Item::UserMessage { text: Some(text) }));
+        }
+
+        let Some(blocks) = message["message"]["content"].as_array() else {
+            return events;
+        };
 
         for block in blocks {
             if block["type"].as_str() != Some("tool_result") {

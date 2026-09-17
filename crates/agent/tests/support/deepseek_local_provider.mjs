@@ -1,6 +1,7 @@
-// Runs the real installed dsh against a local model; no provider account is used.
+// Runs dsh through the application's pinned package launcher against a local model.
 // From the repository root: node crates/agent/tests/support/deepseek_local_provider.mjs
 // An optional argument selects one test. The default runs the protocol scenarios.
+// Set NMT_DSH_TEST_LAUNCHER=custom to use an installed dsh instead of pnpm dlx.
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -33,7 +34,16 @@ const server = createServer(async (request, response) => {
 
   emit({ role: 'assistant', content: '' });
 
-  if (input.tools && prompt.includes('protocol-probe question') && completed.length === 0) {
+  if (prompt.includes('queue-probe first')) {
+    if (prompt.includes('queue-probe second')) {
+      emit({ content: 'queue-probe consumed' });
+    } else {
+      emit({ content: 'queue-probe waiting' });
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    emit({}, 'stop');
+    response.end('data: [DONE]\n\n');
+  } else if (input.tools && prompt.includes('protocol-probe question') && completed.length === 0) {
     const args = { questions: [{ id: 'probe-choice', question: 'Continue this test?', options: [{ label: 'Yes' }, { label: 'No' }] }] };
 
     emit({ tool_calls: [{ index: 0, id: 'probe-question', type: 'function', function: { name: 'ask_user_question', arguments: JSON.stringify(args) } }] });
@@ -84,6 +94,7 @@ const scenarios = process.argv[2] ? [process.argv[2]] : [
   'two_sessions_share_one_host_and_do_not_see_each_other',
   'a_profile_can_declare_and_select_an_image_model',
   'permission_commands_update_the_session_preset',
+  'a_steered_message_is_consumed_without_another_submission',
 ];
 
 try {
@@ -94,7 +105,13 @@ try {
       const code = await new Promise((resolve, reject) => {
         const child = spawn('cargo', ['test', '-p', 'nmt_agent', '--test', 'deepseek_live', scenario, '--', '--ignored', '--nocapture'], {
           windowsHide: true, stdio: 'inherit',
-          env: { ...process.env, DSH_HOME: probeHome, DEEPSEEK_API_KEY: 'local-probe', DEEPSEEK_BASE_URL: `http://127.0.0.1:${server.address().port}` },
+          env: {
+            ...process.env,
+            NMT_DSH_TEST_LAUNCHER: process.env.NMT_DSH_TEST_LAUNCHER || 'pnpm-dlx',
+            DSH_HOME: probeHome,
+            DEEPSEEK_API_KEY: 'local-probe',
+            DEEPSEEK_BASE_URL: `http://127.0.0.1:${server.address().port}`,
+          },
         });
 
         child.once('error', reject);

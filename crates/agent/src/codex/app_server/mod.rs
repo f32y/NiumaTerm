@@ -31,6 +31,9 @@ mod team;
 mod title_generation;
 
 #[cfg(test)]
+#[cfg(windows)]
+mod steering_tests;
+#[cfg(test)]
 mod tests;
 
 use std::mem::take;
@@ -417,6 +420,7 @@ impl Session {
 
         let rpc_id = self.alloc_rpc_id();
         let input = codex_user_input(text, skill, images);
+        let params = turn_start_params(&thread_id, input, settings, &self.workspace);
 
         if let Some(turn_id) = self.conversation.current_turn.clone() {
             if let Err(message) = self.try_send(json!({
@@ -426,16 +430,21 @@ impl Session {
                 "params": {
                     "threadId": thread_id,
                     "expectedTurnId": turn_id,
-                    "input": input,
+                    "input": params["input"],
                 },
             })) {
                 return SendOutcome::Rejected { message };
             }
 
+            self.control.track(
+                rpc_id,
+                ControlOperation::Steer {
+                    next_turn_params: params,
+                },
+            );
+
             return SendOutcome::Steered;
         }
-
-        let params = turn_start_params(&thread_id, input, settings, &self.workspace);
 
         if let Err(message) = self.try_send(json!({
             "jsonrpc": "2.0",
@@ -527,8 +536,17 @@ impl Session {
 
         let rpc_id = self.alloc_rpc_id();
 
-        self.try_send(turn_interrupt_request(rpc_id, &thread_id, &turn_id))
-            .is_ok()
+        if self
+            .try_send(turn_interrupt_request(rpc_id, &thread_id, &turn_id))
+            .is_err()
+        {
+            return false;
+        }
+
+        // An explicit stop must not be undone by a late steering refusal.
+        self.control.cancel_steering_retries();
+
+        true
     }
 
     /// Switch this session onto a persisted thread. The response carries the
@@ -881,9 +899,32 @@ impl Session {
 
     fn on_response(&mut self, rpc_id: u64, message: &Value) -> Vec<Event> {
         let (pending_command, query) = match self.control.finish(rpc_id) {
+            Some(ControlOperation::Steer { next_turn_params })
+                if message["error"]["message"] == "no active turn to steer" =>
+            {
+                // The server rejected this input before admission. Starting it
+                // again is safe only for this explicit refusal, never for a
+                // timeout whose delivery outcome is unknown.
+                let id = self.alloc_rpc_id();
+
+                return match self.try_send(json!({
+                    "jsonrpc": "2.0", "id": id, "method": "turn/start",
+                    "params": next_turn_params,
+                })) {
+                    Ok(()) => Vec::new(),
+                    Err(message) => vec![Event::Error {
+                        message,
+                        fatal: false,
+                    }],
+                };
+            }
             Some(ControlOperation::Command(command)) => (Some(command), None),
             Some(ControlOperation::Query(kind)) => (None, Some(kind)),
-            Some(ControlOperation::Other | ControlOperation::ThreadRequest) => (None, None),
+            Some(
+                ControlOperation::Other
+                | ControlOperation::ThreadRequest
+                | ControlOperation::Steer { .. },
+            ) => (None, None),
             Some(ControlOperation::ThreadName)
                 if message["error"]["data"]["requestTimedOut"].as_bool() == Some(true) =>
             {

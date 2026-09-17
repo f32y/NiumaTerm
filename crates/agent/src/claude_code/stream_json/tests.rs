@@ -685,12 +685,84 @@ fn transcript_state_isolates_children_and_tool_results() {
 
     let result = json!({"message":{"content":[{"type":"tool_result","tool_use_id":"tool-1","content":"done"}]}});
 
-    assert!(other.on_tool_results(&result).is_empty());
+    assert!(other.on_user_message(&result).is_empty());
     assert!(matches!(
-        parent.on_tool_results(&result).as_slice(),
+        parent.on_user_message(&result).as_slice(),
         [Event::ItemCompleted(_)]
     ));
-    assert!(parent.on_tool_results(&result).is_empty());
+    assert!(parent.on_user_message(&result).is_empty());
+}
+
+#[test]
+fn consumed_steering_is_acknowledged_before_the_current_turn_finishes() {
+    use crate::session::AgentKind;
+    use crate::session::delivery::MessageDelivery;
+
+    let mut transcript = TranscriptState::default();
+    let mut delivery = MessageDelivery::new(AgentKind::Claude);
+
+    delivery.submit(SendOutcome::StartedTurn, "first".into(), || None);
+    delivery.submit(SendOutcome::Steered, "queued".into(), || None);
+
+    let echoed = json!({
+        "type": "user", "parent_tool_use_id": null,
+        "message": {"role": "user", "content": [{"type": "text", "text": "queued"}]},
+    });
+
+    for event in transcript.on_user_message(&echoed) {
+        if let Event::ItemStarted(Item::UserMessage { text: Some(text) }) = event {
+            assert_eq!(delivery.echoed(&text).as_deref(), Some("queued"));
+        }
+    }
+
+    assert!(
+        delivery.pending().is_empty(),
+        "consumed steering must leave the queue"
+    );
+    assert!(delivery.is_active());
+}
+
+#[test]
+fn a_queued_prompt_echo_opens_the_next_turn_before_model_output() {
+    let mut turn = TurnTracker::default();
+
+    let echo = json!({"type": "user", "isReplay": true,
+        "message": {"content": "queued"}, "parent_tool_use_id": null});
+
+    assert!(turn.begin_message_turn());
+
+    turn.observe(&json!({"type": "assistant"}));
+
+    assert!(!turn.observe(&echo).started);
+
+    turn.finish();
+
+    let observed = turn.observe(&echo);
+
+    assert!(observed.started);
+    assert!(observed.adopted);
+    assert!(!turn.observe(&json!({"type": "assistant"})).started);
+
+    turn.finish();
+
+    for ignored in [
+        json!({"type": "user", "parent_tool_use_id": "child", "message": {"content": "queued"}}),
+        json!({"type": "user", "isSynthetic": true, "message": {"content": "queued"}}),
+        json!({"type": "user", "message": {"content": [{"type": "tool_result", "content": "queued"}]}}),
+    ] {
+        assert!(!turn.observe(&ignored).started);
+        assert!(
+            TranscriptState::default()
+                .on_user_message(&ignored)
+                .is_empty()
+        );
+    }
+
+    assert!(
+        launch_arguments(&AgentWorkspace::default(), None)
+            .iter()
+            .any(|argument| argument == "--replay-user-messages")
+    );
 }
 
 #[test]
