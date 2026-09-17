@@ -23,7 +23,6 @@ use crate::progress::TaskList;
 use crate::session::branch::{
     BranchCompletion, BranchFailure, BranchReplay, BranchUpdate, ConversationBranch,
 };
-use crate::session::capabilities::AgentCapabilities as _;
 use crate::session::children::{ChildAgents, ChildTranscript};
 use crate::session::commands::{CommandQueue, PendingSlashCommand};
 use crate::session::delivery::{MessageDelivery, RecoverablePrompt};
@@ -36,7 +35,7 @@ use crate::session::restore::{ConversationRestore, ReadyAction, ReplayAction, Se
 use crate::session::settings::ConversationSettings;
 use crate::session::update_readiness::{ConversationWork, Readiness, prepare_stop};
 use crate::session::workflows::WorkflowData;
-use crate::session::{AgentKind, Backend, RecoveryIdentity};
+use crate::session::{AgentKind, Backend, RecoveryIdentity, SettingsOutcome};
 use crate::transcript::TextField;
 use crate::transcript::conversation::{ConversationImage, ConversationState, hidden};
 
@@ -734,13 +733,10 @@ impl SessionController {
 
         let selection = self.finish_ready(settings.clone());
 
-        let approval = if self.kind.caps().approval_selection_is_a_command {
-            self.runtime
-                .backend_mut()
-                .and_then(|backend| self.controls.apply_approval(backend, reported_approval))
-        } else {
-            None
-        };
+        let approval = self
+            .runtime
+            .backend_mut()
+            .and_then(|backend| self.controls.apply_approval(backend, reported_approval));
 
         Some(SessionReady {
             branch,
@@ -783,7 +779,7 @@ impl SessionController {
     /// Apply host-supplied defaults after any restored content has been accepted.
     /// A model-selection refusal leaves the effective settings reported by the
     /// backend and returns its error for the host to present.
-    fn finish_ready(&mut self, settings: ThreadSettings) -> Option<Result<(), String>> {
+    fn finish_ready(&mut self, settings: ThreadSettings) -> Option<SettingsOutcome> {
         self.input.restore(&mut self.runtime);
 
         let defaults = self.ready_defaults.clone();
@@ -796,13 +792,10 @@ impl SessionController {
             defaults.effort.as_deref(),
         );
 
-        let selection = if self.kind.caps().model_selection_is_a_request {
-            self.runtime
-                .backend_mut()
-                .and_then(|backend| self.controls.apply_model(backend))
-        } else {
-            None
-        };
+        let selection = self
+            .runtime
+            .backend_mut()
+            .and_then(|backend| self.controls.apply_model(backend));
 
         self.naming.sync(self.runtime.backend_mut());
 
@@ -839,22 +832,25 @@ impl SessionController {
         self.controls.seed = SettingsSeed::None;
     }
 
-    pub fn apply_model_selection(&mut self) -> Option<Result<(), String>> {
+    pub fn apply_model_selection(&mut self) -> Option<SettingsOutcome> {
         self.controls.apply_model(self.runtime.backend_mut()?)
     }
 
-    pub fn select_agent_preset(&mut self, preset: String) -> Option<Result<(), String>> {
+    pub fn select_agent_preset(&mut self, preset: String) -> Option<SettingsOutcome> {
         if self.controls.settings.agent_preset.as_deref() == Some(&preset) {
             return None;
         }
 
-        let result = self.runtime.backend_mut()?.select_agent_preset(&preset);
+        let outcome = self.runtime.backend_mut()?.select_agent_preset(&preset);
 
-        if result.is_ok() {
-            self.controls.settings.agent_preset = Some(preset);
+        match outcome {
+            SettingsOutcome::Effective | SettingsOutcome::RidesNextSubmission => {
+                self.controls.settings.agent_preset = Some(preset);
+            }
+            SettingsOutcome::Refused { .. } => {}
         }
 
-        Some(result)
+        Some(outcome)
     }
 
     /// A provider or command may start work without a locally submitted prompt.
@@ -990,11 +986,11 @@ pub struct UserInterruption {
 pub struct SessionReady {
     pub branch: Option<BranchCompletion>,
     pub replaced: bool,
-    pub selection: Option<Result<(), String>>,
+    pub selection: Option<SettingsOutcome>,
 
     /// The outcome of sending a remembered permission preset to a harness
     /// that pinned its own default into the new conversation.
-    pub approval: Option<Result<(), String>>,
+    pub approval: Option<SettingsOutcome>,
 }
 
 pub struct SessionReplay {

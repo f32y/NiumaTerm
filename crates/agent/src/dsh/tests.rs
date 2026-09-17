@@ -554,15 +554,18 @@ fn a_command_result_reports_what_the_registry_settled() {
     assert_eq!(
         catalogs::command_outcome(
             "compact",
+            "",
             &json!({ "commandId": "cmd-1", "result": { "kind": "success", "text": "compacted" } }),
         ),
         SlashCommandOutcome::Completed {
             message: Some("compacted".into()),
+            approval: None,
         }
     );
     assert_eq!(
         catalogs::command_outcome(
             "permission",
+            "nope",
             &json!({ "commandId": "cmd-2", "result": { "kind": "error", "text": "no such preset" } }),
         ),
         SlashCommandOutcome::Rejected {
@@ -572,12 +575,37 @@ fn a_command_result_reports_what_the_registry_settled() {
 
     // A name the registry could not resolve produces no answer at all, and
     // nothing ran, so the caller reports the refusal itself.
-    let SlashCommandOutcome::Rejected { message } = catalogs::command_outcome("nope", &Value::Null)
+    let SlashCommandOutcome::Rejected { message } =
+        catalogs::command_outcome("nope", "", &Value::Null)
     else {
         panic!("an unresolved name should be refused");
     };
 
     assert!(message.contains("/nope"), "{message}");
+}
+
+#[test]
+fn only_a_successful_permission_switch_names_a_preset_to_remember() {
+    use crate::chat::SlashCommandOutcome;
+    use crate::dsh::catalogs;
+
+    let success = json!({ "commandId": "cmd-1", "result": { "kind": "success", "text": "ok" } });
+
+    let approval =
+        |name: &str, arguments: &str| match catalogs::command_outcome(name, arguments, &success) {
+            SlashCommandOutcome::Completed { approval, .. } => approval,
+            outcome => panic!("a success result must complete: {outcome:?}"),
+        };
+
+    assert_eq!(
+        approval("permission", " danger-full-access "),
+        Some("danger-full-access".to_string())
+    );
+
+    // A bare command reports the preset in effect and switches nothing, and
+    // another command's argument is not a preset.
+    assert_eq!(approval("permission", "  "), None);
+    assert_eq!(approval("compact", "danger-full-access"), None);
 }
 
 #[test]

@@ -77,7 +77,17 @@ pub struct SkillReference {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SlashCommandOutcome {
     Accepted,
-    Completed { message: Option<String> },
-    Rejected { message: String },
+    Completed {
+        message: Option<String>,
+
+        /// The permission preset the command put in force, when switching it
+        /// is what the command did. The harness that owns such a command is
+        /// the only side that can tell it from one that merely shares a name,
+        /// and the caller remembers the pick for the next conversation.
+        approval: Option<String>,
+    },
+    Rejected {
+        message: String,
+    },
     NotReady,
 }

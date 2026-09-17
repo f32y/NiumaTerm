@@ -45,7 +45,10 @@ fn queued_commands_wait_for_real_turn_and_exit_discards_pending_work() {
     ));
 
     commands.settle(
-        &SlashCommandOutcome::Completed { message: None },
+        &SlashCommandOutcome::Completed {
+            message: None,
+            approval: None,
+        },
         Status::Running,
     );
 

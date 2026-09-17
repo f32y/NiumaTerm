@@ -525,7 +525,7 @@ impl ConversationBranch {
                     SlashCommandOutcome::Accepted => Ok(()),
                     SlashCommandOutcome::NotReady => Err(BranchError::NotReady),
                     SlashCommandOutcome::Rejected { message } => Err(BranchError::Failed(message)),
-                    SlashCommandOutcome::Completed { message } => {
+                    SlashCommandOutcome::Completed { message, .. } => {
                         Err(BranchError::InvalidFileResult(message))
                     }
                 })

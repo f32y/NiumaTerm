@@ -9,11 +9,12 @@
 //! failing the list.
 
 pub use crate::claude_code::sessions::fork::ClaudeFork;
-pub use crate::claude_code::sessions::task_history::{RestoredTask, load_task_history};
 
 pub(crate) use crate::claude_code::sessions::fork::fork_session_before;
 pub(crate) use crate::claude_code::sessions::replay::{load_checkpoints, try_load_replay};
-pub(crate) use crate::claude_code::sessions::task_history::load_child_transcript;
+pub(crate) use crate::claude_code::sessions::task_history::{
+    RestoredTask, load_child_transcript, load_task_history,
+};
 pub(crate) use crate::claude_code::sessions::titles::{
     count_all_sessions, count_sessions, list_all_sessions, list_sessions,
     provisional_title_from_prompt,

@@ -8,7 +8,7 @@ use nmt_agent::chat::{
 };
 use nmt_agent::session::lifecycle::{StartOutcome, Status};
 use nmt_agent::session::restore::{ReadyAction, ReplayLoaded, ResumeStart, SettingsSeed};
-use nmt_agent::session::{AgentKind, RecoveryIdentity};
+use nmt_agent::session::{AgentKind, RecoveryIdentity, ResumeOutcome};
 use nmt_config::profile::AgentProfile;
 
 use crate::agent_tab::session::{Backend, TestBackend};
@@ -92,7 +92,7 @@ fn install_backend(pane: &mut AgentPane) {
 
     let mut backend = TestBackend::new([], SlashCommandOutcome::NotReady, Vec::new());
 
-    backend.resume_accepted = true;
+    backend.resume_outcome = ResumeOutcome::SwitchedInPlace;
 
     assert!(matches!(
         pane.session
@@ -105,7 +105,18 @@ fn install_backend(pane: &mut AgentPane) {
     pane.session.borrow_mut().runtime.ready();
 }
 
+/// Make the installed backend answer like a harness that picks its
+/// conversation at launch, which is what sends a resume to the disk read.
+fn resume_by_reading_history(pane: &mut AgentPane) {
+    match pane.session.borrow_mut().runtime.backend_mut() {
+        Some(Backend::Test(backend)) => backend.resume_outcome = ResumeOutcome::NeedsReplayRead,
+        _ => panic!("the test backend must be installed"),
+    }
+}
+
 fn prepare_local_replay(pane: &mut AgentPane, cx: &App) -> RecoveryIdentity {
+    resume_by_reading_history(pane);
+
     let cwd = pane.cwd(cx);
 
     let ResumeStart::ReadReplay(request) = ({
@@ -366,6 +377,9 @@ fn old_backend_events_during_disk_read_leave_visible_rows_and_settings_untouched
                 .set_model("current-model".into());
 
             let settings = pane.session.borrow().controls.settings.clone();
+
+            resume_by_reading_history(pane);
+
             let cwd = pane.cwd(cx);
 
             let ResumeStart::ReadReplay(request) = ({

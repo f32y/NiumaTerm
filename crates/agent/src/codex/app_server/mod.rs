@@ -977,7 +977,10 @@ impl Session {
 
                 return vec![Event::SlashCommandResult {
                     name: command,
-                    outcome: SlashCommandOutcome::Completed { message: None },
+                    outcome: SlashCommandOutcome::Completed {
+                        message: None,
+                        approval: None,
+                    },
                 }];
             }
 

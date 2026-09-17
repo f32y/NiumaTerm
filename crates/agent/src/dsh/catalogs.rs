@@ -257,11 +257,20 @@ pub(crate) fn skill_catalog(value: &Value) -> SkillCatalog {
 /// rather than an acknowledgement. A name or a line the registry could not
 /// resolve produces no answer at all, which is a refusal the caller has to
 /// report itself: nothing ran and nothing will.
-pub(crate) fn command_outcome(name: &str, value: &Value) -> SlashCommandOutcome {
+///
+/// A bare `/permission` only reports the preset in effect, while one naming a
+/// preset switches it. The harness pins its own default into each conversation
+/// it opens, so a successful switch names the preset for the caller to
+/// remember for the next one.
+pub(crate) fn command_outcome(name: &str, arguments: &str, value: &Value) -> SlashCommandOutcome {
     let text = value["result"]["text"].as_str().map(str::to_string);
+    let preset = arguments.trim();
 
     match value["result"]["kind"].as_str() {
-        Some("success") => SlashCommandOutcome::Completed { message: text },
+        Some("success") => SlashCommandOutcome::Completed {
+            message: text,
+            approval: (name == "permission" && !preset.is_empty()).then(|| preset.to_owned()),
+        },
         Some(_) => SlashCommandOutcome::Rejected {
             message: text.unwrap_or_else(|| format!("/{name} failed")),
         },

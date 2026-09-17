@@ -7,7 +7,7 @@ use crate::chat::{
     SlashCommandOutcome,
 };
 use crate::session::team_capabilities::RecoveredTeamTurn;
-use crate::session::{AgentKind, RecoveryIdentity, RenameOutcome};
+use crate::session::{AgentKind, RecoveryIdentity, RenameOutcome, ResumeOutcome, SettingsOutcome};
 use crate::workflow::{WorkflowRefreshRequest, WorkflowSource};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -27,12 +27,12 @@ pub struct TestBackend {
     pub restored_questions: Vec<QuestionRequest>,
     pub rename_outcome: RenameOutcome,
     pub interrupt_accepted: bool,
-    pub resume_accepted: bool,
+    pub resume_outcome: ResumeOutcome,
     pub fork_accepted: bool,
     pub fork_requests: Vec<ForkAnchor>,
     pub file_restore_requests: Vec<String>,
     pub team_recovered_turns: Vec<RecoveredTeamTurn>,
-    pub approval_selection: Result<(), String>,
+    pub approval_selection: SettingsOutcome,
     pub approval_selections: Vec<String>,
     pub(super) send_outcomes: VecDeque<SendOutcome>,
     pub(super) slash_outcome: SlashCommandOutcome,
@@ -63,12 +63,12 @@ impl TestBackend {
             restored_questions: Vec::new(),
             rename_outcome: RenameOutcome::Unsupported,
             interrupt_accepted: false,
-            resume_accepted: false,
+            resume_outcome: ResumeOutcome::Rejected,
             fork_accepted: false,
             fork_requests: Vec::new(),
             file_restore_requests: Vec::new(),
             team_recovered_turns: Vec::new(),
-            approval_selection: Ok(()),
+            approval_selection: SettingsOutcome::RidesNextSubmission,
             approval_selections: Vec::new(),
             send_outcomes: send_outcomes.into_iter().collect(),
             slash_outcome,
