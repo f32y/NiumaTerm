@@ -4,7 +4,7 @@
 
 <h1 align="center">NiumaTerm</h1>
 
-<p align="center">A high performance multi-tab, multi-workspace terminal application.</p>
+<p align="center">A high performance multi-tab, multi-workspace terminal & agent application.</p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"></a>
@@ -14,10 +14,12 @@
 
 ## Features
 
-- Feature-rich terminal based on [rioterm](https://github.com/raphamorim/rio)
+- 100% native. No Electron. No WebView.
+- Feature-rich terminal inspired by [rioterm](https://github.com/raphamorim/rio)
 - High performance VT parser with [libghostty-vt](https://github.com/ghostty-org/ghostty) and [its Rust binding](https://github.com/uzaaft/libghostty-rs)
 - GPU-accelerated UI with [Zed editor's GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui)
-- UI components backed by [gpui-component](https://github.com/longbridge/gpui-component)
+- UI components backed by [gpui-kit](https://github.com/longbridge/gpui-kit)
+- Agent integrations including Claude Code, Codex and DeepSeek Harness.
 
 ## Build
 
@@ -65,10 +67,6 @@ Setup git hooks before committing anything:
 ```
 git config core.hooksPath .githooks
 ```
-
-## Code Style
-
-- Insert reasonable blank lines between logic.
 
 ## License
 
