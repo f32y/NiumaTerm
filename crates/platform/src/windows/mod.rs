@@ -32,6 +32,7 @@ mod notifier;
 mod pipes;
 mod process_exit;
 mod readiness;
+mod registered_wait;
 mod shell_integration;
 
 #[cfg(test)]
@@ -39,11 +40,11 @@ mod tests;
 
 use std::ffi::OsStr;
 use std::future::Future;
-use std::io;
 use std::iter::{self, once};
 use std::os::windows::ffi::OsStrExt;
 use std::pin::Pin;
 use std::task::{Context, Poll as TaskPoll, ready};
+use std::{io, mem};
 
 use tokio::task::{JoinHandle, spawn_blocking};
 
@@ -56,15 +57,20 @@ use crate::{AsyncPty, PtyOptions, WinsizeBuilder};
 pub struct Pty {
     // Declared first so an unawaited drop starts the console close before the
     // output pipe closes; the host's final writes then fail instead of waiting.
-    backend: Option<Backend>,
-    resize_task: Option<JoinHandle<Backend>>,
-
-    /// The console close started by `poll_shutdown`, driven by its owner task.
-    closing: Option<Pin<Box<dyn Future<Output = ()> + Send>>>,
-
+    console: Console,
     conout: ReadPipe,
     conin: WritePipe,
     child_watcher: ChildExitWatcher,
+}
+
+/// Who holds the console: this value, a blocking resize, or the close started
+/// by `poll_shutdown`. A resize and a close never run at the same time, and no
+/// command can reach the console while another process owns it.
+enum Console {
+    Owned(Backend),
+    Resizing(JoinHandle<Backend>),
+    Closing(Pin<Box<dyn Future<Output = ()> + Send>>),
+    Closed,
 }
 
 /// Create a ConPTY shell with child-only environment overrides.
@@ -79,23 +85,24 @@ pub fn create_managed_pty_with_env(options: PtyOptions<'_>) -> Result<Pty, io::E
 
 impl Pty {
     fn new(
-        backend: impl Into<Backend>,
-        conout: impl Into<ReadPipe>,
-        conin: impl Into<WritePipe>,
+        backend: Backend,
+        conout: ReadPipe,
+        conin: WritePipe,
         child_watcher: ChildExitWatcher,
     ) -> Self {
         Self {
-            backend: Some(backend.into()),
-            resize_task: None,
-            closing: None,
-            conout: conout.into(),
-            conin: conin.into(),
+            console: Console::Owned(backend),
+            conout,
+            conin,
             child_watcher,
         }
     }
 
     pub fn process_tree(&self) -> Option<ProcessTree> {
-        self.backend.as_ref()?.process_tree()
+        match &self.console {
+            Console::Owned(backend) => backend.process_tree(),
+            Console::Resizing(_) | Console::Closing(_) | Console::Closed => None,
+        }
     }
 
     /// Reports whether a child exit has been observed without waiting.
@@ -103,34 +110,30 @@ impl Pty {
         self.child_watcher.exited()
     }
 
+    /// Take the console back from a running resize once it finishes.
     fn poll_resize_completion(&mut self, cx: &mut Context<'_>) -> TaskPoll<io::Result<()>> {
-        let Some(task) = &mut self.resize_task else {
+        let Console::Resizing(task) = &mut self.console else {
             return TaskPoll::Ready(Ok(()));
         };
 
-        let result = match Pin::new(task).poll(cx) {
-            TaskPoll::Pending => return TaskPoll::Pending,
-            TaskPoll::Ready(result) => result,
-        };
-
-        self.resize_task = None;
-
-        match result {
+        match ready!(Pin::new(task).poll(cx)) {
             Ok(backend) => {
-                self.backend = Some(backend);
+                self.console = Console::Owned(backend);
 
                 TaskPoll::Ready(Ok(()))
             }
-            Err(error) => TaskPoll::Ready(Err(io::Error::other(error))),
+            Err(error) => {
+                // The task dropped the console with its panic; the close it
+                // started on drop is all the teardown left to run.
+                self.console = Console::Closed;
+
+                TaskPoll::Ready(Err(io::Error::other(error)))
+            }
         }
     }
 }
 
 impl AsyncPty for Pty {
-    fn start_async(&mut self) -> io::Result<()> {
-        self.conout.start_async()
-    }
-
     fn poll_read(&mut self, cx: &mut Context<'_>, buf: &mut [u8]) -> TaskPoll<io::Result<usize>> {
         self.conout.poll_read(cx, buf)
     }
@@ -152,19 +155,26 @@ impl AsyncPty for Pty {
         cx: &mut Context<'_>,
         size: WinsizeBuilder,
     ) -> TaskPoll<io::Result<()>> {
-        if self.resize_task.is_none() {
-            let Some(mut backend) = self.backend.take() else {
-                return TaskPoll::Ready(Err(io::Error::other("console backend is unavailable")));
-            };
+        match mem::replace(&mut self.console, Console::Closed) {
+            Console::Owned(mut backend) => {
+                // The native control call can wait for the console host.
+                // Transfer ownership while it runs so output reads keep
+                // draining and no borrowed console handle can outlive its
+                // owner on cancellation.
+                self.console = Console::Resizing(spawn_blocking(move || {
+                    backend.set_winsize((&size).into());
 
-            // The native control call can wait for the console host. Transfer
-            // ownership while it runs so output reads keep draining and no
-            // borrowed console handle can outlive its owner on cancellation.
-            self.resize_task = Some(spawn_blocking(move || {
-                backend.set_winsize((&size).into());
+                    backend
+                }));
+            }
+            // The caller repolls one request until it completes, so `size` is
+            // the change already running.
+            Console::Resizing(task) => self.console = Console::Resizing(task),
+            closed => {
+                self.console = closed;
 
-                backend
-            }));
+                return TaskPoll::Ready(Err(io::Error::other("console is closed")));
+            }
         }
 
         self.poll_resize_completion(cx)
@@ -174,14 +184,15 @@ impl AsyncPty for Pty {
         // A running resize owns the console; the close needs it back first.
         ready!(self.poll_resize_completion(cx))?;
 
-        if let Some(backend) = self.backend.take() {
-            self.closing = Some(Box::pin(backend.close()));
-        }
+        self.console = match mem::replace(&mut self.console, Console::Closed) {
+            Console::Owned(backend) => Console::Closing(Box::pin(backend.close())),
+            other => other,
+        };
 
-        if let Some(closing) = &mut self.closing {
+        if let Console::Closing(closing) = &mut self.console {
             ready!(closing.as_mut().poll(cx));
 
-            self.closing = None;
+            self.console = Console::Closed;
         }
 
         TaskPoll::Ready(Ok(()))

@@ -21,7 +21,7 @@ use windows_sys::Win32::System::JobObjects::{
 use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
 use crate::process_lifetime::cleanup_failed_attachment;
-use crate::windows::pipes::child_stdio_pair;
+use crate::windows::pipes::{Direction, child_stdio_pair};
 
 /// A child whose standard streams are asynchronous pipes owned by this process.
 pub struct PipedChild {
@@ -35,9 +35,9 @@ pub struct PipedChild {
 pub fn spawn_piped(mut command: Command) -> io::Result<PipedChild> {
     let _runtime = nmt_runtime::handle().enter();
 
-    let (stdin, child_stdin) = child_stdio_pair(false)?;
-    let (stdout, child_stdout) = child_stdio_pair(true)?;
-    let (stderr, child_stderr) = child_stdio_pair(true)?;
+    let (stdin, child_stdin) = child_stdio_pair(Direction::Outbound)?;
+    let (stdout, child_stdout) = child_stdio_pair(Direction::Inbound)?;
+    let (stderr, child_stderr) = child_stdio_pair(Direction::Inbound)?;
 
     command
         .stdin(Stdio::from(child_stdin))

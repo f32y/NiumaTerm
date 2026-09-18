@@ -110,10 +110,11 @@ fn default_shell_command(shell: &str) {
 pub struct Pty {
     pub child: Child,
     file: File,
-    async_file: Option<AsyncFd<OwnedFd>>,
+    async_file: AsyncFd<OwnedFd>,
 
-    /// Process-wide SIGCHLD deliveries, observed from `start_async` onward.
-    child_signals: Option<Signal>,
+    /// Process-wide SIGCHLD deliveries, observed from creation onward so an
+    /// exit before the first poll is still found by `waitpid`.
+    child_signals: Signal,
 
     /// Present only for a managed PTY. Dropping it signals the shell's
     /// process group, which ends the descendants a bare `SIGHUP` to the shell
@@ -668,12 +669,16 @@ pub fn create_pty_with_env(options: PtyOptions<'_>) -> Result<Pty, Error> {
                 process: Some(child_process),
             };
 
+            let file = unsafe { File::from_raw_fd(main) };
+
+            let (async_file, child_signals) = register_with_runtime(&file)?;
+
             Ok(Pty {
                 child: child_unix,
-                file: unsafe { File::from_raw_fd(main) },
+                file,
                 job: None,
-                async_file: None,
-                child_signals: None,
+                async_file,
+                child_signals,
             })
         }
         Err(err) => Err(Error::new(
@@ -802,14 +807,18 @@ fn create_pty_with_fork(
                 set_nonblocking(main);
             }
 
+            let file = unsafe { File::from_raw_fd(main) };
+
+            let (async_file, child_signals) = register_with_runtime(&file)?;
+
             Ok(Pty {
                 child,
-                file: unsafe { File::from_raw_fd(main) },
+                file,
                 // `forkpty` leaves no `std::process::Child` to attach to, so
                 // this path never manages the descendant tree.
                 job: None,
-                async_file: None,
-                child_signals: None,
+                async_file,
+                child_signals,
             })
         }
         _ => Err(Error::other(format!(
@@ -942,23 +951,30 @@ fn command_per_pid(pid: libc::pid_t) -> String {
         .to_string()
 }
 
+/// Associate the PTY descriptor and SIGCHLD with the shared runtime. Creation
+/// runs on whichever thread opens the tab, so the runtime context is entered
+/// here; entering only sets a thread-local and keeps creation synchronous.
+fn register_with_runtime(file: &File) -> io::Result<(AsyncFd<OwnedFd>, Signal)> {
+    let _runtime = nmt_runtime::handle().enter();
+
+    Ok((
+        AsyncFd::new(file.as_fd().try_clone_to_owned()?)?,
+        signal(SignalKind::child())?,
+    ))
+}
+
 impl AsyncPty for Pty {
-    fn start_async(&mut self) -> io::Result<()> {
-        self.async_file = Some(AsyncFd::new(self.file.as_fd().try_clone_to_owned()?)?);
-
-        self.child_signals = Some(signal(SignalKind::child())?);
-
-        Ok(())
-    }
-
     fn poll_read(&mut self, cx: &mut Context<'_>, buf: &mut [u8]) -> TaskPoll<io::Result<usize>> {
-        let file = self.async_file.as_mut().expect("async PTY initialized");
-
         loop {
-            let mut ready = ready!(file.poll_read_ready_mut(cx))?;
+            let mut ready = ready!(self.async_file.poll_read_ready_mut(cx))?;
 
             match ready.try_io(|_| self.file.read(buf)) {
                 Ok(Ok(0)) => return TaskPoll::Ready(Err(io::ErrorKind::BrokenPipe.into())),
+                // Linux reports a hung-up PTY with `EIO`; callers only need to
+                // know the child side is gone.
+                Ok(Err(error)) if error.raw_os_error() == Some(libc::EIO) => {
+                    return TaskPoll::Ready(Err(io::ErrorKind::BrokenPipe.into()));
+                }
                 Ok(result) => return TaskPoll::Ready(result),
                 Err(_) => continue,
             }
@@ -966,10 +982,8 @@ impl AsyncPty for Pty {
     }
 
     fn poll_write(&mut self, cx: &mut Context<'_>, buf: &[u8]) -> TaskPoll<io::Result<usize>> {
-        let file = self.async_file.as_mut().expect("async PTY initialized");
-
         loop {
-            let mut ready = ready!(file.poll_write_ready_mut(cx))?;
+            let mut ready = ready!(self.async_file.poll_write_ready_mut(cx))?;
 
             match ready.try_io(|_| self.file.write(buf)) {
                 Ok(result) => return TaskPoll::Ready(result),
@@ -987,9 +1001,7 @@ impl AsyncPty for Pty {
                 return TaskPoll::Ready(());
             }
 
-            let signals = self.child_signals.as_mut().expect("async PTY initialized");
-
-            if ready!(signals.poll_recv(cx)).is_none() {
+            if ready!(self.child_signals.poll_recv(cx)).is_none() {
                 return TaskPoll::Ready(());
             }
         }
@@ -1001,11 +1013,6 @@ impl AsyncPty for Pty {
         size: WinsizeBuilder,
     ) -> TaskPoll<io::Result<()>> {
         TaskPoll::Ready(self.child.set_winsize(size))
-    }
-
-    #[cfg(target_os = "linux")]
-    fn is_hangup_error(&self, error: &io::Error) -> bool {
-        error.raw_os_error() == Some(libc::EIO)
     }
 }
 
