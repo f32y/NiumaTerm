@@ -206,7 +206,16 @@ fn theme_preview(theme: &Theme) -> Div {
 }
 
 fn choose_theme(name: String, editing: &Entity<SettingsEditing>, cx: &mut App) {
-    let applied = select_theme(name, cx);
+    let theme = editing
+        .read(cx)
+        .theme_families
+        .iter()
+        .flat_map(|family| &family.variants)
+        .find(|choice| choice.id == name)
+        .map(|choice| choice.theme.clone())
+        .ok_or_else(|| "theme is no longer available".to_string());
+
+    let applied = select_theme(name, theme, cx);
 
     editing.update(cx, |editing, cx| {
         editing.theme_load_failed = !applied;

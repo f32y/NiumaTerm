@@ -39,14 +39,14 @@ async fn claude_member_startup_retains_native_permission_selection(cx: &mut Test
         ..ThreadSettings::default()
     };
 
-    let (runtime, member, host) = cx.update(|cx| {
+    let (runtime, member) = cx.update(|cx| {
         gpui_component::init(cx);
 
         cx.set_global(AgentSettings::default());
 
         cx.set_global(AgentThreadDefaults::default());
 
-        let runtime = TeamRuntime::create(directory.path(), AgentWorkspace::default(), cx).unwrap();
+        let runtime = TeamRuntime::create(directory.path(), AgentWorkspace::default(), cx);
 
         let profile = AgentProfile {
             name: "test-claude".into(),
@@ -67,28 +67,27 @@ async fn claude_member_startup_retains_native_permission_selection(cx: &mut Test
         };
 
         let member = runtime.update(cx, |runtime, cx| {
-            runtime
-                .add_member(
-                    profile,
-                    MemberConfig {
-                        name: "Alice".into(),
-                        profile: ProfileReference {
-                            kind: AgentKind::Claude,
-                            name: "test-claude".into(),
-                        },
-                        roots: AgentWorkspace::default(),
-                        settings: settings.clone(),
-                        role: String::new(),
+            runtime.add_member(
+                profile,
+                MemberConfig {
+                    name: "Alice".into(),
+                    profile: ProfileReference {
+                        kind: AgentKind::Claude,
+                        name: "test-claude".into(),
                     },
-                    cx,
-                )
-                .unwrap()
+                    roots: AgentWorkspace::default(),
+                    settings: settings.clone(),
+                    role: String::new(),
+                },
+                cx,
+            )
         });
 
-        let host = runtime.read(cx).member_session(member).unwrap().clone();
-
-        (runtime, member, host)
+        (runtime, member)
     });
+
+    let member = member.await.unwrap();
+    let host = cx.update(|cx| runtime.read(cx).member_session(member).unwrap().clone());
 
     cx.condition(&host, |session, _| {
         matches!(
@@ -98,9 +97,10 @@ async fn claude_member_startup_retains_native_permission_selection(cx: &mut Test
     })
     .await;
 
-    runtime.update(cx, |runtime, cx| {
-        runtime.pump(cx).unwrap();
+    runtime.update(cx, |runtime, cx| runtime.schedule(cx));
+    cx.run_until_parked();
 
+    runtime.update(cx, |runtime, cx| {
         assert_eq!(runtime.error(), None);
         assert_eq!(
             runtime
@@ -205,7 +205,7 @@ async fn reopened_request(cx: &mut TestAppContext, completed: bool) {
 
         cx.set_global(AgentThreadDefaults::default());
 
-        let runtime = cx.new(|_| TeamRuntime::new(saved));
+        let runtime = cx.new(|cx| TeamRuntime::new(saved, cx.background_executor().clone()));
 
         let owner = AgentSession::create(
             AgentProfile {
@@ -305,18 +305,16 @@ async fn reopened_request(cx: &mut TestAppContext, completed: bool) {
                     .status_text(cx)
                     .contains(rust_i18n::t!("team-ready").as_ref())
             );
-            assert!(
-                pane.perform(TeamCommand::AbandonRestored(attempt.id), cx),
-                "{:?}",
-                pane.error
-            );
+
+            pane.perform(TeamCommand::AbandonRestored(attempt.id), cx)
+                .detach();
         }
     });
 
     cx.run_until_parked();
 
     runtime.update(&mut cx, |runtime, _| {
-        assert!(runtime.session.pending_recovery().next().is_none());
+        assert!(runtime.pending_recovery().next().is_none());
         assert_eq!(runtime.room().attempts().len(), 1);
         assert!(if completed {
             matches!(
@@ -333,9 +331,11 @@ async fn reopened_request(cx: &mut TestAppContext, completed: bool) {
         assert_eq!(runtime.error(), None);
     });
 
-    pane.update(&mut cx, |pane, cx| {
-        assert!(pane.perform(TeamCommand::Continue(discussion), cx))
-    });
+    assert!(
+        pane.update(&mut cx, |pane, cx| pane
+            .perform(TeamCommand::Continue(discussion), cx))
+            .await
+    );
 
     cx.run_until_parked();
 
@@ -381,7 +381,7 @@ async fn sent_team_request_displays_stream_before_completion(cx: &mut TestAppCon
             })
             .unwrap();
 
-        let runtime = cx.new(|_| TeamRuntime::new(session));
+        let runtime = cx.new(|cx| TeamRuntime::new(session, cx.background_executor().clone()));
 
         let owner = AgentSession::create(
             AgentProfile {
@@ -649,7 +649,7 @@ async fn completed_reply_waits_for_background_work_before_advancing(cx: &mut Tes
             .unwrap();
 
         let session = TeamSession::create(directory.path(), room).unwrap();
-        let runtime = cx.new(|_| TeamRuntime::new(session));
+        let runtime = cx.new(|cx| TeamRuntime::new(session, cx.background_executor().clone()));
 
         let owner = AgentSession::create(
             AgentProfile {
@@ -693,9 +693,9 @@ async fn completed_reply_waits_for_background_work_before_advancing(cx: &mut Tes
 
     cx.run_until_parked();
 
-    runtime.update(cx, |runtime, cx| {
-        runtime
-            .command(
+    runtime
+        .update(cx, |runtime, cx| {
+            runtime.command(
                 TeamCommand::Start {
                     input: UserInput {
                         text: "Review".into(),
@@ -708,8 +708,9 @@ async fn completed_reply_waits_for_background_work_before_advancing(cx: &mut Tes
                 },
                 cx,
             )
-            .unwrap();
-    });
+        })
+        .await
+        .unwrap();
 
     cx.run_until_parked();
 
@@ -745,17 +746,19 @@ async fn completed_reply_waits_for_background_work_before_advancing(cx: &mut Tes
 
     cx.run_until_parked();
 
-    runtime.update(cx, |runtime, cx| {
-        assert!(matches!(
-            runtime.room().attempts()[0].state,
-            AttemptState::Completed { .. }
-        ));
-        assert_eq!(runtime.room().attempts().len(), 1);
-        assert!(matches!(
-            runtime.command(TeamCommand::Exclude(member), cx),
-            Err(TeamError::Busy)
-        ));
-    });
+    let result = runtime
+        .update(cx, |runtime, cx| {
+            assert!(matches!(
+                runtime.room().attempts()[0].state,
+                AttemptState::Completed { .. }
+            ));
+            assert_eq!(runtime.room().attempts().len(), 1);
+
+            runtime.command(TeamCommand::Exclude(member), cx)
+        })
+        .await;
+
+    assert!(matches!(result, Err(TeamError::Busy)));
 
     tasks.apply(
         child,

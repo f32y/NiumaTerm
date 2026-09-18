@@ -84,22 +84,21 @@ impl<T> PendingAttachments<T> {
             return Err(AttachError::Full);
         }
 
-        let decoded = image_rs::load_from_memory(image).map_err(|_| AttachError::Undecodable)?;
-        let (width, height) = decoded.dimensions();
+        let bytes = prepare_image(image)?;
 
-        // Re-encoding as PNG regardless of the clipboard's format keeps one
-        // format flowing to the thumbnail, the transcript, and both harnesses.
-        let bytes = match scaled_dimensions(width, height) {
-            Some((to_width, to_height)) => {
-                encode_png(&decoded.resize(to_width, to_height, FilterType::Triangle))?
-            }
-            None => encode_png(&decoded)?,
-        };
+        self.attach_prepared(make_image(bytes))
+    }
+
+    /// Insert an already normalized image without decoding on the caller's thread.
+    pub fn attach_prepared(&mut self, image: T) -> Result<String, AttachError> {
+        if self.items.len() >= MAX_ATTACHMENTS {
+            return Err(AttachError::Full);
+        }
 
         let placeholder = placeholder_text(self.items.len() + 1);
 
         self.items.push(Attachment {
-            image: make_image(bytes),
+            image,
             placeholder: placeholder.clone(),
         });
 
@@ -183,6 +182,17 @@ impl<T> PendingAttachments<T> {
         }
 
         renumbered
+    }
+}
+
+/// Normalize encoded image bytes before publishing an attachment to its view.
+pub fn prepare_image(image: &[u8]) -> Result<Vec<u8>, AttachError> {
+    let decoded = image_rs::load_from_memory(image).map_err(|_| AttachError::Undecodable)?;
+    let (width, height) = decoded.dimensions();
+
+    match scaled_dimensions(width, height) {
+        Some((width, height)) => encode_png(&decoded.resize(width, height, FilterType::Triangle)),
+        None => encode_png(&decoded),
     }
 }
 

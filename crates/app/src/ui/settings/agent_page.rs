@@ -4,50 +4,23 @@ use rust_i18n::t;
 
 use crate::ui::settings::*;
 
-fn agent_hook_item(
-    name: Cow<'static, str>,
-    detection_path: Option<path::PathBuf>,
-    hooks_path: Option<path::PathBuf>,
-    status: fn(&path::Path) -> HookInstallStatus,
-    install: fn(&path::Path) -> io::Result<()>,
-    uninstall: fn(&path::Path) -> io::Result<()>,
-) -> SettingItem {
-    let detected = detection_path.as_ref().is_some_and(|path| path.is_file());
+fn agent_hook_item(name: Cow<'static, str>, hook: Hook, cx: &App) -> SettingItem {
+    let detected = hook
+        .state(cx)
+        .is_some_and(|state| state.detected && !state.pending);
 
-    let unavailable = hooks_path
-        .as_deref()
-        .is_some_and(|path| status(path) == HookInstallStatus::Unavailable);
-
-    let status_path = hooks_path.clone();
-    let action_path = hooks_path;
+    let unavailable = hook
+        .state(cx)
+        .is_some_and(|state| state.status == Some(HookInstallStatus::Unavailable));
 
     let mut item = SettingItem::new(
         name.clone(),
         SettingField::checkbox(
-            // Settings renders only the active page, so a disk-backed getter
-            // refreshes Hook state whenever the user enters the Agent page.
-            move |_| {
-                status_path
-                    .as_deref()
-                    .is_some_and(|path| status(path) == HookInstallStatus::Installed)
+            move |cx| {
+                hook.state(cx)
+                    .is_some_and(|state| state.status == Some(HookInstallStatus::Installed))
             },
-            move |enabled, cx| {
-                let Some(path) = action_path.as_deref() else {
-                    return;
-                };
-
-                let result = if enabled {
-                    install(path)
-                } else {
-                    uninstall(path)
-                };
-
-                if let Err(error) = result {
-                    warn!("failed to update {name} hooks: {error}");
-                }
-
-                cx.refresh_windows();
-            },
+            move |enabled, cx| hook.refresh(Some(enabled), cx),
         ),
     )
     .disabled(!detected || unavailable);
@@ -271,19 +244,13 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
                 )
                 .item(agent_hook_item(
                     t!("settings-agent-kind-claude-code"),
-                    claude_hook::settings_path(),
-                    claude_hook::settings_path(),
-                    claude_hook::hooks_status,
-                    claude_hook::install_hooks,
-                    claude_hook::uninstall_hooks,
+                    Hook::Claude,
+                    cx,
                 ))
                 .item(agent_hook_item(
                     t!("settings-agent-kind-codex"),
-                    codex_hook::config_path(),
-                    codex_hook::hooks_path(),
-                    codex_hook::hooks_status,
-                    codex_hook::install_hooks,
-                    codex_hook::uninstall_hooks,
+                    Hook::Codex,
+                    cx,
                 )),
         )
         .group(cli_updates)

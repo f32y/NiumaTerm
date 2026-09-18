@@ -174,15 +174,22 @@ pub(super) fn close_last_workspace_dialog(
                         .label(t!("shell-close-quit"))
                         .danger()
                         .on_click(move |_, window, cx| {
-                            if !ui::settings::save_settings(window, cx) {
-                                window.close_dialog(cx);
+                            let shell = quit_shell.downgrade();
 
-                                return;
-                            }
+                            ui::settings::save_settings(window, cx, move |saved, window, cx| {
+                                if !saved {
+                                    window.close_dialog(cx);
 
-                            quit_shell.update(cx, |this, cx| this.doom_workspace(id, cx));
+                                    return;
+                                }
 
-                            cx.quit();
+                                if shell
+                                    .update(cx, |this, cx| this.doom_workspace(id, cx))
+                                    .is_ok()
+                                {
+                                    cx.quit();
+                                }
+                            });
                         }),
                 )
                 .child(

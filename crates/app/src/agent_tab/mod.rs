@@ -37,18 +37,17 @@ mod workflows;
 mod tests;
 
 use std::cell::{Ref, RefCell};
+use std::env;
 use std::ops::Range;
-use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use std::{env, fs};
 
+use futures::channel::oneshot;
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, Bounds, ClipboardEntry, Context, Entity, FocusHandle, Image, ImageFormat,
-    IntoElement, MouseButton, MouseUpEvent, Pixels, Render, SharedString, WeakEntity, Window, div,
-    px, relative, size,
+    AnyElement, App, Bounds, Context, Entity, FocusHandle, Image, IntoElement, MouseButton,
+    MouseUpEvent, Pixels, Render, SharedString, WeakEntity, Window, div, px, relative, size,
 };
 use gpui_base::TextSelection;
 use gpui_component::input::{
@@ -98,7 +97,7 @@ use crate::agent_tab::commands::{
     route_slash, setting_value_label, status_summary, validate_skill_binding,
 };
 use crate::agent_tab::composer::attachments::{
-    AttachError, ComposerAttachments, MAX_ATTACHMENTS, THUMBNAIL, scratch_dir,
+    ComposerAttachments, MAX_ATTACHMENTS, THUMBNAIL, has_image, prepare_paste, scratch_dir,
 };
 use crate::agent_tab::composer::{
     BranchFlow, CachedCatalog, CommandFeedbackKind, ComposerAction, PaletteAction, PaletteModel,
@@ -615,50 +614,107 @@ impl AgentPane {
     /// composer's own text handling, which is what a clipboard holding text
     /// should get.
     pub(crate) fn paste_image(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        let Some(_) = self.host.upgrade() else {
+        let Some(host) = self.host.upgrade() else {
             return false;
         };
 
         // An image reaches the clipboard two ways: as pixels, from a capture
         // tool or a browser, and as a file, from a file manager. Both are the
         // same gesture to the person doing it.
-        let Some(image) = cx
+        let entries: Vec<_> = cx
             .read_from_clipboard()
             .into_iter()
             .flat_map(|item| item.into_entries())
-            .find_map(|entry| match entry {
-                ClipboardEntry::Image(image) => Some(image),
-                ClipboardEntry::ExternalPaths(paths) => {
-                    paths.paths().iter().find_map(|path| image_file(path))
-                }
-                ClipboardEntry::String(_) => None,
-            })
-        else {
+            .collect();
+
+        if !has_image(&entries) {
             return false;
-        };
-
-        match self
-            .attachments
-            .attach_image(&image, &self.input, window, cx)
-        {
-            Ok(()) => {
-                cx.notify();
-
-                true
-            }
-            Err(AttachError::Full) => {
-                self.palette.set_feedback(
-                    CommandFeedbackKind::Error,
-                    t!("agent-composer-images-full", count = MAX_ATTACHMENTS).into_owned(),
-                    cx,
-                );
-
-                true
-            }
-            // Something on the clipboard claimed to be an image and was not.
-            // Falling through lets the composer paste whatever text is there.
-            Err(AttachError::Undecodable) => false,
         }
+
+        if self.attachments.images().iter().count() + self.attachments.preparing >= MAX_ATTACHMENTS
+        {
+            self.palette.set_feedback(
+                CommandFeedbackKind::Error,
+                t!("agent-composer-images-full", count = MAX_ATTACHMENTS).into_owned(),
+                cx,
+            );
+
+            return true;
+        }
+
+        let host = host.read(cx);
+        let scratch = (host.kind == AgentKind::Codex).then(|| scratch_dir(host.route.as_str()));
+        let epoch = self.session.borrow().runtime().epoch();
+        let binding_generation = self.binding.generation;
+        let executor = cx.background_executor().clone();
+
+        self.attachments.preparing += 1;
+
+        let previous = self.attachments.paste_ready.take();
+        let (completed, ready) = oneshot::channel();
+
+        self.attachments.paste_ready = Some(ready);
+
+        let prepared = executor.clone().spawn(async move {
+            if let Some(previous) = previous {
+                let _ = previous.await;
+            }
+
+            prepare_paste(entries, scratch, executor)
+        });
+
+        let pane = cx.weak_entity();
+
+        window
+            .spawn(cx, async move |cx| {
+                let prepared = prepared.await;
+
+                let _ = cx.update(|window, cx| {
+                    let _ = pane.update(cx, |this, cx| {
+                        this.attachments.preparing = this.attachments.preparing.saturating_sub(1);
+
+                        cx.notify();
+
+                        if !this.binding.is_current()
+                            || this.binding.generation != binding_generation
+                            || this.session.borrow().runtime().epoch() != epoch
+                        {
+                            return;
+                        }
+
+                        match prepared {
+                            Ok(mut prepared) => {
+                                let path = prepared.path.clone();
+
+                                if this
+                                    .attachments
+                                    .attach_prepared(
+                                        prepared.image.clone(),
+                                        path,
+                                        &this.input,
+                                        window,
+                                        cx,
+                                    )
+                                    .is_ok()
+                                {
+                                    prepared.path = None;
+                                }
+                            }
+                            Err(message) => {
+                                this.palette
+                                    .set_feedback(CommandFeedbackKind::Error, message, cx)
+                            }
+                        }
+                    });
+                });
+
+                let _ = completed.send(());
+            })
+            .detach();
+
+        cx.notify();
+
+        true
     }
 
     pub(crate) fn remove_attachment(
@@ -866,7 +922,8 @@ impl AgentPane {
     }
 
     pub(super) fn is_command_busy(&self) -> bool {
-        self.session.borrow().runtime().status() == Status::Running
+        self.attachments.preparing > 0
+            || self.session.borrow().runtime().status() == Status::Running
             || self.session.borrow().commands().awaiting_turn
             || self.history_ui.mode == RecentSessionsMode::Loading
             || self.branch_flow_holds_composer()
@@ -2931,11 +2988,14 @@ impl AgentPane {
         restore_on_interrupt: Option<(String, Vec<String>)>,
         cx: &mut Context<Self>,
     ) -> bool {
+        if self.attachments.preparing > 0 {
+            return false;
+        }
+
         let Some(session_host) = self.host.upgrade() else {
             return false;
         };
 
-        let session_agent_route = session_host.read(cx).route.clone();
         let session_kind = session_host.read(cx).kind;
 
         if !self.binding.is_current() {
@@ -2952,7 +3012,7 @@ impl AgentPane {
             .title_request(title_text, tab_title_from_prompt);
 
         let settings = self.session.borrow().controls.settings.clone();
-        let scratch = scratch_dir(session_agent_route.as_str());
+        let image_paths = self.attachments.paths();
 
         let restores_annotations = restore_on_interrupt.is_some();
 
@@ -2976,7 +3036,7 @@ impl AgentPane {
                     settings: &settings,
                     skill,
                     images: &images,
-                    scratch: &scratch,
+                    image_paths: &image_paths,
                     title: title_request.as_ref(),
                 })
             },
@@ -4013,27 +4073,6 @@ fn replace_input_with_history<T: 'static>(
 
         input.set_selected_range(end..end, cx);
     });
-}
-
-/// A copied file read as an image, or `None` for anything that is not one.
-/// Only the extension is trusted to decide whether reading is worth it; the
-/// decode decides whether it was an image.
-fn image_file(path: &Path) -> Option<Image> {
-    let format = match path
-        .extension()
-        .and_then(|extension| extension.to_str())?
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "png" => ImageFormat::Png,
-        "jpg" | "jpeg" => ImageFormat::Jpeg,
-        "webp" => ImageFormat::Webp,
-        "gif" => ImageFormat::Gif,
-        "bmp" => ImageFormat::Bmp,
-        _ => return None,
-    };
-
-    Some(Image::from_bytes(format, fs::read(path).ok()?))
 }
 
 #[derive(Clone, Copy)]

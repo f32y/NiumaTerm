@@ -16,15 +16,17 @@ pub(crate) use nmt_agent::images::{AttachError, MAX_ATTACHMENTS};
 mod tests;
 
 use std::cell::Cell;
-use std::env;
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
+use std::{env, fs};
 
+use futures::channel::oneshot;
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, Bounds, Context, Entity, FontWeight, Image, ImageFormat, ObjectFit, SharedString,
-    Window, div, img, px,
+    AnyElement, BackgroundExecutor, Bounds, ClipboardEntry, Context, Entity, FontWeight, Image,
+    ImageFormat, ObjectFit, SharedString, Window, div, img, px,
 };
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::input::TextareaState;
@@ -34,8 +36,9 @@ use gpui_component::{ActiveTheme as _, ElementExt as _, IconName, Sizable as _, 
 use nmt_agent::images::MAX_IMAGE_EDGE;
 #[cfg(test)]
 use nmt_agent::images::placeholder_text;
-use nmt_agent::images::{Attachment, PendingAttachments as CorePendingAttachments};
+use nmt_agent::images::{Attachment, PendingAttachments as CorePendingAttachments, prepare_image};
 use rust_i18n::t;
+use uuid::Uuid;
 
 use crate::agent_tab::AgentPane;
 use crate::agent_tab::settings::UI_RADIUS;
@@ -58,6 +61,9 @@ pub(crate) fn spaced_placeholder(preceding: Option<char>, placeholder: &str) -> 
 #[derive(Default)]
 pub(crate) struct ComposerAttachments {
     images: PendingAttachments,
+    paths: HashMap<u64, PathBuf>,
+    pub(crate) preparing: usize,
+    pub(crate) paste_ready: Option<oneshot::Receiver<()>>,
 
     /// Earlier agent response text attached to the pending message.
     annotations: Vec<String>,
@@ -74,6 +80,14 @@ impl ComposerAttachments {
 
     pub(crate) fn clear_images(&mut self) {
         self.images.clear();
+        self.paths.clear();
+    }
+
+    pub(crate) fn paths(&self) -> Vec<PathBuf> {
+        self.images
+            .iter()
+            .filter_map(|attachment| self.paths.get(&attachment.image.id).cloned())
+            .collect()
     }
 
     pub(crate) fn clear_annotations(&mut self) {
@@ -117,6 +131,7 @@ impl ComposerAttachments {
 
     /// Attach a decoded image and write its placeholder at the cursor, so the
     /// text keeps the record of where the image belongs.
+    #[cfg(test)]
     pub(crate) fn attach_image(
         &mut self,
         image: &Image,
@@ -125,6 +140,30 @@ impl ComposerAttachments {
         cx: &mut Context<AgentPane>,
     ) -> Result<(), AttachError> {
         let placeholder = attach_png(&mut self.images, image)?;
+
+        input.update(cx, |input, cx| {
+            let preceding = input.text().chars_at(input.cursor()).prev();
+
+            input.insert(spaced_placeholder(preceding, &placeholder), window, cx);
+        });
+
+        Ok(())
+    }
+
+    pub(crate) fn attach_prepared(
+        &mut self,
+        image: Arc<Image>,
+        path: Option<PathBuf>,
+        input: &Entity<TextareaState>,
+        window: &mut Window,
+        cx: &mut Context<AgentPane>,
+    ) -> Result<(), AttachError> {
+        let id = image.id;
+        let placeholder = self.images.attach_prepared(image)?;
+
+        if let Some(path) = path {
+            self.paths.insert(id, path);
+        }
 
         input.update(cx, |input, cx| {
             let preceding = input.text().chars_at(input.cursor()).prev();
@@ -201,6 +240,9 @@ impl ComposerAttachments {
 
         let links = self.images.placeholder_links(&text);
 
+        self.paths
+            .retain(|id, _| self.images.iter().any(|image| image.image.id == *id));
+
         input.update(cx, |input, cx| input.set_links(links, cx));
 
         true
@@ -239,9 +281,8 @@ impl ComposerAttachments {
         )
     }
 
-    /// One thumbnail with the control that takes it back off. The image
-    /// renders from the bytes the paste produced, so no file is written for
-    /// something the user may still remove.
+    /// One thumbnail with the control that takes it back off. Rendering uses
+    /// the prepared bytes without reading the provider's attachment file.
     fn render_attachment(
         &self,
         index: usize,
@@ -388,6 +429,89 @@ impl ComposerAttachments {
 
 pub(crate) type PendingAttachments = CorePendingAttachments<Arc<Image>>;
 
+pub(crate) struct PreparedPaste {
+    pub(crate) image: Arc<Image>,
+    pub(crate) path: Option<PathBuf>,
+    executor: BackgroundExecutor,
+}
+
+impl Drop for PreparedPaste {
+    fn drop(&mut self) {
+        if let Some(path) = self.path.take() {
+            self.executor
+                .spawn(async move {
+                    let _ = fs::remove_file(&path);
+
+                    if let Some(parent) = path.parent() {
+                        let _ = fs::remove_dir(parent);
+                    }
+                })
+                .detach();
+        }
+    }
+}
+
+pub(crate) fn has_image(entries: &[ClipboardEntry]) -> bool {
+    entries.iter().any(|entry| match entry {
+        ClipboardEntry::Image(_) => true,
+        ClipboardEntry::ExternalPaths(paths) => paths.paths().iter().any(|path| image_file(path)),
+        ClipboardEntry::String(_) => false,
+    })
+}
+
+fn image_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| {
+            matches!(
+                value.to_ascii_lowercase().as_str(),
+                "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp"
+            )
+        })
+}
+
+pub(crate) fn prepare_paste(
+    entries: Vec<ClipboardEntry>,
+    scratch: Option<PathBuf>,
+    executor: BackgroundExecutor,
+) -> Result<PreparedPaste, String> {
+    let bytes = entries
+        .into_iter()
+        .find_map(|entry| match entry {
+            ClipboardEntry::Image(image) => prepare_image(image.bytes()).ok(),
+            ClipboardEntry::ExternalPaths(paths) => paths
+                .paths()
+                .iter()
+                .filter(|path| image_file(path))
+                .find_map(|path| {
+                    fs::read(path)
+                        .ok()
+                        .and_then(|bytes| prepare_image(&bytes).ok())
+                }),
+            ClipboardEntry::String(_) => None,
+        })
+        .ok_or_else(|| "Could not read the pasted image".to_string())?;
+
+    let mut prepared = PreparedPaste {
+        image: Arc::new(Image::from_bytes(ImageFormat::Png, bytes)),
+        path: None,
+        executor,
+    };
+
+    if let Some(directory) = scratch {
+        fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+
+        let path = directory.join(format!("image-{}.png", Uuid::new_v4()));
+
+        prepared.path = Some(path.clone());
+
+        fs::write(path, prepared.image.bytes()).map_err(|error| error.to_string())?;
+    }
+
+    Ok(prepared)
+}
+
+#[cfg(test)]
 fn attach_png(pending: &mut PendingAttachments, image: &Image) -> Result<String, AttachError> {
     pending.attach(image.bytes(), |bytes| {
         Arc::new(Image::from_bytes(ImageFormat::Png, bytes))

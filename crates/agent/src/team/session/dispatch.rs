@@ -67,11 +67,24 @@ pub(crate) fn reserve_dispatches(
 /// The caller supplies a ready, idle session. Persistence precedes every
 /// external send, including the durable change from reserved to charged.
 /// A transport-level start is still awaiting provider acceptance evidence.
+#[cfg(test)]
 pub(crate) fn dispatch(
     store: &mut RoomStore,
     id: AttemptId,
     send: impl FnOnce(&DispatchIntent) -> SendOutcome,
 ) -> Result<SendOutcome, DispatchError> {
+    let intent = prepare(store, id)?;
+    let outcome = send(&intent);
+
+    finish(store, id, &outcome)?;
+
+    Ok(outcome)
+}
+
+pub(crate) fn prepare(
+    store: &mut RoomStore,
+    id: AttemptId,
+) -> Result<DispatchIntent, DispatchError> {
     let mut next = store.room().clone();
 
     let index = next
@@ -113,9 +126,29 @@ pub(crate) fn dispatch(
 
     store.commit(next)?;
 
-    let outcome = send(&intent);
+    Ok(intent)
+}
 
-    match &outcome {
+pub(crate) fn finish(
+    store: &mut RoomStore,
+    id: AttemptId,
+    outcome: &SendOutcome,
+) -> Result<(), DispatchError> {
+    let room = store.room();
+
+    let index = room
+        .attempts
+        .iter()
+        .position(|attempt| attempt.id == id)
+        .ok_or(DispatchError::Ineligible)?;
+
+    let intent = room.attempts[index].intent.clone();
+
+    if room.attempts[index].state != AttemptState::Sending {
+        return Err(DispatchError::Ineligible);
+    }
+
+    match outcome {
         SendOutcome::StartedTurn => {}
         SendOutcome::Steered | SendOutcome::Rejected { .. } => {
             let mut next = store.room().clone();
@@ -153,5 +186,5 @@ pub(crate) fn dispatch(
         }
     }
 
-    Ok(outcome)
+    Ok(())
 }

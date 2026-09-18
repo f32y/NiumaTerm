@@ -515,17 +515,19 @@ fn on_window_closed(cx: &mut App, window_id: WindowId) {
 }
 
 fn on_app_quit(cx: &mut App) -> impl Future<Output = ()> + use<> {
-    // Started before the synchronous saves below so both proceed together; the
-    // application waits for it before exiting.
     let history_flushed = input_history::flush(cx);
 
     // Settings edits live in the global until something writes
     // them out. Closing the settings surface does that, and so
     // does quitting with it still open.
-    if cx.global::<AppSettings>().should_save_on_exit()
-        && let Err(error) = cx.global::<AppSettings>().save()
-    {
-        warn!("failed to save settings on application shutdown: {error}");
+    if cx.global::<AppSettings>().should_save_on_exit() {
+        let settings = cx.global::<AppSettings>().clone();
+
+        let _write = utils::background_write(cx, move || {
+            if let Err(error) = settings.save() {
+                warn!("failed to save settings on application shutdown: {error}");
+            }
+        });
     }
 
     let restore_last_session_when_opening = cx
@@ -548,13 +550,17 @@ fn on_app_quit(cx: &mut App) -> impl Future<Output = ()> + use<> {
             .collect()
     };
 
-    if !windows.is_empty()
-        && let Err(err) = local_state::save_windows(&windows)
-    {
-        warn!("failed to save local_state.toml: {err}");
-    }
+    let saved = utils::background_write(cx, move || {
+        if !windows.is_empty()
+            && let Err(err) = local_state::save_windows(&windows)
+        {
+            warn!("failed to save local_state.toml: {err}");
+        }
+    });
 
     async move {
+        saved.await;
+
         if let Err(error) = history_flushed.await {
             warn!("failed to flush Agent input history: {error}");
         }

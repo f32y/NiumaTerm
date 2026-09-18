@@ -139,9 +139,16 @@ impl TabSurface {
 
         let runtime = pane.read(cx).runtime().clone();
 
-        if let Err(error) = runtime.update(cx, |runtime, cx| runtime.close(cx)) {
-            warn!("could not save disabled Team: {error}");
-        }
+        let closed = runtime.update(cx, |runtime, cx| runtime.close(cx));
+
+        cx.spawn(async move |_| {
+            if let Err(error) = closed.await {
+                warn!("could not save disabled Team: {error}");
+            }
+
+            drop(runtime);
+        })
+        .detach();
 
         *self = Self::TeamDisabled(Box::new(saved));
 

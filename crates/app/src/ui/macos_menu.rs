@@ -57,9 +57,11 @@ pub(crate) fn install(cx: &mut App) {
         }
 
         with_active_window(cx, |window, cx| {
-            if save_settings(window, cx) {
-                cx.quit();
-            }
+            save_settings(window, cx, |saved, _, cx| {
+                if saved {
+                    cx.quit();
+                }
+            });
         });
     });
 

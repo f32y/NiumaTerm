@@ -19,6 +19,7 @@ use crate::agent_tab::AgentPane;
 use crate::agent_tab::profile::{
     AgentKind, AgentThreadDefaults, agent_launch, defaults_from_thread_settings,
 };
+use crate::utils::background_write;
 
 /// The picks remembered for this profile, falling back to the bucket its
 /// agent kind shares with unnamed profiles.
@@ -69,7 +70,9 @@ pub(crate) fn remember_defaults(
         stored
     };
 
-    if let Err(err) = local_state::save_agent_defaults(&stored) {
-        warn!("failed to save agent defaults to local_state.toml: {err}");
-    }
+    let _write = background_write(cx, move || {
+        if let Err(err) = local_state::save_agent_defaults(&stored) {
+            warn!("failed to save agent defaults to local_state.toml: {err}");
+        }
+    });
 }

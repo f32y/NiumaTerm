@@ -367,9 +367,7 @@ fn restore_team_tab(
     let restored = saved_id
         .parse::<RoomId>()
         .map_err(|error| error.to_string())
-        .and_then(|id| {
-            TeamRuntime::open(&config_dir_path(), id, cx).map_err(|error| error.to_string())
-        });
+        .map(|id| TeamRuntime::open(&config_dir_path(), id, cx));
 
     match restored {
         Ok(runtime) => TabSurface::Team(cx.new(|cx| TeamPane::new(runtime, window, cx))),

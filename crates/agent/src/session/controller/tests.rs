@@ -1,4 +1,3 @@
-use std::path::Path;
 use std::time::{Duration, Instant};
 
 use crate::background_task::{BackgroundTaskKey, BackgroundTaskLoadState, BackgroundTaskSnapshot};
@@ -208,7 +207,7 @@ fn send(session: &mut SessionController, text: &str) -> SendOutcome {
                     settings: &ThreadSettings::default(),
                     skill: None,
                     images: &[],
-                    scratch: Path::new("unused-test-attachments"),
+                    image_paths: &[],
                     title: None,
                 })
             },

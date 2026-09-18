@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc;
 use std::time::Instant;
 use std::{env, fs, process, thread};
 
@@ -249,6 +250,61 @@ fn waiting_for_cache_persistence_keeps_update_state_readable() {
         "state must remain readable while persistence waits"
     );
     assert!(read_cache(&path).installations.contains_key(key.as_str()));
+
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn dismissing_updates_returns_while_the_cache_writer_is_busy() {
+    let path = test_path("dismiss-pending-write");
+    let coordinator = UpdateCoordinator::new(path.clone());
+
+    let key = coordinator.register(
+        ProviderKind::Codex,
+        AgentCli::new("fake-codex", []),
+        Arc::new(FakeMaintenance {
+            provider: ProviderKind::Codex,
+            probes: AtomicUsize::new(0),
+            updates: AtomicUsize::new(0),
+        }),
+    );
+
+    nmt_runtime::handle()
+        .block_on(coordinator.check(&key, true))
+        .unwrap();
+
+    let disk_busy = coordinator.cache_write.lock();
+    let worker = coordinator.clone();
+    let target = Version::new(1, 2, 0);
+    let updated_key = key.clone();
+    let updated_target = target.clone();
+    let (completed, received) = mpsc::channel();
+
+    let task = thread::spawn(move || {
+        worker.dismiss_available(&updated_key, &Version::new(1, 1, 0));
+        worker.dismiss_available(&updated_key, &updated_target);
+        completed.send(()).unwrap();
+    });
+
+    let returned = received.recv_timeout(Duration::from_secs(3));
+
+    drop(disk_busy);
+
+    task.join().unwrap();
+
+    assert!(
+        returned.is_ok(),
+        "dismissal must not wait for the filesystem"
+    );
+
+    nmt_runtime::handle()
+        .block_on(coordinator.persist_cache())
+        .unwrap();
+
+    assert_eq!(
+        read_cache(&path).installations[key.as_str()].dismissed_target,
+        Some(target)
+    );
 
     fs::remove_file(path).unwrap();
 }

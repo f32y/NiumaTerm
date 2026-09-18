@@ -1,3 +1,7 @@
+pub use crate::utils::background_write::background_write;
+
+mod background_write;
+
 use std::env;
 use std::future::Future;
 #[cfg(not(test))]

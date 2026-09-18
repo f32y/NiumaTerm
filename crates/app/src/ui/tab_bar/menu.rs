@@ -1,15 +1,56 @@
 use std::slice;
 
 use app::agent_tab::{AgentKind, AgentKindExt as _};
-use gpui::{App, Entity, SharedString};
+use gpui::{App, Entity, Global, SharedString};
 use gpui_component::modern_menu::ModernMenu;
 use gpui_component::{Icon, IconName, IconNamed, Sizable as _};
+use nmt_agent::team::model::RoomId;
 use nmt_agent::team::session::TeamSession;
 use nmt_config::config_dir_path;
 use nmt_config::profile::Profile;
 use rust_i18n::t;
 
 use crate::ui::{AppSettings, AppWindow};
+
+#[derive(Default)]
+struct SavedTeamRooms {
+    rooms: Vec<RoomId>,
+    loading: bool,
+}
+
+impl Global for SavedTeamRooms {}
+
+pub(crate) fn refresh_saved_rooms(cx: &mut App) {
+    if !cx.has_global::<SavedTeamRooms>() {
+        cx.set_global(SavedTeamRooms::default());
+    }
+
+    if cx.global::<SavedTeamRooms>().loading {
+        return;
+    }
+
+    cx.global_mut::<SavedTeamRooms>().loading = true;
+
+    let task = cx
+        .background_executor()
+        .spawn(async { TeamSession::saved_rooms(&config_dir_path()) });
+
+    cx.spawn(async move |cx| {
+        let rooms = task.await;
+
+        cx.update(|cx| {
+            let saved = cx.global_mut::<SavedTeamRooms>();
+
+            saved.loading = false;
+
+            match rooms {
+                Ok(rooms) => saved.rooms = rooms,
+                Err(error) => tracing::warn!("failed to list saved team rooms: {error}"),
+            }
+        });
+    })
+    .detach();
+}
 
 /// A shell tab's mark: the prompt itself, with no box drawn around it. At the
 /// size a tab strip and a menu row set their glyphs, a box spends most of the
@@ -204,14 +245,9 @@ pub(crate) fn new_tab_menu(
         item_shell.update(cx, |this, cx| this.open_team_tab(None, window, cx));
     });
 
-    let rooms = match TeamSession::saved_rooms(&config_dir_path()) {
-        Ok(rooms) => rooms,
-        Err(error) => {
-            tracing::warn!("failed to list saved team rooms: {error}");
+    refresh_saved_rooms(cx);
 
-            return menu;
-        }
-    };
+    let rooms = cx.global::<SavedTeamRooms>().rooms.clone();
 
     {
         for room in rooms {
