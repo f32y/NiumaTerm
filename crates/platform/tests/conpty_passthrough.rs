@@ -85,8 +85,6 @@ fn drive_conpty_with_title(script: &str, title: Option<&str>) -> Vec<u8> {
     .expect("failed to create ConPTY");
 
     runtime.block_on(async {
-        pty.start_async().expect("failed to register ConPTY");
-
         let mut collected: Vec<u8> = Vec::new();
         let mut buf = [0u8; 4096];
 

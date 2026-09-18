@@ -9,6 +9,7 @@ use std::thread::spawn;
 use std::time::Duration;
 
 use tokio::runtime::{Builder, Runtime};
+use tokio::task::yield_now;
 use tokio::time::{sleep, timeout};
 
 use crate::windows::pipes::{ConinPipe, ConoutPipe, PIPE_BUFFER, conin_pair, conout_pair};
@@ -18,13 +19,11 @@ fn async_output_parks_and_native_completion_wakes_the_reader() {
     let (mut reader, peer) = conout_pair().unwrap();
     let mut peer = File::from(peer);
 
-    let runtime = Builder::new_current_thread().enable_all().build().unwrap();
+    let runtime = runtime();
     let polls = Arc::new(AtomicUsize::new(0));
     let counter = polls.clone();
 
     runtime.block_on(async {
-        reader.start_async().unwrap();
-
         let task = tokio::spawn(async move {
             let mut buf = [0; 3];
 
@@ -39,17 +38,11 @@ fn async_output_parks_and_native_completion_wakes_the_reader() {
             (reader, buf, count)
         });
 
-        sleep(Duration::from_millis(20)).await;
+        // On a current-thread runtime, yielding runs the spawned task up to
+        // its first pending poll before the peer writes anything.
+        yield_now().await;
 
-        let parked = polls.load(Ordering::Relaxed);
-
-        sleep(Duration::from_millis(60)).await;
-
-        assert_eq!(
-            polls.load(Ordering::Relaxed),
-            parked,
-            "idle IOCP read woke itself"
-        );
+        assert_eq!(polls.load(Ordering::Relaxed), 1);
 
         peer.write_all(b"abc").unwrap();
 
@@ -58,6 +51,9 @@ fn async_output_parks_and_native_completion_wakes_the_reader() {
             .unwrap()
             .unwrap();
 
+        // One poll parked and one completed it: an idle IOCP read never
+        // wakes itself.
+        assert_eq!(polls.load(Ordering::Relaxed), 2);
         assert_eq!(count, 3);
         assert_eq!(&buf, b"abc");
 
@@ -79,9 +75,7 @@ fn async_output_parks_and_native_completion_wakes_the_reader() {
 fn async_flush_waits_for_native_completion_under_backpressure() {
     let (mut peer, mut writer) = writer_with_pending_write();
 
-    let runtime = Builder::new_current_thread().enable_all().build().unwrap();
-
-    runtime.block_on(async {
+    runtime().block_on(async {
         poll_fn(|cx| {
             assert!(writer.poll_flush(cx).is_pending());
             assert!(writer.poll_write(cx, b"later").is_pending());
@@ -219,11 +213,8 @@ fn runtime() -> Runtime {
     Builder::new_current_thread().enable_all().build().unwrap()
 }
 
-/// A reader associated with `runtime`'s IOCP, as the PTY task does on start.
-fn started_reader(runtime: &Runtime) -> (ConoutPipe, File) {
-    let (mut reader, peer) = conout_pair().unwrap();
-
-    runtime.block_on(async { reader.start_async().unwrap() });
+fn started_reader() -> (ConoutPipe, File) {
+    let (reader, peer) = conout_pair().unwrap();
 
     (reader, File::from(peer))
 }
@@ -250,7 +241,7 @@ fn would_park(reader: &mut ConoutPipe) -> bool {
 fn partial_reads_drain_buffered_output_before_parking() {
     let runtime = runtime();
 
-    let (mut reader, mut peer) = started_reader(&runtime);
+    let (mut reader, mut peer) = started_reader();
 
     runtime.block_on(async {
         // Push more than a single small read will drain.
@@ -284,8 +275,6 @@ fn output_written_before_the_first_read_is_not_lost() {
     peer.write_all(b"early").unwrap();
 
     runtime().block_on(async {
-        reader.start_async().unwrap();
-
         let mut sink = [0; 64];
 
         let got = read(&mut reader, &mut sink).await.unwrap();
@@ -298,7 +287,7 @@ fn output_written_before_the_first_read_is_not_lost() {
 fn a_closed_peer_is_reported_as_a_broken_pipe() {
     let runtime = runtime();
 
-    let (mut reader, peer) = started_reader(&runtime);
+    let (mut reader, peer) = started_reader();
 
     drop(peer);
 
@@ -314,7 +303,7 @@ fn a_closed_peer_is_reported_as_a_broken_pipe() {
 fn each_payload_wakes_a_parked_read() {
     let runtime = runtime();
 
-    let (mut reader, mut peer) = started_reader(&runtime);
+    let (mut reader, mut peer) = started_reader();
 
     runtime.block_on(async {
         let mut sink = [0; 64];
@@ -335,7 +324,7 @@ fn each_payload_wakes_a_parked_read() {
 fn an_empty_read_keeps_buffered_output_ready() {
     let runtime = runtime();
 
-    let (mut reader, mut peer) = started_reader(&runtime);
+    let (mut reader, mut peer) = started_reader();
 
     runtime.block_on(async {
         peer.write_all(b"xy").unwrap();
@@ -359,7 +348,7 @@ fn a_zero_length_peer_write_does_not_close_output() {
 
     let runtime = runtime();
 
-    let (mut reader, mut peer) = started_reader(&runtime);
+    let (mut reader, mut peer) = started_reader();
 
     runtime.block_on(async {
         assert!(would_park(&mut reader));
@@ -400,7 +389,7 @@ fn a_zero_length_peer_write_does_not_close_output() {
 fn dropping_reader_cancels_a_pending_native_read() {
     let runtime = runtime();
 
-    let (mut reader, peer) = started_reader(&runtime);
+    let (mut reader, peer) = started_reader();
 
     // Start the native read that dropping must cancel.
     runtime.block_on(async { assert!(would_park(&mut reader)) });
@@ -421,7 +410,4 @@ fn dropping_reader_cancels_a_pending_native_read() {
     closer.join().unwrap();
 
     assert!(closed, "reader teardown waited for native output");
-
-    // Process the cancellation while the runtime still owns the overlapped storage.
-    runtime.block_on(async { sleep(Duration::from_millis(20)).await });
 }

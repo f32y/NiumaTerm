@@ -1,6 +1,7 @@
 use std::future::poll_fn;
 use std::os::windows::io::AsRawHandle;
 use std::process::Command;
+use std::ptr;
 use std::task::Poll;
 use std::time::Duration;
 

@@ -383,9 +383,6 @@ async fn read_usage_panel() -> Result<UsageSnapshot, UsageFetchError> {
     })
     .map_err(|err| format!("could not start interactive Claude usage session: {err}"))?;
 
-    pty.start_async()
-        .map_err(|err| format!("could not watch Claude usage session output: {err}"))?;
-
     let started_at = Instant::now();
     let deadline = started_at + CLI_FETCH_TIMEOUT;
 
@@ -508,7 +505,7 @@ async fn drain_pty_output(
         match read {
             Ok(0) => return Ok(false),
             Ok(count) => append_bounded(output, &buffer[..count], MAX_CLI_OUTPUT_BYTES),
-            Err(err) if err.kind() == ErrorKind::BrokenPipe || pty.is_hangup_error(&err) => {
+            Err(err) if err.kind() == ErrorKind::BrokenPipe => {
                 return Ok(true);
             }
             Err(err) => return Err(format!("failed to read Claude usage panel: {err}")),

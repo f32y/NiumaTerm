@@ -7,8 +7,8 @@
 //!
 //! Output reads use Tokio's named pipe, so completions arrive directly at the
 //! runtime's IOCP. Input writes complete against an auto-reset event; its wait
-//! callback marks [`SoftReady`] and wakes the waiting task. Writes can also
-//! settle on demand without a runtime.
+//! callback wakes the waiting task. Writes can also settle on demand without
+//! a runtime.
 
 #[cfg(test)]
 #[path = "pipes_tests.rs"]
@@ -21,10 +21,10 @@ use std::task::{Context, Poll as TaskPoll, ready};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{io, mem, process, ptr};
 
+use futures::task::AtomicWaker;
 use tokio::net::windows::named_pipe::NamedPipeServer;
 use windows_sys::Win32::Foundation::{
-    ERROR_IO_INCOMPLETE, ERROR_IO_PENDING, GENERIC_READ, GENERIC_WRITE, HANDLE,
-    INVALID_HANDLE_VALUE,
+    ERROR_IO_INCOMPLETE, ERROR_IO_PENDING, GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, OPEN_EXISTING,
@@ -34,11 +34,9 @@ use windows_sys::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED
 use windows_sys::Win32::System::Pipes::{
     CreateNamedPipeW, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PeekNamedPipe,
 };
-use windows_sys::Win32::System::Threading::{
-    CreateEventW, INFINITE, RegisterWaitForSingleObject, UnregisterWaitEx, WT_EXECUTEINWAITTHREAD,
-};
+use windows_sys::Win32::System::Threading::{CreateEventW, WT_EXECUTEINWAITTHREAD};
 
-use crate::windows::readiness::SoftReady;
+use crate::windows::registered_wait::RegisteredWait;
 use crate::windows::win32_string;
 
 /// Kernel buffer of each pipe. The console host
@@ -53,34 +51,46 @@ const WRITE_CHUNK: usize = 64 * 1024;
 
 static NEXT_PIPE: AtomicU32 = AtomicU32::new(0);
 
-/// Create the pipe carrying console output: the overlapped end read here, and
-/// the synchronous write end for the console host.
-pub(crate) fn conout_pair() -> io::Result<(ConoutPipe, OwnedHandle)> {
-    let (ours, theirs) = pipe_pair(PIPE_ACCESS_INBOUND, GENERIC_WRITE)?;
+/// Which way bytes flow through a pipe, seen from this process.
+#[derive(Clone, Copy)]
+pub(crate) enum Direction {
+    /// The peer writes and this process reads.
+    Inbound,
+    /// This process writes and the peer reads.
+    Outbound,
+}
 
-    Ok((ConoutPipe::new(ours), theirs))
+/// Create the pipe carrying console output: the overlapped end read here, and
+/// the synchronous write end for the console host. The reader is registered
+/// with the shared runtime's IOCP here, so creation can stay synchronous while
+/// the first read needs no runtime context of its own.
+pub(crate) fn conout_pair() -> io::Result<(ConoutPipe, OwnedHandle)> {
+    let (ours, theirs) = pipe_pair(Direction::Inbound)?;
+
+    let _runtime = nmt_runtime::handle().enter();
+
+    // SAFETY: The connected handle has no pending I/O, and ownership moves
+    // exclusively to Tokio.
+    let pipe = unsafe { NamedPipeServer::from_raw_handle(ours.into_raw_handle()) }?;
+
+    Ok((ConoutPipe { pipe }, theirs))
 }
 
 /// Create the pipe carrying console input: the synchronous read end for the
 /// console host, and the overlapped end written here.
 pub(crate) fn conin_pair() -> io::Result<(OwnedHandle, ConinPipe)> {
-    let (ours, theirs) = pipe_pair(PIPE_ACCESS_OUTBOUND, GENERIC_READ)?;
+    let (ours, theirs) = pipe_pair(Direction::Outbound)?;
 
     Ok((theirs, ConinPipe::new(ours)?))
 }
 
-/// Pipes for one of a child's standard streams; `inbound` carries the child's
-/// output here. Anonymous pipes cannot be overlapped, so Tokio's own child
-/// stdio parks a blocking-pool thread on every pending read. Here the parent
-/// end is registered with the runtime's IOCP instead, and the child's end
-/// stays synchronous as ordinary console programs expect. Call inside a
-/// runtime context.
-pub(crate) fn child_stdio_pair(inbound: bool) -> io::Result<(NamedPipeServer, OwnedHandle)> {
-    let (ours, theirs) = if inbound {
-        pipe_pair(PIPE_ACCESS_INBOUND, GENERIC_WRITE)?
-    } else {
-        pipe_pair(PIPE_ACCESS_OUTBOUND, GENERIC_READ)?
-    };
+/// Pipes for one of a child's standard streams. Anonymous pipes cannot be
+/// overlapped, so Tokio's own child stdio parks a blocking-pool thread on
+/// every pending read. Here the parent end is registered with the runtime's
+/// IOCP instead, and the child's end stays synchronous as ordinary console
+/// programs expect. Call inside a runtime context.
+pub(crate) fn child_stdio_pair(direction: Direction) -> io::Result<(NamedPipeServer, OwnedHandle)> {
+    let (ours, theirs) = pipe_pair(direction)?;
 
     // SAFETY: The connected handle has no pending I/O, and ownership moves
     // exclusively to Tokio.
@@ -89,15 +99,20 @@ pub(crate) fn child_stdio_pair(inbound: bool) -> io::Result<(NamedPipeServer, Ow
     Ok((ours, theirs))
 }
 
-/// One connected pipe: the overlapped end with `access`, then the synchronous
-/// end opened with `peer_access`.
+/// One connected pipe: the overlapped end kept here, then the synchronous end
+/// opened for the peer.
 ///
 /// The name only has to be unique on this machine. `FIRST_PIPE_INSTANCE` makes
 /// creation fail if another process already owns the name, and the single
 /// instance is taken by the open below, so the pipe can never gain a second
 /// peer: if another process connects first, the open fails and no terminal
 /// data is ever written to it.
-pub(super) fn pipe_pair(access: u32, peer_access: u32) -> io::Result<(OwnedHandle, OwnedHandle)> {
+fn pipe_pair(direction: Direction) -> io::Result<(OwnedHandle, OwnedHandle)> {
+    let (access, peer_access) = match direction {
+        Direction::Inbound => (PIPE_ACCESS_INBOUND, GENERIC_WRITE),
+        Direction::Outbound => (PIPE_ACCESS_OUTBOUND, GENERIC_READ),
+    };
+
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.subsec_nanos());
@@ -147,17 +162,14 @@ pub(super) fn pipe_pair(access: u32, peer_access: u32) -> io::Result<(OwnedHandl
 }
 
 /// Runs on the operating system's wait thread when an operation completes.
-extern "system" fn operation_completed(ctx: *mut c_void, _timed_out: bool) {
-    // Borrow only: the end owns the box and frees it after a blocking
-    // unregister has excluded any callback still running.
-    let soft = unsafe { &*(ctx as *const SoftReady) };
+/// Waking consumes the registered waker, so a burst of completions before the
+/// task re-registers posts one wakeup.
+unsafe extern "system" fn operation_completed(ctx: *mut c_void, _timed_out: bool) {
+    // Borrow only: the registration owns the waker and frees it after a
+    // blocking unregister has excluded any callback still running.
+    let waker = unsafe { &*(ctx as *const AtomicWaker) };
 
-    // An operation that finished inside its own call signals the event too.
-    // Waking only on the clear-to-set edge keeps a burst of those from posting
-    // one wakeup per chunk.
-    if !soft.is_ready() {
-        soft.set_ready();
-    }
+    waker.wake();
 }
 
 /// The overlapped input end and the single write it runs at a time.
@@ -171,16 +183,12 @@ struct PipeEnd {
     /// the handle inside `overlapped` stays open for as long as it is used.
     _event: OwnedHandle,
 
-    wait: HANDLE,
-
-    /// Boxed because the wait callback keeps its address.
-    soft: Box<SoftReady>,
+    wait: RegisteredWait<AtomicWaker>,
 
     in_flight: bool,
 }
 
-// The raw pointers refer to allocations this value owns, and the wait callback
-// only touches the thread-safe `SoftReady`.
+// The raw pointer inside `overlapped` refers to an event this value owns.
 unsafe impl Send for PipeEnd {}
 
 impl PipeEnd {
@@ -193,42 +201,45 @@ impl PipeEnd {
 
         let event = unsafe { OwnedHandle::from_raw_handle(event) };
 
-        let soft = Box::new(SoftReady::new());
-
         let mut overlapped: Box<OVERLAPPED> = Box::new(unsafe { mem::zeroed() });
 
         overlapped.hEvent = event.as_raw_handle();
 
-        let mut wait: HANDLE = ptr::null_mut();
-
-        let registered = unsafe {
-            RegisterWaitForSingleObject(
-                &mut wait,
-                event.as_raw_handle(),
-                Some(operation_completed),
-                ptr::from_ref::<SoftReady>(&soft).cast(),
-                INFINITE,
-                WT_EXECUTEINWAITTHREAD,
-            )
-        };
-
-        if registered == 0 {
-            return Err(io::Error::last_os_error());
-        }
+        let wait = RegisteredWait::new(
+            event.as_raw_handle(),
+            AtomicWaker::new(),
+            operation_completed,
+            WT_EXECUTEINWAITTHREAD,
+        )?;
 
         Ok(Self {
             handle,
             overlapped,
             _event: event,
             wait,
-            soft,
             in_flight: false,
         })
     }
 
-    /// Turn the return of `WriteFile` into a started operation. An
-    /// immediate success still reports its byte count through `finished`.
-    fn started(&mut self, succeeded: i32) -> io::Result<()> {
+    /// Install before checking completion so a concurrent callback cannot be
+    /// lost between the check and the task suspending.
+    fn register_task_waker(&self, cx: &Context<'_>) {
+        self.wait.context().register(cx.waker());
+    }
+
+    /// Start one native write of `bytes`. A write that finished inside the
+    /// call still reports its byte count through `result`.
+    fn submit(&mut self, bytes: &[u8]) -> io::Result<()> {
+        let succeeded = unsafe {
+            WriteFile(
+                self.handle.as_raw_handle(),
+                bytes.as_ptr(),
+                bytes.len() as u32,
+                ptr::null_mut(),
+                &mut *self.overlapped,
+            )
+        };
+
         if succeeded == 0 {
             let error = io::Error::last_os_error();
 
@@ -242,7 +253,8 @@ impl PipeEnd {
         Ok(())
     }
 
-    fn result(&mut self) -> io::Result<Option<usize>> {
+    /// The byte count of the running operation, or `Pending` while it runs.
+    fn result(&mut self) -> TaskPoll<io::Result<usize>> {
         let mut transferred = 0;
 
         let done = unsafe {
@@ -257,71 +269,52 @@ impl PipeEnd {
         if done != 0 {
             self.in_flight = false;
 
-            return Ok(Some(transferred as usize));
+            return TaskPoll::Ready(Ok(transferred as usize));
         }
 
         let error = io::Error::last_os_error();
 
         if error.raw_os_error() == Some(ERROR_IO_INCOMPLETE as i32) {
-            return Ok(None);
+            return TaskPoll::Pending;
         }
 
         self.in_flight = false;
 
-        Err(error)
-    }
-
-    /// The byte count of the running operation, or `None` while it is pending.
-    ///
-    /// Reporting "pending" clears the ready flag, and the completion may have
-    /// raised it just before. Looking again after the clear closes that gap; a
-    /// completion found there raises the flag again because its own wakeup may
-    /// already be spent.
-    fn finished(&mut self) -> io::Result<Option<usize>> {
-        if let Some(transferred) = self.result()? {
-            return Ok(Some(transferred));
-        }
-
-        self.soft.clear();
-
-        let finished = self.result()?;
-
-        if finished.is_some() {
-            self.soft.set_ready();
-        }
-
-        Ok(finished)
+        TaskPoll::Ready(Err(error))
     }
 }
 
 impl Drop for PipeEnd {
     fn drop(&mut self) {
+        // The callback and the wait below would both consume the auto-reset
+        // event, and only one of them wakes. Stopping the callback first
+        // leaves a later completion's signal to the wait alone.
+        self.wait.unregister();
+
+        if !self.in_flight {
+            return;
+        }
+
         unsafe {
-            // Blocking unregister: no callback can touch `soft` afterwards, and
-            // nothing else consumes the event the wait below may need.
-            UnregisterWaitEx(self.wait, INVALID_HANDLE_VALUE);
+            // The kernel still references `overlapped` and the owner's buffer.
+            // Both are freed after this returns, so the cancelled operation has
+            // to be seen through to its completion first.
+            CancelIoEx(self.handle.as_raw_handle(), &*self.overlapped);
 
-            if self.in_flight {
-                // The kernel still references `overlapped` and the owner's
-                // buffer. Both are freed after this returns, so the cancelled
-                // operation has to be seen through to its completion first.
-                CancelIoEx(self.handle.as_raw_handle(), &*self.overlapped);
+            let mut transferred = 0;
 
-                let mut transferred = 0;
-
-                GetOverlappedResult(
-                    self.handle.as_raw_handle(),
-                    &*self.overlapped,
-                    &mut transferred,
-                    1,
-                );
-            }
+            GetOverlappedResult(
+                self.handle.as_raw_handle(),
+                &*self.overlapped,
+                &mut transferred,
+                1,
+            );
         }
     }
 }
 
-/// The console output stream, driven by the Tokio runtime's IOCP after
-/// [`ConoutPipe::start_async`]. Reads report `BrokenPipe` after hangup.
+/// The console output stream, driven by the shared runtime's IOCP. Reads
+/// report `BrokenPipe` after hangup.
 pub struct ConoutPipe {
     // Mio 1.2.3, which backs Tokio's named pipes, uses a 4 KiB internal read
     // buffer with no public size setting. PIPE_BUFFER only sizes the kernel
@@ -330,54 +323,19 @@ pub struct ConoutPipe {
     // completion and poll frequency during sustained output and can reduce
     // throughput. Using 64 KiB internal reads requires a mio dependency patch;
     // its effect on throughput and short-message latency needs measurement.
-    pipe: ReadSource,
-}
-
-/// The IOCP association is made inside a runtime context, which session
-/// creation does not have, so the handle waits until the owner task starts.
-enum ReadSource {
-    Unregistered(Option<OwnedHandle>),
-    Registered(NamedPipeServer),
+    pipe: NamedPipeServer,
 }
 
 impl ConoutPipe {
-    fn new(handle: OwnedHandle) -> Self {
-        Self {
-            pipe: ReadSource::Unregistered(Some(handle)),
-        }
-    }
-
-    pub(super) fn start_async(&mut self) -> io::Result<()> {
-        let ReadSource::Unregistered(handle) = &mut self.pipe else {
-            return Err(io::Error::other("pipe is already registered"));
-        };
-
-        let handle = handle
-            .take()
-            .ok_or_else(|| io::Error::other("pipe initialization failed"))?;
-
-        // SAFETY: No I/O was submitted before this sole ownership transfer.
-        // IOCP association cannot be moved from a different live poller.
-        let pipe = unsafe { NamedPipeServer::from_raw_handle(handle.into_raw_handle()) }?;
-
-        self.pipe = ReadSource::Registered(pipe);
-
-        Ok(())
-    }
-
     pub(super) fn poll_read(
         &mut self,
         cx: &mut Context<'_>,
         buf: &mut [u8],
     ) -> TaskPoll<io::Result<usize>> {
-        let ReadSource::Registered(pipe) = &mut self.pipe else {
-            return TaskPoll::Ready(Err(io::Error::other("pipe has no async registration")));
-        };
-
         loop {
-            ready!(pipe.poll_read_ready(cx))?;
+            ready!(self.pipe.poll_read_ready(cx))?;
 
-            match pipe.try_read(buf) {
+            match self.pipe.try_read(buf) {
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => continue,
                 Ok(0) if !buf.is_empty() => {
                     // An empty peer write also produces a zero-byte completion.
@@ -386,7 +344,7 @@ impl ConoutPipe {
                     // pointers are null because only connection status is used.
                     let connected = unsafe {
                         PeekNamedPipe(
-                            pipe.as_raw_handle(),
+                            self.pipe.as_raw_handle(),
                             ptr::null_mut(),
                             0,
                             ptr::null_mut(),
@@ -406,8 +364,7 @@ impl ConoutPipe {
 }
 
 /// The console input stream. `poll_write` accepts bytes only while no native
-/// write is running and stays pending otherwise; the ready flag is set while
-/// it would accept.
+/// write is running and stays pending otherwise.
 pub struct ConinPipe {
     // Declared before `buf`: dropping it completes the write that reads `buf`.
     end: PipeEnd,
@@ -420,12 +377,8 @@ pub struct ConinPipe {
 
 impl ConinPipe {
     fn new(handle: OwnedHandle) -> io::Result<Self> {
-        let end = PipeEnd::new(handle)?;
-
-        end.soft.set_ready();
-
         Ok(Self {
-            end,
+            end: PipeEnd::new(handle)?,
             buf: Vec::new(),
             sent: 0,
         })
@@ -436,15 +389,9 @@ impl ConinPipe {
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> TaskPoll<io::Result<usize>> {
-        // Installed before settling, so a completion racing the check still
-        // wakes the task that is about to suspend.
-        self.end.soft.register_task_waker(cx.waker());
+        self.end.register_task_waker(cx);
 
-        self.settle()?;
-
-        if self.end.in_flight {
-            return TaskPoll::Pending;
-        }
+        ready!(self.settle())?;
 
         // A zero-length write on a byte pipe completes the peer's read with no
         // data, which a reader can take for the end of the stream.
@@ -460,62 +407,41 @@ impl ConinPipe {
 
         self.sent = 0;
 
-        self.submit()?;
+        self.end.submit(&self.buf)?;
 
         // A write that fit the pipe buffer is already complete; settling now
         // lets a flush that follows succeed without waiting for a wakeup.
-        self.settle()?;
+        if let TaskPoll::Ready(Err(error)) = self.settle() {
+            return TaskPoll::Ready(Err(error));
+        }
 
         TaskPoll::Ready(Ok(accepted))
     }
 
     /// Complete once every accepted byte reached the pipe.
     pub(super) fn poll_flush(&mut self, cx: &mut Context<'_>) -> TaskPoll<io::Result<()>> {
-        self.end.soft.register_task_waker(cx.waker());
+        self.end.register_task_waker(cx);
 
-        self.settle()?;
-
-        if self.end.in_flight {
-            TaskPoll::Pending
-        } else {
-            TaskPoll::Ready(Ok(()))
-        }
+        self.settle()
     }
 
-    fn submit(&mut self) -> io::Result<()> {
-        let rest = &self.buf[self.sent..];
-
-        let started = unsafe {
-            WriteFile(
-                self.end.handle.as_raw_handle(),
-                rest.as_ptr(),
-                rest.len() as u32,
-                ptr::null_mut(),
-                &mut *self.end.overlapped,
-            )
-        };
-
-        self.end.started(started)
-    }
-
-    /// Account for a finished native write, sending whatever it left over.
-    fn settle(&mut self) -> io::Result<()> {
+    /// Account for finished native writes, sending whatever they left over.
+    /// `Pending` while a write is still running.
+    fn settle(&mut self) -> TaskPoll<io::Result<()>> {
         while self.end.in_flight {
-            let Some(transferred) = self.end.finished()? else {
-                return Ok(());
-            };
+            let transferred = ready!(self.end.result())?;
 
             self.sent += transferred;
 
             if self.sent < self.buf.len() {
                 if transferred == 0 {
-                    return Err(io::ErrorKind::WriteZero.into());
+                    return TaskPoll::Ready(Err(io::ErrorKind::WriteZero.into()));
                 }
 
-                self.submit()?;
+                self.end.submit(&self.buf[self.sent..])?;
             }
         }
 
-        Ok(())
+        TaskPoll::Ready(Ok(()))
     }
 }
