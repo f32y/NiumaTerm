@@ -6,7 +6,6 @@ mod tests;
 
 use std::io;
 use std::ops::Range;
-use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt;
@@ -26,10 +25,7 @@ use nmt_config::local_state::TabState;
 use nmt_terminal::clipboard::{Clipboard, ClipboardType};
 use nmt_terminal::input::{KeyPhase, WheelDelta};
 use nmt_terminal::session::interaction::{CopyCompletion, PendingCopy};
-use nmt_terminal::session::{
-    EngineError, HostEvent, SessionObserver, SurfaceMouseButton, TerminalSession,
-    TerminalSessionConfig,
-};
+use nmt_terminal::session::{HostEvent, SurfaceMouseButton, TerminalSessionConfig};
 use rust_i18n::t;
 use tracing::warn;
 
@@ -155,28 +151,6 @@ impl TerminalPane {
             profile_name: launch.profile_name,
             restorable: launch.restorable,
             agent_route: launch.agent_route,
-        };
-
-        Ok(cx.new(|cx| Self::from_source(cx, identity, wake, wake_rx, source)))
-    }
-
-    /// Install the observer before starting the session so its first output,
-    /// images and wake notifications reach the pane being constructed.
-    pub fn attach(
-        cx: &mut impl AppContext,
-        surface_id: u64,
-        profile_name: String,
-        agent_route: AgentRoute,
-        connect: impl FnOnce(Arc<dyn SessionObserver>) -> Result<TerminalSession, EngineError>,
-    ) -> Result<Entity<Self>, String> {
-        let (wake, wake_rx) = wake::wake_channel();
-        let source = TerminalFrameSource::attach(wake.clone(), surface_id, connect)?;
-
-        let identity = PaneIdentity {
-            id: surface_id,
-            profile_name,
-            restorable: TabState::default(),
-            agent_route,
         };
 
         Ok(cx.new(|cx| Self::from_source(cx, identity, wake, wake_rx, source)))

@@ -11,8 +11,6 @@ mod ipc;
 mod keymap;
 mod logging;
 mod profiling;
-#[cfg(windows)]
-mod remote;
 mod tabs;
 mod ui;
 mod update;
@@ -324,11 +322,6 @@ fn on_finish_launching(
 
     #[cfg(any(windows, target_os = "macos"))]
     update::initialize(is_testing, cx);
-
-    // Bring up the remote host service if it was left enabled. Runs on
-    // its own runtime thread; failures only log.
-    #[cfg(windows)]
-    remote::reconcile(&nmt_config::get().remote_session);
 
     // The platform remembers the choice and applies it to the vsync
     // thread when that spawns (after this closure returns).

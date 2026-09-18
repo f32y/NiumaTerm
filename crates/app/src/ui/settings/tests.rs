@@ -6,8 +6,8 @@ use app::agent_tab::AgentKind;
 use app::terminal_tab::settings::TerminalSettings;
 use gpui::{
     Context, Entity, InteractiveElement as _, IntoElement, ListAlignment, ListOffset, ListState,
-    ScrollDelta, ScrollWheelEvent, StatefulInteractiveElement as _, TestAppContext, list, point,
-    px, size,
+    ScrollDelta, ScrollWheelEvent, StatefulInteractiveElement as _, TestAppContext, div, list,
+    point, px, size,
 };
 use nmt_config::Config;
 use nmt_config::appearance::SmoothScrollingMode;
@@ -79,11 +79,6 @@ fn closed_settings_release_local_edits_while_another_window_stays_open(cx: &mut 
     editors[0]
         .update(cx, |editing, cx| {
             editing.theme_filter = "First window".into();
-
-            #[cfg(windows)]
-            {
-                editing.remote_pairing_input = "temporary pairing code".into();
-            }
 
             cx.notify();
         })
@@ -954,7 +949,6 @@ fn failed_settings_save_keeps_edits_for_retry() {
     assert_eq!(config.agent, settings.config().agent);
     assert_eq!(config.system, settings.config().system);
     assert_eq!(config.update, settings.config().update);
-    assert_eq!(config.remote_session, settings.config().remote_session);
     assert!(!config.terminal.improve_powershell_compatibility);
 }
 

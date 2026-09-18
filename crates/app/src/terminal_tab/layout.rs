@@ -44,28 +44,6 @@ pub(super) fn bottom_anchor_offsets(
     }
 }
 
-#[cfg(all(test, windows))]
-pub(super) fn live_frame_text(frame: &TerminalFrame) -> Option<String> {
-    let rows = frame_content_rows(frame);
-
-    if rows == 0 {
-        return None;
-    }
-
-    let mut lines = frame
-        .lines()
-        .iter()
-        .take(rows)
-        .map(|line| line.text().replace('\u{00a0}', " ").trim_end().to_string())
-        .collect::<Vec<_>>();
-
-    while lines.last().is_some_and(|line| line.is_empty()) {
-        lines.pop();
-    }
-
-    (!lines.is_empty()).then(|| lines.join("\n"))
-}
-
 /// The pixel y-offset for a viewport row (0 with no gaps / out of range).
 pub(super) fn row_y_offset(offsets: &[f32], row: usize) -> f32 {
     offsets.get(row).copied().unwrap_or(0.0)

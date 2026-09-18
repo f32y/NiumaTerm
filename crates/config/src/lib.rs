@@ -8,7 +8,6 @@ pub mod builtin_themes;
 pub mod colors;
 pub mod defaults;
 pub mod local_state;
-pub mod remote_session;
 pub mod system;
 pub mod terminal;
 pub mod theme;

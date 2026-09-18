@@ -5,8 +5,6 @@ use app::terminal_tab::view::{TerminalLaunch, TerminalPane};
 use gpui::{AppContext, Context, Entity};
 use nmt_agent::agent_process;
 use nmt_config::local_state::TabState;
-#[cfg(windows)]
-use nmt_remote_net::net_pty::terminal_session;
 use nmt_terminal::session::TerminalSessionConfig;
 use rust_i18n::t;
 use tracing::warn;
@@ -135,21 +133,4 @@ pub(crate) fn spawn_default_pane(
     AppWindow::watch_pane(&pane, cx);
 
     pane
-}
-
-#[cfg(windows)]
-pub(crate) fn attach_remote(
-    cx: &mut impl AppContext,
-    id: u64,
-    remote: nmt_remote_net::RemoteSession,
-) -> Result<Entity<TerminalPane>, String> {
-    let route = agent_process().allocate_route();
-
-    TerminalPane::attach(
-        cx,
-        id,
-        t!("terminal-remote-profile-name").to_string(),
-        route,
-        move |observer| terminal_session(remote, id, nmt_config::active_colors(), Some(observer)),
-    )
 }

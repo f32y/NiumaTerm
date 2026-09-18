@@ -16,14 +16,10 @@ use std::path::Path;
 use std::rc::Rc;
 
 use gpui::Global;
-#[cfg(windows)]
-use gpui::SharedString;
 use nmt_agent::dsh;
 use nmt_config::agent::AgentConfig;
 use nmt_config::appearance::AppearanceConfig;
 use nmt_config::defaults::default_theme;
-#[cfg(windows)]
-use nmt_config::remote_session::RemoteSessionConfig;
 use nmt_config::system::SystemConfig;
 use nmt_config::terminal::TerminalConfig;
 use nmt_config::theme_catalog::ThemeFamily;
@@ -48,13 +44,6 @@ pub struct SettingsEditing {
 
     pub theme_columns: u16,
     pub theme_load_failed: bool,
-
-    #[cfg(windows)]
-    pub remote_pairing_code: Option<String>,
-    #[cfg(windows)]
-    pub remote_pairing_input: SharedString,
-    #[cfg(windows)]
-    pub remote_client_status: Option<String>,
 }
 
 impl Default for AppSettings {
@@ -202,11 +191,6 @@ impl AppSettings {
 
     pub fn edit_system(&mut self, edit: impl FnOnce(&mut SystemConfig)) {
         edit(&mut self.config.system);
-    }
-
-    #[cfg(windows)]
-    pub fn edit_remote_session(&mut self, edit: impl FnOnce(&mut RemoteSessionConfig)) {
-        edit(&mut self.config.remote_session);
     }
 
     pub fn edit_update(&mut self, edit: impl FnOnce(&mut UpdateConfig)) {
@@ -519,7 +503,6 @@ impl AppSettings {
                 cursor_shape: self.config.cursor.shape,
                 agent: &self.config.agent,
                 system: &self.config.system,
-                remote_session: &self.config.remote_session,
                 update: &self.config.update,
                 profiles: &self.config.profiles.list,
                 default_profile: &self.config.profiles.default,

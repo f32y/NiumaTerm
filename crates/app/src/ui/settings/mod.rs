@@ -16,8 +16,6 @@ pub use crate::ui::settings::state::{
 pub(crate) use crate::ui::settings::opacity::{
     background_image_layer_opacity, main_view_background_opacity, window_background_appearance,
 };
-#[cfg(windows)]
-pub(crate) use crate::ui::settings::remote_session_page::reconcile_remote_host;
 pub(crate) use crate::ui::settings::state::builtin_agent_profile;
 #[cfg(test)]
 pub(crate) use crate::ui::settings::state::{
@@ -38,8 +36,6 @@ mod fields;
 mod macos_page;
 mod opacity;
 mod profiles_page;
-#[cfg(windows)]
-mod remote_session_page;
 mod state;
 mod system_page;
 mod table;
@@ -57,10 +53,9 @@ use std::{io, path};
 use app::design::SETTINGS_NAV_WIDTH;
 #[cfg(test)]
 use gpui::WindowBackgroundAppearance;
-use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    App, AppContext as _, Context, Div, Entity, FileDialogFilter, IntoElement as _,
-    ParentElement as _, PathPromptOptions, SharedString, Styled as _, Task, Window, div, relative,
+    App, AppContext as _, Context, Entity, FileDialogFilter, IntoElement as _, ParentElement as _,
+    PathPromptOptions, SharedString, Styled as _, Task, Window, relative,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::dialog::{DIALOG_BUTTON_MIN_WIDTH, DialogClose, DialogFooter};
@@ -97,8 +92,6 @@ use tracing::warn;
 #[cfg(windows)]
 use crate::PlatformHandle;
 use crate::agent_updates::AgentUpdates;
-#[cfg(windows)]
-use crate::ui::UI_RADIUS;
 use crate::ui::composition::sidebar_surface;
 use crate::ui::settings::about_page::about_page;
 use crate::ui::settings::agent_page::agent_page;
@@ -117,8 +110,6 @@ use crate::ui::settings::opacity::{
     effective_surface_background_opacity, window_background_appearance_for,
 };
 use crate::ui::settings::profiles_page::profiles_page;
-#[cfg(windows)]
-use crate::ui::settings::remote_session_page::remote_session_page;
 #[cfg(test)]
 use crate::ui::settings::state::{
     DEFAULT_AGENT_TRANSCRIPT_FONT_SIZE, DEFAULT_BACKGROUND_IMAGE_OPACITY, DEFAULT_TAB_WIDTH,
@@ -276,7 +267,7 @@ pub fn settings_view(editing: Entity<SettingsEditing>, cx: &App) -> Settings {
 
     let sidebar_style = sidebar_surface(cx).rounded_none().border_0().border_r_1();
 
-    let settings = Settings::new("app-settings")
+    Settings::new("app-settings")
         .sidebar_width(SETTINGS_NAV_WIDTH)
         .sidebar_size_range(SETTINGS_NAV_WIDTH..SETTINGS_NAV_WIDTH)
         .sidebar_style(&sidebar_style)
@@ -284,7 +275,7 @@ pub fn settings_view(editing: Entity<SettingsEditing>, cx: &App) -> Settings {
         // whole category top to bottom.
         .single_group_pages(true)
         .page(appearance_page(
-            editing.clone(),
+            editing,
             backdrop,
             background_image_enabled,
             cx.global::<AppSettings>().config().appearance.tab_auto_size,
@@ -296,12 +287,6 @@ pub fn settings_view(editing: Entity<SettingsEditing>, cx: &App) -> Settings {
         .page(system_page(shell_integration_mismatched))
         .page(profiles_page(&profiles, &agent_profiles))
         .page(terminal_page())
-        .page(agent_page(&agent_profiles, cx));
-
-    // Remote sessions are hosted by ConPTY and keyed by DPAPI, so the page
-    // that configures them exists only where they do.
-    #[cfg(windows)]
-    let settings = settings.page(remote_session_page(editing));
-
-    settings.page(about_page())
+        .page(agent_page(&agent_profiles, cx))
+        .page(about_page())
 }

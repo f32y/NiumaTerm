@@ -25,9 +25,7 @@ use crate::terminal::TerminalConfig;
 #[cfg(test)]
 use crate::theme::AppearanceTheme;
 use crate::theme::{Theme, UiTheme};
-use crate::{
-    CursorShape, agent, appearance, persistence, profile, remote_session, set_active_colors, update,
-};
+use crate::{CursorShape, agent, appearance, persistence, profile, set_active_colors, update};
 
 #[derive(Default, Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct Shell {
@@ -74,10 +72,6 @@ pub struct Config {
     /// System-behavior settings (settings dialog, System page).
     #[serde(default = "system::SystemConfig::default")]
     pub system: system::SystemConfig,
-
-    /// Remote-session connection settings (settings dialog, Remote Session page).
-    #[serde(default, rename = "remote-session")]
-    pub remote_session: remote_session::RemoteSessionConfig,
 
     /// Update checking settings (settings dialog, About page).
     #[serde(default = "update::UpdateConfig::default")]
@@ -282,7 +276,6 @@ impl Default for Config {
             agent_profiles: profile::AgentProfilesConfig::default(),
             agent: agent::AgentConfig::default(),
             system: system::SystemConfig::default(),
-            remote_session: remote_session::RemoteSessionConfig::default(),
             update: update::UpdateConfig::default(),
             terminal: TerminalConfig::default(),
         }
@@ -321,7 +314,6 @@ pub struct SettingsPatch<'a> {
     pub cursor_shape: CursorShape,
     pub agent: &'a AgentConfig,
     pub system: &'a SystemConfig,
-    pub remote_session: &'a remote_session::RemoteSessionConfig,
     pub update: &'a update::UpdateConfig,
     pub profiles: &'a [Profile],
     pub default_profile: &'a str,
@@ -365,7 +357,6 @@ fn patch_settings_document(doc: &mut DocumentMut, patch: &SettingsPatch<'_>) -> 
         agent,
         system,
         profiles,
-        remote_session,
         update,
         default_profile,
         agent_profiles,
@@ -391,8 +382,6 @@ fn patch_settings_document(doc: &mut DocumentMut, patch: &SettingsPatch<'_>) -> 
     patch_group(doc, "system", system)?;
 
     patch_group(doc, "agent", agent)?;
-
-    patch_group(doc, "remote-session", remote_session)?;
 
     patch_group(doc, "update", update)?;
 

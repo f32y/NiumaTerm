@@ -11,8 +11,6 @@
 use app::terminal_tab::view::{NextBlock, PreviousBlock, SendShiftTab, SendTab};
 use gpui::{App, KeyBinding};
 
-#[cfg(windows)]
-use crate::ui::NewRemoteTab;
 #[cfg(target_os = "macos")]
 use crate::ui::macos_menu::{Hide, HideOthers, Minimize, Quit};
 use crate::ui::{
@@ -49,7 +47,6 @@ fn window_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("ctrl-pageup", PrevWorkspace, Some("AppWindow")),
         KeyBinding::new("ctrl-shift-b", ToggleSidebar, Some("AppWindow")),
         KeyBinding::new("ctrl-,", ShowSettings, Some("AppWindow")),
-        KeyBinding::new("ctrl-shift-r", NewRemoteTab, Some("AppWindow")),
         KeyBinding::new("ctrl-shift-a", NewAgentTab, Some("AppWindow")),
         // Split-pane creation and keyboard resize. These consume the xterm
         // `\x1b[1;7A..D` / `\x1b[1;4A..D` arrow sequences before the terminal
