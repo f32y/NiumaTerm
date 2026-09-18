@@ -3,18 +3,17 @@ use std::io::{Read, Write};
 use std::pin::{Pin, pin};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
-use std::task::{Context, Poll as TaskPoll};
+use std::task::{Context, Poll as TaskPoll, Waker};
 use std::{io, mem, sync, time};
 
 use futures::executor::block_on;
-use futures::task::noop_waker_ref;
 use nmt_config::CursorShape;
 use nmt_config::colors::{Colors, NamedColor};
 use nmt_platform::{AsyncPty, WinsizeBuilder, poll_nonblocking};
 use parking_lot::Mutex;
-use tokio::runtime::Builder;
+use tokio::runtime::{Builder, Runtime};
 use tokio::sync::oneshot;
-use tokio::time::{sleep, timeout};
+use tokio::time::{Instant, sleep, timeout};
 
 use crate::event::{self, VoidListener};
 use crate::ghostty;
@@ -22,7 +21,7 @@ use crate::render_buffer::{FrameStore, RenderBuffer};
 use crate::termio::powershell_compatibility::RESIZE_INPUT_DELAY;
 use crate::termio::{
     PtyState, READ_BUFFER_SIZE, SNAPSHOT_MIN_INTERVAL, SYNC_OUTPUT_TIMEOUT, SessionHandles,
-    SessionOptions, Termio, mode, publish_render_buffer, scrollback_bytes, start_session,
+    SessionOptions, Step, Termio, mode, publish_render_buffer, scrollback_bytes, start_session,
 };
 
 #[test]
@@ -53,6 +52,27 @@ fn failed_capture_does_not_publish_back_buffer() {
     assert!(!failed);
     assert_eq!(front.load().cols(), 3);
     assert_eq!(back.cols(), 2);
+}
+
+fn noop_cx() -> Context<'static> {
+    Context::from_waker(Waker::noop())
+}
+
+fn drain<U: event::EventListener + Send + 'static>(
+    machine: &mut Termio<FakePty, U>,
+    state: &mut PtyState,
+) -> Step {
+    machine.drain_recv_channel(state, &mut noop_cx())
+}
+
+/// A current-thread runtime on paused time: sleeps and the PTY task's own
+/// deadlines advance together, so wake counts are exact.
+fn paused_runtime() -> Runtime {
+    Builder::new_current_thread()
+        .enable_all()
+        .start_paused(true)
+        .build()
+        .unwrap()
 }
 
 fn snapshot_row_text(snapshot: &RenderBuffer, y: u16) -> String {
@@ -198,7 +218,6 @@ struct FakeWriter {
     data: Vec<u8>,
     budget: Option<usize>,
     flush_pending: bool,
-    resize_pending: bool,
     resize_completion: Option<oneshot::Receiver<()>>,
     exited: bool,
     write_zero: bool,
@@ -289,10 +308,6 @@ impl AsyncPty for FakePty {
             self.writer.resize_completion = None;
         }
 
-        if self.writer.resize_pending {
-            return TaskPoll::Pending;
-        }
-
         self.writer
             .operations
             .push(format!("resize:{}x{}", size.cols, size.rows));
@@ -305,7 +320,7 @@ impl AsyncPty for FakePty {
 fn empty_input_does_not_stall_following_writes() {
     let mut machine = resized_pipe(b"");
     let mut state = PtyState::default();
-    let mut cx = Context::from_waker(noop_waker_ref());
+    let mut cx = noop_cx();
 
     state.write_list.push_back(Vec::new().into());
     state.write_list.push_back(b"after empty".to_vec().into());
@@ -329,10 +344,11 @@ fn empty_input_does_not_stall_following_writes() {
 fn pending_native_resize_keeps_output_live_and_preserves_input_order() {
     let mut machine = resized_pipe(b"");
     let mut state = PtyState::default();
-    let mut cx = Context::from_waker(noop_waker_ref());
+    let mut cx = noop_cx();
     let mut buf = vec![0; READ_BUFFER_SIZE];
+    let (finish_resize, resized) = oneshot::channel();
 
-    machine.pty.writer.resize_pending = true;
+    machine.pty.writer.resize_completion = Some(resized);
     machine.pty.reader.data = b"output during resize".to_vec();
 
     machine
@@ -363,7 +379,7 @@ fn pending_native_resize_keeps_output_live_and_preserves_input_order() {
     );
     assert!(machine.pty.writer.operations.is_empty());
 
-    machine.pty.writer.resize_pending = false;
+    finish_resize.send(()).unwrap();
 
     assert!(matches!(
         machine.poll_io(&mut state, &mut buf, &mut cx),
@@ -418,7 +434,7 @@ fn idle_async_loop_parks_until_a_command_arrives() {
     let sender = machine.channel();
     let polls = Arc::new(AtomicUsize::new(0));
     let counter = polls.clone();
-    let runtime = Builder::new_current_thread().enable_all().build().unwrap();
+    let runtime = paused_runtime();
 
     runtime.block_on(async {
         let task = tokio::spawn(async move {
@@ -438,7 +454,7 @@ fn idle_async_loop_parks_until_a_command_arrives() {
 
         assert!(parked > 0);
 
-        sleep(time::Duration::from_millis(60)).await;
+        sleep(time::Duration::from_secs(60)).await;
 
         assert_eq!(
             polls.load(Ordering::Relaxed),
@@ -518,7 +534,7 @@ fn delayed_resize_parks_then_rearms_the_input_deadline() {
     let (finish_resize, resized) = oneshot::channel();
     let polls = Arc::new(AtomicUsize::new(0));
     let counter = polls.clone();
-    let runtime = Builder::new_current_thread().enable_all().build().unwrap();
+    let runtime = paused_runtime();
 
     machine.pty.writer.observer = Some(written);
     machine.pty.writer.resize_completion = Some(resized);
@@ -614,50 +630,28 @@ fn queued_resize_cannot_overtake_partial_or_buffered_input() {
         .send(event::Msg::Input(b"Z".to_vec().into()))
         .unwrap();
 
-    assert!(
-        machine
-            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
-            .is_some()
-    );
+    assert_ne!(drain(&mut machine, &mut state), Step::Shutdown);
     assert_eq!(machine.ghostty.cols(), 80);
 
-    machine
-        .pty_write(&mut state, &mut Context::from_waker(noop_waker_ref()))
-        .unwrap();
+    machine.pty_write(&mut state, &mut noop_cx()).unwrap();
 
-    assert!(
-        machine
-            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
-            .is_some()
-    );
+    assert_ne!(drain(&mut machine, &mut state), Step::Shutdown);
     assert_eq!(machine.ghostty.cols(), 80);
     assert_eq!(machine.pty.writer.data, b"ab");
 
     machine.pty.writer.budget = None;
 
-    machine
-        .pty_write(&mut state, &mut Context::from_waker(noop_waker_ref()))
-        .unwrap();
+    machine.pty_write(&mut state, &mut noop_cx()).unwrap();
 
-    assert!(
-        machine
-            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
-            .is_some()
-    );
+    assert_ne!(drain(&mut machine, &mut state), Step::Shutdown);
     assert_eq!(machine.ghostty.cols(), 80);
     assert_eq!(machine.pty.writer.data, b"abc");
 
     machine.pty.writer.flush_pending = false;
 
-    assert!(
-        machine
-            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
-            .is_some()
-    );
+    assert_ne!(drain(&mut machine, &mut state), Step::Shutdown);
 
-    machine
-        .pty_write(&mut state, &mut Context::from_waker(noop_waker_ref()))
-        .unwrap();
+    machine.pty_write(&mut state, &mut noop_cx()).unwrap();
 
     assert_eq!(
         machine.pty.writer.operations,
@@ -702,25 +696,13 @@ fn queued_resizes_coalesce_only_until_the_next_input() {
         .send(event::Msg::Input(b"B".to_vec().into()))
         .unwrap();
 
-    assert!(
-        machine
-            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
-            .is_some()
-    );
+    assert_ne!(drain(&mut machine, &mut state), Step::Shutdown);
 
-    machine
-        .pty_write(&mut state, &mut Context::from_waker(noop_waker_ref()))
-        .unwrap();
+    machine.pty_write(&mut state, &mut noop_cx()).unwrap();
 
-    assert!(
-        machine
-            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
-            .is_some()
-    );
+    assert_ne!(drain(&mut machine, &mut state), Step::Shutdown);
 
-    machine
-        .pty_write(&mut state, &mut Context::from_waker(noop_waker_ref()))
-        .unwrap();
+    machine.pty_write(&mut state, &mut noop_cx()).unwrap();
 
     assert_eq!(
         machine.pty.writer.operations,
@@ -793,36 +775,22 @@ fn pending_resize_allows_cursor_replies_and_immediate_shutdown() {
         .send(event::Msg::Input(b"later".to_vec().into()))
         .unwrap();
 
-    assert!(
-        machine
-            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
-            .is_some()
-    );
+    assert_ne!(drain(&mut machine, &mut state), Step::Shutdown);
 
     machine.pty.reader.data.extend_from_slice(b"\x1b[6n");
 
     machine
-        .pty_read(
-            &mut state,
-            &mut [0; READ_BUFFER_SIZE],
-            &mut Context::from_waker(noop_waker_ref()),
-        )
+        .pty_read(&mut state, &mut [0; READ_BUFFER_SIZE], &mut noop_cx())
         .unwrap();
 
-    machine
-        .pty_write(&mut state, &mut Context::from_waker(noop_waker_ref()))
-        .unwrap();
+    machine.pty_write(&mut state, &mut noop_cx()).unwrap();
 
     assert_eq!(machine.pty.writer.data, b"\x1b[4;5R");
     assert_eq!(machine.ghostty.cols(), 80);
 
     sender.send(event::Msg::Shutdown).unwrap();
 
-    assert!(
-        !machine
-            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
-            .is_some()
-    );
+    assert_eq!(drain(&mut machine, &mut state), Step::Shutdown);
     assert_eq!(machine.ghostty.cols(), 80);
     assert_eq!(machine.pty.writer.data, b"\x1b[4;5R");
 }
@@ -864,27 +832,17 @@ fn powershell_pause_keeps_replies_live_and_disabling_releases_ordered_input() {
         .send(event::Msg::Input(b"B".to_vec().into()))
         .unwrap();
 
-    assert!(
-        machine
-            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
-            .is_some()
-    );
+    assert_ne!(drain(&mut machine, &mut state), Step::Shutdown);
     assert!(!state.needs_write());
     assert_eq!(machine.ghostty.cols(), 60);
 
     machine.pty.reader.data.extend_from_slice(b"\x1b[6n");
 
     machine
-        .pty_read(
-            &mut state,
-            &mut [0; READ_BUFFER_SIZE],
-            &mut Context::from_waker(noop_waker_ref()),
-        )
+        .pty_read(&mut state, &mut [0; READ_BUFFER_SIZE], &mut noop_cx())
         .unwrap();
 
-    machine
-        .pty_write(&mut state, &mut Context::from_waker(noop_waker_ref()))
-        .unwrap();
+    machine.pty_write(&mut state, &mut noop_cx()).unwrap();
 
     assert_eq!(machine.pty.writer.data, b"\x1b[4;5R");
 
@@ -892,26 +850,14 @@ fn powershell_pause_keeps_replies_live_and_disabling_releases_ordered_input() {
         .send(event::Msg::PowerShellCompatibility(false))
         .unwrap();
 
-    assert!(
-        machine
-            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
-            .is_some()
-    );
+    assert_ne!(drain(&mut machine, &mut state), Step::Shutdown);
 
-    machine
-        .pty_write(&mut state, &mut Context::from_waker(noop_waker_ref()))
-        .unwrap();
+    machine.pty_write(&mut state, &mut noop_cx()).unwrap();
 
     assert_eq!(machine.ghostty.cols(), 60);
-    assert!(
-        machine
-            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
-            .is_some()
-    );
+    assert_ne!(drain(&mut machine, &mut state), Step::Shutdown);
 
-    machine
-        .pty_write(&mut state, &mut Context::from_waker(noop_waker_ref()))
-        .unwrap();
+    machine.pty_write(&mut state, &mut noop_cx()).unwrap();
 
     assert_eq!(machine.ghostty.cols(), 100);
     assert_eq!(machine.pty.writer.data, b"\x1b[4;5RAB");
@@ -933,19 +879,11 @@ fn powershell_pause_keeps_replies_live_and_disabling_releases_ordered_input() {
         .send(event::Msg::Input(b"discard-on-close".to_vec().into()))
         .unwrap();
 
-    assert!(
-        machine
-            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
-            .is_some()
-    );
+    assert_ne!(drain(&mut machine, &mut state), Step::Shutdown);
 
     sender.send(event::Msg::Shutdown).unwrap();
 
-    assert!(
-        !machine
-            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
-            .is_some()
-    );
+    assert_eq!(drain(&mut machine, &mut state), Step::Shutdown);
     assert_eq!(machine.pty.writer.data, b"\x1b[4;5RAB");
 }
 
@@ -1002,11 +940,7 @@ fn powershell_pause_skips_alternate_screen_and_unchanged_grid_sizes() {
         .send(event::Msg::PowerShellCompatibility(true))
         .unwrap();
 
-    assert!(
-        machine
-            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
-            .is_some()
-    );
+    assert_ne!(drain(&mut machine, &mut state), Step::Shutdown);
 
     sender
         .send(event::Msg::Resize(WinsizeBuilder {
@@ -1017,25 +951,15 @@ fn powershell_pause_skips_alternate_screen_and_unchanged_grid_sizes() {
         }))
         .unwrap();
 
-    assert!(
-        machine
-            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
-            .is_some()
-    );
+    assert_ne!(drain(&mut machine, &mut state), Step::Shutdown);
 
     sender
         .send(event::Msg::Input(b"same-size".to_vec().into()))
         .unwrap();
 
-    assert!(
-        machine
-            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
-            .is_some()
-    );
+    assert_ne!(drain(&mut machine, &mut state), Step::Shutdown);
 
-    machine
-        .pty_write(&mut state, &mut Context::from_waker(noop_waker_ref()))
-        .unwrap();
+    machine.pty_write(&mut state, &mut noop_cx()).unwrap();
 
     sender
         .send(event::Msg::Resize(WinsizeBuilder {
@@ -1046,11 +970,7 @@ fn powershell_pause_skips_alternate_screen_and_unchanged_grid_sizes() {
         }))
         .unwrap();
 
-    assert!(
-        machine
-            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
-            .is_some()
-    );
+    assert_ne!(drain(&mut machine, &mut state), Step::Shutdown);
 
     machine.on_pty_chunk(b"\x1b[?1049h");
 
@@ -1058,15 +978,9 @@ fn powershell_pause_skips_alternate_screen_and_unchanged_grid_sizes() {
         .send(event::Msg::Input(b"alternate".to_vec().into()))
         .unwrap();
 
-    assert!(
-        machine
-            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
-            .is_some()
-    );
+    assert_ne!(drain(&mut machine, &mut state), Step::Shutdown);
 
-    machine
-        .pty_write(&mut state, &mut Context::from_waker(noop_waker_ref()))
-        .unwrap();
+    machine.pty_write(&mut state, &mut noop_cx()).unwrap();
 
     sender
         .send(event::Msg::Resize(WinsizeBuilder {
@@ -1077,11 +991,7 @@ fn powershell_pause_skips_alternate_screen_and_unchanged_grid_sizes() {
         }))
         .unwrap();
 
-    assert!(
-        machine
-            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
-            .is_some()
-    );
+    assert_ne!(drain(&mut machine, &mut state), Step::Shutdown);
 
     machine.on_pty_chunk(b"\x1b[?1049l");
 
@@ -1089,15 +999,9 @@ fn powershell_pause_skips_alternate_screen_and_unchanged_grid_sizes() {
         .send(event::Msg::Input(b"returned".to_vec().into()))
         .unwrap();
 
-    assert!(
-        machine
-            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
-            .is_some()
-    );
+    assert_ne!(drain(&mut machine, &mut state), Step::Shutdown);
 
-    machine
-        .pty_write(&mut state, &mut Context::from_waker(noop_waker_ref()))
-        .unwrap();
+    machine.pty_write(&mut state, &mut noop_cx()).unwrap();
 
     assert_eq!(machine.pty.writer.data, b"same-sizealternatereturned");
 }
@@ -1138,36 +1042,26 @@ fn terminal_replies_resume_after_partial_writes_in_input_order() {
     state.write_list.push_back(b"in".to_vec().into());
 
     machine
-        .pty_read(
-            &mut state,
-            &mut [0; READ_BUFFER_SIZE],
-            &mut Context::from_waker(noop_waker_ref()),
-        )
+        .pty_read(&mut state, &mut [0; READ_BUFFER_SIZE], &mut noop_cx())
         .unwrap();
 
     assert!(machine.pty.writer.data.is_empty());
 
-    machine
-        .pty_write(&mut state, &mut Context::from_waker(noop_waker_ref()))
-        .unwrap();
+    machine.pty_write(&mut state, &mut noop_cx()).unwrap();
 
     assert_eq!(machine.pty.writer.data, b"in");
     assert!(state.needs_write());
 
     machine.pty.writer.budget = Some(3);
 
-    machine
-        .pty_write(&mut state, &mut Context::from_waker(noop_waker_ref()))
-        .unwrap();
+    machine.pty_write(&mut state, &mut noop_cx()).unwrap();
 
     assert_eq!(machine.pty.writer.data, b"in\x1b[1");
     assert!(state.needs_write());
 
     machine.pty.writer.budget = None;
 
-    machine
-        .pty_write(&mut state, &mut Context::from_waker(noop_waker_ref()))
-        .unwrap();
+    machine.pty_write(&mut state, &mut noop_cx()).unwrap();
 
     assert_eq!(machine.pty.writer.data, b"in\x1b[1;1R");
     assert!(!state.needs_write());
@@ -1277,7 +1171,7 @@ fn disabled_terminal_responses_are_forwarded_without_replying() {
         .pty_read(
             &mut PtyState::default(),
             &mut [0; READ_BUFFER_SIZE],
-            &mut Context::from_waker(noop_waker_ref()),
+            &mut noop_cx(),
         )
         .unwrap();
 
@@ -1332,11 +1226,7 @@ fn resize_message_publishes_snapshot_to_render_buffer() {
 
     let mut state = PtyState::default();
 
-    assert!(
-        machine
-            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
-            .is_some()
-    );
+    assert_ne!(drain(&mut machine, &mut state), Step::Shutdown);
 
     let buffer = render_buffer.load();
 
@@ -1383,11 +1273,7 @@ fn theme_refresh_preserves_synchronized_output_until_commit() {
     let mut buf = [0u8; READ_BUFFER_SIZE];
 
     machine
-        .pty_read(
-            &mut state,
-            &mut buf,
-            &mut Context::from_waker(noop_waker_ref()),
-        )
+        .pty_read(&mut state, &mut buf, &mut noop_cx())
         .unwrap();
 
     assert_eq!(render_buffer.load().cursor().row.0, 2);
@@ -1399,11 +1285,7 @@ fn theme_refresh_preserves_synchronized_output_until_commit() {
         .extend_from_slice(b"\x1b[?2026h\x1b[1;1HWorking");
 
     machine
-        .pty_read(
-            &mut state,
-            &mut buf,
-            &mut Context::from_waker(noop_waker_ref()),
-        )
+        .pty_read(&mut state, &mut buf, &mut noop_cx())
         .unwrap();
 
     machine
@@ -1411,11 +1293,7 @@ fn theme_refresh_preserves_synchronized_output_until_commit() {
         .send(event::Msg::Theme(Box::new(colors)))
         .unwrap();
 
-    assert!(
-        machine
-            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
-            .is_some()
-    );
+    assert_ne!(drain(&mut machine, &mut state), Step::Shutdown);
 
     {
         let buffer = render_buffer.load();
@@ -1438,11 +1316,7 @@ fn theme_refresh_preserves_synchronized_output_until_commit() {
         .extend_from_slice(b"\x1b[3;3H\x1b[?2026l");
 
     machine
-        .pty_read(
-            &mut state,
-            &mut buf,
-            &mut Context::from_waker(noop_waker_ref()),
-        )
+        .pty_read(&mut state, &mut buf, &mut noop_cx())
         .unwrap();
 
     {
@@ -1463,21 +1337,13 @@ fn theme_refresh_preserves_synchronized_output_until_commit() {
         .extend_from_slice(b"\x1b[?2026h\x1b[2;1HStuck");
 
     machine
-        .pty_read(
-            &mut state,
-            &mut buf,
-            &mut Context::from_waker(noop_waker_ref()),
-        )
+        .pty_read(&mut state, &mut buf, &mut noop_cx())
         .unwrap();
 
-    machine.sync_output_started_at = Some(time::Instant::now() - SYNC_OUTPUT_TIMEOUT);
+    machine.sync_output_started_at = Some(Instant::now() - SYNC_OUTPUT_TIMEOUT);
 
     machine
-        .pty_read(
-            &mut state,
-            &mut buf,
-            &mut Context::from_waker(noop_waker_ref()),
-        )
+        .pty_read(&mut state, &mut buf, &mut noop_cx())
         .unwrap();
 
     {
@@ -1570,11 +1436,7 @@ fn theme_refresh_preserves_progress_cursor_suppression() {
     let mut buf = [0u8; READ_BUFFER_SIZE];
 
     machine
-        .pty_read(
-            &mut state,
-            &mut buf,
-            &mut Context::from_waker(noop_waker_ref()),
-        )
+        .pty_read(&mut state, &mut buf, &mut noop_cx())
         .unwrap();
 
     machine
@@ -1583,14 +1445,10 @@ fn theme_refresh_preserves_progress_cursor_suppression() {
         .data
         .extend_from_slice(b";42\x1b\\    Building [====>     ] 4/10\r");
 
-    machine.last_snapshot_at = Some(time::Instant::now() - SNAPSHOT_MIN_INTERVAL);
+    machine.last_snapshot_at = Some(Instant::now() - SNAPSHOT_MIN_INTERVAL);
 
     machine
-        .pty_read(
-            &mut state,
-            &mut buf,
-            &mut Context::from_waker(noop_waker_ref()),
-        )
+        .pty_read(&mut state, &mut buf, &mut noop_cx())
         .unwrap();
 
     machine
@@ -1598,11 +1456,7 @@ fn theme_refresh_preserves_progress_cursor_suppression() {
         .send(event::Msg::Theme(Box::new(colors)))
         .unwrap();
 
-    assert!(
-        machine
-            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
-            .is_some()
-    );
+    assert_ne!(drain(&mut machine, &mut state), Step::Shutdown);
 
     {
         let buffer = render_buffer.load();
@@ -1622,14 +1476,10 @@ fn theme_refresh_preserves_progress_cursor_suppression() {
         .data
         .extend_from_slice(b"\x1b]9;4;0;\x1b\\");
 
-    machine.last_snapshot_at = Some(time::Instant::now() - SNAPSHOT_MIN_INTERVAL);
+    machine.last_snapshot_at = Some(Instant::now() - SNAPSHOT_MIN_INTERVAL);
 
     machine
-        .pty_read(
-            &mut state,
-            &mut buf,
-            &mut Context::from_waker(noop_waker_ref()),
-        )
+        .pty_read(&mut state, &mut buf, &mut noop_cx())
         .unwrap();
 
     assert!(
@@ -1686,11 +1536,7 @@ fn conpty_echo_after_resize_preserves_addressed_row() {
     let mut read_buf = [0u8; READ_BUFFER_SIZE];
 
     machine
-        .pty_read(
-            &mut state,
-            &mut read_buf,
-            &mut Context::from_waker(noop_waker_ref()),
-        )
+        .pty_read(&mut state, &mut read_buf, &mut noop_cx())
         .unwrap();
 
     let snapshot = machine.ghostty.snapshot().unwrap();
@@ -1767,11 +1613,7 @@ fn conpty_repaint_after_resize_uses_active_screen_when_scrolled() {
     let mut read_buf = [0u8; READ_BUFFER_SIZE];
 
     machine
-        .pty_read(
-            &mut state,
-            &mut read_buf,
-            &mut Context::from_waker(noop_waker_ref()),
-        )
+        .pty_read(&mut state, &mut read_buf, &mut noop_cx())
         .unwrap();
 
     // CUP addresses the active screen even while the viewport shows history.
@@ -1845,11 +1687,7 @@ fn pty_read_events(
     let mut buf = [0u8; READ_BUFFER_SIZE];
 
     machine
-        .pty_read(
-            &mut state,
-            &mut buf,
-            &mut Context::from_waker(noop_waker_ref()),
-        )
+        .pty_read(&mut state, &mut buf, &mut noop_cx())
         .unwrap();
 
     let collected = events.lock().clone();
@@ -2216,11 +2054,7 @@ fn idle_theme_requests_publish_colors_without_replacing_retained_frames() {
             .send(event::Msg::Theme(Box::new(colors)))
             .unwrap();
 
-        assert!(
-            machine
-                .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
-                .is_some()
-        );
+        assert_ne!(drain(&mut machine, &mut state), Step::Shutdown);
 
         let frame = machine.render_buffer.load();
 

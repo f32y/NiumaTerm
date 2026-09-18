@@ -70,7 +70,7 @@ pub(crate) fn remember_defaults(
         stored
     };
 
-    let _write = background_write(cx, move || {
+    background_write(cx, move || {
         if let Err(err) = local_state::save_agent_defaults(&stored) {
             warn!("failed to save agent defaults to local_state.toml: {err}");
         }

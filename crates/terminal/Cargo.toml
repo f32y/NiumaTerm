@@ -48,5 +48,8 @@ url.workspace = true
 futures.workspace = true
 tokio.workspace = true
 
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+
 [target.'cfg(enable_profiling)'.dependencies]
 nmt_profiling.workspace = true

@@ -10,10 +10,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
-use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 
 use crate::dsh::api::ApiClient;
 use crate::dsh::mapping::{ApprovalRequest, QuestionRequest};
+use crate::dsh::session::lane::CommandLane;
+
+type Delivery = Arc<dyn Fn(Value) + Send + Sync>;
 
 pub(super) const COMPLETED_FRAME: &str = "nmt/control-completed";
 const CALL_DEADLINE: Duration = Duration::from_secs(15);
@@ -50,31 +52,27 @@ struct Call {
 }
 
 pub(super) struct Controls {
-    sender: UnboundedSender<Call>,
+    /// Separate from the session's command lane so an interrupt never waits
+    /// behind a conversation switch that can take seconds.
+    lane: CommandLane,
+    client: ApiClient,
+    deliver: Delivery,
     pending: HashMap<u64, Pending>,
     next_id: u64,
 }
 
 impl Controls {
-    /// Controls run one at a time, in the order they were submitted, on a
-    /// task that ends when this side is dropped.
-    pub(super) fn new(client: ApiClient, deliver: Arc<dyn Fn(Value) + Send + Sync>) -> Self {
-        let (sender, mut receiver) = unbounded_channel::<Call>();
-
-        nmt_runtime::handle().spawn(async move {
-            while let Some(call) = receiver.recv().await {
-                Self::run_control(&client, call, deliver.as_ref()).await;
-            }
-        });
-
+    pub(super) fn new(client: ApiClient, deliver: Delivery) -> Self {
         Self {
-            sender,
+            lane: CommandLane::new(),
+            client,
+            deliver,
             pending: HashMap::new(),
             next_id: 0,
         }
     }
 
-    async fn run_control(client: &ApiClient, call: Call, deliver: &(dyn Fn(Value) + Send + Sync)) {
+    async fn run_control(client: ApiClient, call: Call, deliver: Delivery) {
         if call.cancelled.load(Ordering::Acquire) {
             return;
         }
@@ -164,9 +162,11 @@ impl Controls {
             cancelled: Arc::clone(&cancelled),
         };
 
-        if self.sender.send(call).is_err() {
-            return false;
-        }
+        self.lane.run(Self::run_control(
+            self.client.clone(),
+            call,
+            Arc::clone(&self.deliver),
+        ));
 
         self.pending.insert(
             id,

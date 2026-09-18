@@ -663,54 +663,43 @@ impl AgentPane {
             prepare_paste(entries, scratch, executor)
         });
 
-        let pane = cx.weak_entity();
+        cx.spawn_in(window, async move |this, cx| {
+            let prepared = prepared.await;
 
-        window
-            .spawn(cx, async move |cx| {
-                let prepared = prepared.await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.attachments.preparing = this.attachments.preparing.saturating_sub(1);
 
-                let _ = cx.update(|window, cx| {
-                    let _ = pane.update(cx, |this, cx| {
-                        this.attachments.preparing = this.attachments.preparing.saturating_sub(1);
+                cx.notify();
 
-                        cx.notify();
+                if !this.binding.is_current()
+                    || this.binding.generation != binding_generation
+                    || this.session.borrow().runtime().epoch() != epoch
+                {
+                    return;
+                }
 
-                        if !this.binding.is_current()
-                            || this.binding.generation != binding_generation
-                            || this.session.borrow().runtime().epoch() != epoch
+                match prepared {
+                    Ok(mut prepared) => {
+                        let path = prepared.path.clone();
+
+                        if this
+                            .attachments
+                            .attach_prepared(prepared.image.clone(), path, &this.input, window, cx)
+                            .is_ok()
                         {
-                            return;
+                            prepared.path = None;
                         }
+                    }
+                    Err(message) => {
+                        this.palette
+                            .set_feedback(CommandFeedbackKind::Error, message, cx)
+                    }
+                }
+            });
 
-                        match prepared {
-                            Ok(mut prepared) => {
-                                let path = prepared.path.clone();
-
-                                if this
-                                    .attachments
-                                    .attach_prepared(
-                                        prepared.image.clone(),
-                                        path,
-                                        &this.input,
-                                        window,
-                                        cx,
-                                    )
-                                    .is_ok()
-                                {
-                                    prepared.path = None;
-                                }
-                            }
-                            Err(message) => {
-                                this.palette
-                                    .set_feedback(CommandFeedbackKind::Error, message, cx)
-                            }
-                        }
-                    });
-                });
-
-                let _ = completed.send(());
-            })
-            .detach();
+            let _ = completed.send(());
+        })
+        .detach();
 
         cx.notify();
 

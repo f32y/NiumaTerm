@@ -37,6 +37,7 @@ reqwest = { workspace = true, features = [
 tungstenite.workspace = true
 tokio.workspace = true
 tokio-tungstenite.workspace = true
+tokio-util.workspace = true
 futures.workspace = true
 nmt_runtime.workspace = true
 smallvec.workspace = true

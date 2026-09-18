@@ -1,6 +1,6 @@
 use std::io;
 
-use app::utils::background_write;
+use app::utils::background_write_reply;
 use gpui::{App, Global};
 use nmt_agent::HookInstallStatus;
 use nmt_agent::claude_code::hook as claude;
@@ -51,7 +51,17 @@ impl Hook {
         }
     }
 
-    pub(super) fn refresh(self, enabled: Option<bool>, cx: &mut App) {
+    /// Reread the installation status from disk.
+    pub(super) fn refresh(self, cx: &mut App) {
+        self.reload(None, cx);
+    }
+
+    /// Install or remove the hooks, then reread the status they left.
+    pub(super) fn set_installed(self, enabled: bool, cx: &mut App) {
+        self.reload(Some(enabled), cx);
+    }
+
+    fn reload(self, install: Option<bool>, cx: &mut App) {
         let state = &mut cx.default_global::<AgentHooks>().0[self as usize];
 
         state.generation += 1;
@@ -59,8 +69,8 @@ impl Hook {
 
         let generation = state.generation;
 
-        let work = background_write(cx, move || {
-            if let Some(enabled) = enabled {
+        let work = background_write_reply(cx, move || {
+            if let Some(enabled) = install {
                 let result = self.write(enabled);
 
                 if let Err(error) = result {

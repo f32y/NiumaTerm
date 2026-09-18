@@ -1211,30 +1211,33 @@ impl AgentSession {
             policy
         });
 
-        let spawned = cx.background_executor().spawn(on_runtime(async move {
-            if let Some(policy) = team_launch {
-                return Backend::spawn_team(
+        let spawned = cx.spawn(async move |_, _| {
+            on_runtime(async move {
+                if let Some(policy) = team_launch {
+                    return Backend::spawn_team(
+                        kind,
+                        &launch,
+                        &catalog,
+                        &workspace,
+                        recovery,
+                        policy,
+                        move |message| sender.send(message),
+                    )
+                    .await;
+                }
+
+                Backend::spawn(
                     kind,
                     &launch,
                     &catalog,
                     &workspace,
                     recovery,
-                    policy,
                     move |message| sender.send(message),
                 )
-                .await;
-            }
-
-            Backend::spawn(
-                kind,
-                &launch,
-                &catalog,
-                &workspace,
-                recovery,
-                move |message| sender.send(message),
-            )
+                .await
+            })
             .await
-        }));
+        });
 
         cx.spawn(async move |this, cx| {
             Self::pump_backend_messages(this, batches, spawned, epoch, name, on_result, cx).await

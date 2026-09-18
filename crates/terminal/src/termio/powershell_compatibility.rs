@@ -1,7 +1,9 @@
 #[cfg(test)]
 mod tests;
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tokio::time::Instant;
 
 pub(super) const RESIZE_INPUT_DELAY: Duration = Duration::from_millis(80);
 const MAX_QUEUED_INPUT_DELAY: Duration = Duration::from_millis(250);

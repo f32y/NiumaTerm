@@ -451,8 +451,10 @@ impl AppWindow {
         let weak = cx.weak_entity();
 
         window.on_window_should_close(cx, move |window, cx| {
-            weak.update(cx, |this, cx| this.confirm_window_close(window, cx))
-                .unwrap_or(true)
+            // The shell closes the window itself once settings are saved; a
+            // shell that is already gone has nothing left to save.
+            weak.update(cx, |this, cx| this.request_window_close(window, cx))
+                .is_err()
         });
 
         cx.observe_window_activation(window, Self::on_window_activation)
@@ -1415,31 +1417,29 @@ impl AppWindow {
         self.close_workspace_now(id, window, cx);
     }
 
-    /// True when the window may close right away. The explicit confirmation
-    /// setting and terminal child-process warnings share this path. Reached
-    /// from the titlebar X and the OS close request (Alt+F4, taskbar).
-    pub(crate) fn confirm_window_close(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
+    /// Save settings, then close the window unless the explicit confirmation
+    /// setting or a terminal child-process warning holds it. Reached from the
+    /// titlebar X and the OS close request (Alt+F4, taskbar); a close already
+    /// waiting on its save is left to finish.
+    pub(crate) fn request_window_close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.settings_close_pending {
-            return false;
+            return;
         }
 
         self.settings_close_pending = true;
 
-        let shell = cx.weak_entity();
+        let saved = ui::settings::save_settings(window, cx);
 
-        ui::settings::save_settings(window, cx, move |saved, window, cx| {
-            let _ = shell.update(cx, |this, cx| {
+        cx.spawn_in(window, async move |this, cx| {
+            let saved = saved.await;
+
+            let _ = this.update_in(cx, |this, window, cx| {
                 this.settings_close_pending = false;
 
                 this.finish_window_close(saved, window, cx);
             });
-        });
-
-        false
+        })
+        .detach();
     }
 
     fn finish_window_close(&mut self, saved: bool, window: &mut Window, cx: &mut Context<Self>) {
@@ -1502,13 +1502,15 @@ impl AppWindow {
         cx: &mut Context<Self>,
     ) {
         if self.workspaces.kind_of(id) == Some(WorkspaceKind::Settings) {
-            let shell = cx.weak_entity();
+            let saved = ui::settings::save_settings(window, cx);
 
-            ui::settings::save_settings(window, cx, move |saved, window, cx| {
-                if saved {
-                    let _ = shell.update(cx, |this, cx| this.remove_workspace(id, window, cx));
+            cx.spawn_in(window, async move |this, cx| {
+                if saved.await {
+                    let _ = this
+                        .update_in(cx, |this, window, cx| this.remove_workspace(id, window, cx));
                 }
-            });
+            })
+            .detach();
         } else {
             self.remove_workspace(id, window, cx);
         }

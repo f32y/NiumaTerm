@@ -523,7 +523,7 @@ fn on_app_quit(cx: &mut App) -> impl Future<Output = ()> + use<> {
     if cx.global::<AppSettings>().should_save_on_exit() {
         let settings = cx.global::<AppSettings>().clone();
 
-        let _write = utils::background_write(cx, move || {
+        utils::background_write(cx, move || {
             if let Err(error) = settings.save() {
                 warn!("failed to save settings on application shutdown: {error}");
             }
@@ -550,7 +550,7 @@ fn on_app_quit(cx: &mut App) -> impl Future<Output = ()> + use<> {
             .collect()
     };
 
-    let saved = utils::background_write(cx, move || {
+    let saved = utils::background_write_reply(cx, move || {
         if !windows.is_empty()
             && let Err(err) = local_state::save_windows(&windows)
         {

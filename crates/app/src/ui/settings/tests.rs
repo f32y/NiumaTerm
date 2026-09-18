@@ -1332,9 +1332,11 @@ fn background_save_completes_only_after_edits_made_during_the_write_are_saved(
     cx.update(|window, cx| {
         let completed = completed.clone();
 
-        save_settings_to(path.clone(), window, cx, move |saved, _, _| {
-            completed.set(Some(saved))
-        });
+        let saved = save_settings_to(path.clone(), window, cx);
+
+        window
+            .spawn(cx, async move |_| completed.set(Some(saved.await)))
+            .detach();
 
         cx.global_mut::<AppSettings>()
             .edit_appearance(|appearance| appearance.reduce_motion = true);
@@ -1358,9 +1360,11 @@ fn background_save_completes_only_after_edits_made_during_the_write_are_saved(
     cx.update(|window, cx| {
         let completed = completed.clone();
 
-        save_settings_to(path.clone(), window, cx, move |saved, _, _| {
-            completed.set(Some(saved))
-        });
+        let saved = save_settings_to(path.clone(), window, cx);
+
+        window
+            .spawn(cx, async move |_| completed.set(Some(saved.await)))
+            .detach();
     });
 
     cx.run_until_parked();

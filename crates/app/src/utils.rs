@@ -1,4 +1,4 @@
-pub use crate::utils::background_write::background_write;
+pub use crate::utils::background_write::{background_write, background_write_reply};
 
 mod background_write;
 

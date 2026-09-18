@@ -1,4 +1,6 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tokio::time::Instant;
 
 use crate::termio::powershell_compatibility::{PowerShellCompatibility, RESIZE_INPUT_DELAY};
 

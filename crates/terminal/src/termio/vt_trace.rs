@@ -157,7 +157,7 @@ struct TraceRecord {
     dump: Option<(String, String)>,
 }
 
-fn submit(line: String, dump: Option<(String, String)>) {
+fn submit(record: TraceRecord) {
     static WRITER: sync::OnceLock<Option<SyncSender<TraceRecord>>> = sync::OnceLock::new();
 
     // Disk writes are blocking work. One dedicated thread keeps the log open
@@ -178,7 +178,7 @@ fn submit(line: String, dump: Option<(String, String)>) {
 
     // Diagnostics must not stall terminal I/O or grow without bound when
     // storage is slow. The queue preserves submission order across writes.
-    if writer.try_send(TraceRecord { line, dump }).is_err() {
+    if writer.try_send(record).is_err() {
         tracing::warn!("VT trace queue is full; dropping a diagnostic record");
     }
 }
@@ -236,7 +236,7 @@ pub(crate) fn trace_read(route: usize, engine: &GhosttyTerminal, bytes: &[u8]) {
 
     line.push('\n');
 
-    submit(line, None);
+    submit(TraceRecord { line, dump: None });
 }
 
 /// Emit a trace point: one summary line to the master log + a full content dump to
@@ -316,5 +316,8 @@ pub fn trace(label: &str, engine: &mut GhosttyTerminal, detail: &str) {
         body.push('\n');
     }
 
-    submit(summary, Some((name, body)));
+    submit(TraceRecord {
+        line: summary,
+        dump: Some((name, body)),
+    });
 }

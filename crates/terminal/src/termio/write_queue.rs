@@ -77,10 +77,7 @@ impl PtyState {
                     Err(err) => {
                         self.set_current(Some(current));
 
-                        match err.kind() {
-                            ErrorKind::Interrupted | ErrorKind::WouldBlock => break 'write_many,
-                            _ => return Err(err),
-                        }
+                        return Err(err);
                     }
                 }
             }

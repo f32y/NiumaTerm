@@ -4,22 +4,24 @@ mod router;
 mod tests;
 
 use std::cmp::Reverse;
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::Future;
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, LazyLock, Weak};
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 
+use futures::future::{BoxFuture, Shared};
+use futures::{FutureExt as _, TryFutureExt as _};
 use parking_lot::Mutex;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use tokio::sync::{Notify, oneshot};
+use tokio::sync::oneshot;
 use tokio::time::timeout;
 
 use crate::LaunchConfig;
 use crate::codex::app_server::host::router::Router;
 use crate::launcher::AgentCli;
-use crate::subprocess::JsonLineProcess;
+use crate::subprocess::{DROP_SHUTDOWN_GRACE, JsonLineProcess};
 
 const HOST_INIT_RPC_ID: u64 = 1;
 const FIRST_HOST_RPC_ID: u64 = 2;
@@ -30,34 +32,16 @@ pub(super) type RegistrationId = u64;
 
 type Delivery = Arc<dyn Fn(Value) + Send + Sync>;
 
-static SHARED_HOST: LazyLock<SharedHostSlot> = LazyLock::new(SharedHostSlot::new);
+static SHARED_HOST: Mutex<SharedHost> = Mutex::new(SharedHost::Idle(Weak::new()));
 
-struct SharedHostState {
-    host: Weak<CodexHost>,
-    starting: bool,
-    attempt: u64,
-    failed_attempts: VecDeque<(u64, String)>,
-}
-
-struct SharedHostSlot {
-    state: Mutex<SharedHostState>,
-
-    /// Wakes every waiter created before a startup attempt settles.
-    ready: Notify,
-}
-
-impl SharedHostSlot {
-    fn new() -> Self {
-        Self {
-            state: Mutex::new(SharedHostState {
-                host: Weak::new(),
-                starting: false,
-                attempt: 0,
-                failed_attempts: VecDeque::new(),
-            }),
-            ready: Notify::new(),
-        }
-    }
+/// The host every Codex tab shares, held weakly so it stops with its last
+/// tab. While a start runs, its future is what is shared: tabs opened together
+/// wait for that one start and receive its outcome, failure included, so a
+/// failing launch is paid for once. A start whose initiator was cancelled
+/// stays here and is resumed by the next tab that asks.
+enum SharedHost {
+    Idle(Weak<CodexHost>),
+    Starting(Shared<BoxFuture<'static, Result<Arc<CodexHost>, String>>>),
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -91,58 +75,61 @@ impl CodexHost {
         catalog: &[LaunchConfig],
         on_stderr: impl Fn(String) + Send + 'static,
     ) -> Result<Arc<Self>, String> {
-        let bootstrap = HostBootstrap::from_launches(launch, catalog)?;
+        let mut bootstrap = Some(HostBootstrap::from_launches(launch, catalog)?);
 
-        loop {
-            // Created before the state is read, so a startup that settles in
-            // between still wakes this waiter.
-            let settled = SHARED_HOST.ready.notified();
+        let start = {
+            let mut shared = SHARED_HOST.lock();
 
-            let waiting_for = {
-                let mut shared = SHARED_HOST.state.lock();
+            if let SharedHost::Idle(host) = &*shared
+                && let Some(host) = host.upgrade()
+                && host.router.alive.load(Ordering::Acquire)
+            {
+                host.ensure_compatible(launch, bootstrap.as_ref().expect("bootstrap"))?;
 
-                if let Some(host) = shared.host.upgrade()
-                    && host.router.alive.load(Ordering::Acquire)
-                {
-                    host.ensure_compatible(launch, &bootstrap)?;
-
-                    return Ok(host);
-                }
-
-                if shared.starting {
-                    Some(shared.attempt)
-                } else {
-                    shared.starting = true;
-                    shared.attempt = shared.attempt.wrapping_add(1).max(1);
-
-                    None
-                }
-            };
-
-            if let Some(attempt) = waiting_for {
-                settled.await;
-
-                if let Some((_, error)) = SHARED_HOST
-                    .state
-                    .lock()
-                    .failed_attempts
-                    .iter()
-                    .find(|(failed_attempt, _)| *failed_attempt == attempt)
-                {
-                    return Err(error.clone());
-                }
-
-                continue;
+                return Ok(host);
             }
 
-            let mut attempt = StartAttempt::claim();
+            match &*shared {
+                SharedHost::Starting(start) => start.clone(),
+                SharedHost::Idle(_) => {
+                    let start = Self::start(bootstrap.take().expect("bootstrap"), on_stderr)
+                        .map_ok(Arc::new)
+                        .boxed()
+                        .shared();
 
-            let started = Self::start(bootstrap, on_stderr).await.map(Arc::new);
+                    *shared = SharedHost::Starting(start.clone());
 
-            attempt.settle(&started);
+                    start
+                }
+            }
+        };
 
-            return started;
+        let started = start.clone().await;
+
+        {
+            let mut shared = SHARED_HOST.lock();
+
+            // A later start may already have replaced this one.
+            if let SharedHost::Starting(current) = &*shared
+                && current.ptr_eq(&start)
+            {
+                *shared = SharedHost::Idle(
+                    started
+                        .as_ref()
+                        .map_or_else(|_| Weak::new(), Arc::downgrade),
+                );
+            }
         }
+
+        let host = started?;
+
+        // The initiator built the host from its own launch; a waiter has to
+        // check that the shared host matches the launch it asked for.
+        if let Some(bootstrap) = &bootstrap {
+            host.ensure_compatible(launch, bootstrap)?;
+        }
+
+        Ok(host)
     }
 
     async fn start(
@@ -317,13 +304,7 @@ impl CodexHost {
 
 impl Drop for CodexHost {
     fn drop(&mut self) {
-        self.router.expected_shutdown.store(true, Ordering::Release);
-
-        nmt_runtime::handle().spawn(
-            self.process
-                .get_mut()
-                .shutdown(Duration::from_millis(250), true),
-        );
+        nmt_runtime::handle().spawn(self.shutdown(DROP_SHUTDOWN_GRACE, true));
     }
 }
 
@@ -507,68 +488,4 @@ fn message_thread_id(message: &Value) -> Option<&str> {
     message["params"]["threadId"]
         .as_str()
         .or_else(|| message["params"]["thread"]["id"].as_str())
-}
-
-/// The startup attempt this caller claimed. Settling records the outcome and
-/// wakes waiters; a startup dropped before it settles is recorded as failed,
-/// so waiters are released instead of waiting for an attempt that never ends.
-struct StartAttempt {
-    attempt: u64,
-    settled: bool,
-}
-
-impl StartAttempt {
-    fn claim() -> Self {
-        Self {
-            attempt: SHARED_HOST.state.lock().attempt,
-            settled: false,
-        }
-    }
-
-    fn settle(&mut self, started: &Result<Arc<CodexHost>, String>) {
-        self.settled = true;
-
-        let mut shared = SHARED_HOST.state.lock();
-
-        shared.starting = false;
-
-        match started {
-            Ok(host) => shared.host = Arc::downgrade(host),
-            Err(error) => record_failure(&mut shared, self.attempt, error.clone()),
-        }
-
-        drop(shared);
-
-        SHARED_HOST.ready.notify_waiters();
-    }
-}
-
-impl Drop for StartAttempt {
-    fn drop(&mut self) {
-        if self.settled {
-            return;
-        }
-
-        let mut shared = SHARED_HOST.state.lock();
-
-        shared.starting = false;
-
-        record_failure(
-            &mut shared,
-            self.attempt,
-            "Codex app-server startup was cancelled".to_string(),
-        );
-
-        drop(shared);
-
-        SHARED_HOST.ready.notify_waiters();
-    }
-}
-
-fn record_failure(shared: &mut SharedHostState, attempt: u64, error: String) {
-    shared.failed_attempts.push_back((attempt, error));
-
-    while shared.failed_attempts.len() > 8 {
-        shared.failed_attempts.pop_front();
-    }
 }

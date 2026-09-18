@@ -26,9 +26,15 @@ pub(crate) const PROGRESS_METHOD: &str = "nmt/claudeProgress";
 /// rendering. Waiting is a runtime task; each read-and-parse pass is one
 /// blocking batch, so log I/O never occupies an I/O worker.
 pub(crate) struct ProgressMonitor {
-    sender: UnboundedSender<Option<(String, PathBuf)>>,
+    sender: UnboundedSender<Watch>,
     session_id: Option<String>,
     cwd: Option<String>,
+}
+
+/// What the monitor task should follow next.
+enum Watch {
+    Session { id: String, path: PathBuf },
+    Stop,
 }
 
 impl ProgressMonitor {
@@ -47,12 +53,12 @@ impl ProgressMonitor {
             loop {
                 tokio::select! {
                     next = receiver.recv() => match next {
-                        Some(Some(next)) => {
-                            target = Some(next);
+                        Some(Watch::Session { id, path }) => {
+                            target = Some((id, path));
                             reader = ProgressReader::default();
                             reported = None;
                         }
-                        Some(None) | None => break,
+                        Some(Watch::Stop) | None => break,
                     },
                     _ = refresh.tick() => {}
                 }
@@ -106,7 +112,10 @@ impl ProgressMonitor {
         }
 
         if let Some(path) = session_path(self.cwd.as_deref(), session_id) {
-            let _ = self.sender.send(Some((session_id.to_owned(), path)));
+            let _ = self.sender.send(Watch::Session {
+                id: session_id.to_owned(),
+                path,
+            });
 
             self.session_id = Some(session_id.to_owned());
         }
@@ -116,14 +125,14 @@ impl ProgressMonitor {
         let sender = self.sender.clone();
 
         move || {
-            let _ = sender.send(None);
+            let _ = sender.send(Watch::Stop);
         }
     }
 }
 
 impl Drop for ProgressMonitor {
     fn drop(&mut self) {
-        let _ = self.sender.send(None);
+        let _ = self.sender.send(Watch::Stop);
     }
 }
 

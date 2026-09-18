@@ -67,7 +67,7 @@ pub struct SessionWorker {
 
 #[cfg(test)]
 impl SessionWorker {
-    pub(crate) fn without_thread_for_test(messenger: MsgSender) -> Self {
+    pub(crate) fn detached_for_test(messenger: MsgSender) -> Self {
         Self {
             messenger,
             task: None,
@@ -77,9 +77,13 @@ impl SessionWorker {
 
 impl SessionWorker {
     pub async fn shutdown(mut self) {
-        let _ = self.messenger.send(Msg::Shutdown);
+        let task = self.task.take();
 
-        if let Some(task) = self.task.take()
+        // Dropping requests the shutdown; waiting for the task afterwards is
+        // what distinguishes this from an implicit drop.
+        drop(self);
+
+        if let Some(task) = task
             && let Err(error) = task.await
         {
             tracing::warn!(%error, "PTY task did not finish normally");
@@ -149,8 +153,10 @@ where
     let task = nmt_runtime::handle().spawn(async move {
         let finished = pipe.run_event_loop().await;
 
-        // Native console destruction can wait for the host and its descendants.
-        // Finite native teardown uses the blocking pool; I/O waits suspend.
+        // Dropping the PTY unregisters native wait callbacks, which waits for
+        // any callback still running, and sees a cancelled overlapped write
+        // through to completion; freeing the engine's scrollback is finite CPU
+        // work. Neither belongs on an I/O worker.
         if let Err(error) = nmt_runtime::handle()
             .spawn_blocking(move || drop(finished))
             .await
