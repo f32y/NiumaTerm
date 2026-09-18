@@ -36,7 +36,7 @@ use nmt_input::{
 };
 use nmt_platform::process::ProcessTree;
 use nmt_platform::{
-    EventedPty, PtyOptions, WinsizeBuilder, create_managed_pty_with_env, create_pty_with_env,
+    AsyncPty, PtyOptions, WinsizeBuilder, create_managed_pty_with_env, create_pty_with_env,
 };
 use parking_lot::Mutex;
 use tracing::error;
@@ -63,7 +63,7 @@ use crate::vt_modes::Mode;
 
 type SessionBuffer = Arc<FrameStore>;
 
-/// A host event surfaced from the PTY thread to the shell. The shell
+/// A host event surfaced from the PTY task to the shell. The shell
 /// drains these on its render tick via [`TerminalSession::poll_events`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HostEvent {
@@ -210,7 +210,7 @@ impl TerminalSession {
         Ok(session)
     }
 
-    pub fn from_pty<T: EventedPty + Send + 'static>(
+    pub fn from_pty<T: AsyncPty + Send + 'static>(
         pty: T,
         process_tree: Option<ProcessTree>,
         options: SessionOptions,

@@ -1,12 +1,14 @@
-use std::io::{BufReader, Cursor};
+use std::io::Cursor;
 use std::process::Command;
 use std::sync::Barrier;
 use std::sync::mpsc::{RecvTimeoutError, channel};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use futures::executor::block_on;
 use nmt_platform::process::hidden_command;
 use serde_json::{Value, json};
+use tokio::io::BufReader;
 
 use crate::subprocess::input::{InputClosed, InputQueue};
 use crate::subprocess::requests::DeadlineTimer;
@@ -55,7 +57,9 @@ fn malformed_output_reports_failure_before_eof_and_stops_delivery() {
     assert!(rx.try_recv().is_err());
     assert!(!process.has_stdin());
 
-    process.shutdown(Duration::from_secs(1), true).unwrap();
+    nmt_runtime::handle()
+        .block_on(process.shutdown(Duration::from_secs(1), true))
+        .unwrap();
 }
 
 fn script(windows: &str, unix: &str) -> Command {
@@ -124,7 +128,9 @@ fn long_stderr_lines_remain_complete_and_separate_from_protocol_output() {
         json!({"ready":true})
     );
 
-    process.shutdown(Duration::from_secs(5), false).unwrap();
+    nmt_runtime::handle()
+        .block_on(process.shutdown(Duration::from_secs(5), false))
+        .unwrap();
 }
 
 #[test]
@@ -169,11 +175,15 @@ fn stalled_input_accepts_a_message_burst_without_closing_the_process() {
 
     process.try_write_line(json!({"interrupt":true})).unwrap();
 
-    process.shutdown(Duration::from_millis(20), true).unwrap();
+    nmt_runtime::handle()
+        .block_on(process.shutdown(Duration::from_millis(20), true))
+        .unwrap();
 
     closed_rx.recv_timeout(Duration::from_secs(5)).unwrap();
 
-    process.shutdown(Duration::from_secs(1), false).unwrap();
+    nmt_runtime::handle()
+        .block_on(process.shutdown(Duration::from_secs(1), false))
+        .unwrap();
 }
 
 #[test]
@@ -200,7 +210,9 @@ fn shutdown_drains_accepted_messages_in_order() {
         process.try_write_line(json!({"index":index})).unwrap();
     }
 
-    process.shutdown(Duration::from_secs(5), false).unwrap();
+    nmt_runtime::handle()
+        .block_on(process.shutdown(Duration::from_secs(5), false))
+        .unwrap();
 
     for index in 0..20 {
         assert_eq!(
@@ -267,8 +279,8 @@ fn stdout_close_callback_follows_the_last_json_message() {
         .recv_timeout(Duration::from_secs(5))
         .expect("stdout close callback");
 
-    process
-        .shutdown(Duration::from_secs(1), false)
+    nmt_runtime::handle()
+        .block_on(process.shutdown(Duration::from_secs(1), false))
         .expect("exited process should be observable");
 }
 
@@ -284,7 +296,10 @@ fn large_history_reply_preserves_following_messages() {
     let mut reader = BufReader::new(Cursor::new(input));
     let mut messages = Vec::new();
 
-    read_messages(&mut reader, "Test", |message| messages.push(message)).unwrap();
+    block_on(read_messages(&mut reader, "Test", |message| {
+        messages.push(message)
+    }))
+    .unwrap();
 
     assert_eq!(messages.len(), 2);
     assert_eq!(messages[0]["result"]["history"].as_str().unwrap(), history);
@@ -296,7 +311,10 @@ fn startup_notices_bom_and_blank_lines_preserve_protocol_objects() {
     let mut reader = Cursor::new(b"\xef\xbb\xbfStarting agent\r\n[WARN] startup notice\n\n{\"ready\":true}\r\n  \n{\"done\":true}");
     let mut messages = Vec::new();
 
-    read_messages(&mut reader, "Test", |message| messages.push(message)).unwrap();
+    block_on(read_messages(&mut reader, "Test", |message| {
+        messages.push(message)
+    }))
+    .unwrap();
 
     assert_eq!(messages, [json!({"ready":true}), json!({"done":true})]);
 }
@@ -308,7 +326,10 @@ fn malformed_protocol_stops_before_later_messages_without_exposing_input() {
 
     let mut messages = Vec::new();
 
-    let error = read_messages(&mut reader, "Test", |message| messages.push(message)).unwrap_err();
+    let error = block_on(read_messages(&mut reader, "Test", |message| {
+        messages.push(message)
+    }))
+    .unwrap_err();
 
     assert_eq!(messages, [json!({"ready":true})]);
     assert!(error.contains("JSON is invalid"));
@@ -328,7 +349,7 @@ fn malformed_startup_json_invalid_utf8_and_non_objects_fail() {
         b"\"text\"\n",
         b"{}\nlate notice\n",
     ] {
-        assert!(read_messages(&mut Cursor::new(bytes), "Test", |_| {}).is_err());
+        assert!(block_on(read_messages(&mut Cursor::new(bytes), "Test", |_| {})).is_err());
     }
 }
 
@@ -342,9 +363,9 @@ fn long_startup_notices_preserve_the_first_protocol_message() {
 
     let mut messages = Vec::new();
 
-    read_messages(&mut Cursor::new(input), "Test", |message| {
+    block_on(read_messages(&mut Cursor::new(input), "Test", |message| {
         messages.push(message)
-    })
+    }))
     .unwrap();
 
     assert_eq!(messages, [json!({"ready":true})]);
@@ -356,7 +377,7 @@ fn large_input_and_queued_burst_preserve_order_while_a_write_is_active() {
 
     queue.submit(vec![json!("active")]).unwrap();
 
-    let writing = receiver.recv().unwrap();
+    let writing = block_on(receiver.recv()).unwrap();
 
     queue
         .submit(vec![json!("x".repeat(33 * 1024 * 1024))])
@@ -368,12 +389,15 @@ fn large_input_and_queued_burst_preserve_order_while_a_write_is_active() {
 
     assert_eq!(writing.messages, [json!("active")]);
     assert_eq!(
-        receiver.recv().unwrap().messages[0].as_str().unwrap().len(),
+        block_on(receiver.recv()).unwrap().messages[0]
+            .as_str()
+            .unwrap()
+            .len(),
         33 * 1024 * 1024
     );
 
     for index in 0..2048 {
-        assert_eq!(receiver.recv().unwrap().messages, [json!(index)]);
+        assert_eq!(block_on(receiver.recv()).unwrap().messages, [json!(index)]);
     }
 }
 
@@ -383,7 +407,7 @@ fn cancelled_payloads_are_removed_while_a_write_is_active() {
 
     queue.submit(vec![json!("active")]).unwrap();
 
-    let writing = receiver.recv().unwrap();
+    let writing = block_on(receiver.recv()).unwrap();
 
     for _ in 0..128 {
         let ticket = queue.submit_tracked(vec![json!("queued")]).unwrap();
@@ -428,8 +452,8 @@ fn sender_close_drains_accepted_input_then_wakes_the_receiver() {
 
     drop(queue);
 
-    assert_eq!(receiver.recv().unwrap().messages, [json!(1)]);
-    assert!(receiver.recv().is_err());
+    assert_eq!(block_on(receiver.recv()).unwrap().messages, [json!(1)]);
+    assert!(block_on(receiver.recv()).is_none());
 }
 
 #[test]
@@ -449,7 +473,7 @@ fn cancellation_wins_before_start_and_cannot_split_a_started_batch() {
         .submit_tracked(vec![json!("settings"), json!({"type":"user"})])
         .unwrap();
 
-    let writing = receiver.recv().unwrap();
+    let writing = block_on(receiver.recv()).unwrap();
 
     assert!(!ticket.cancel());
     assert_eq!(writing.messages.len(), 2);
@@ -463,7 +487,7 @@ fn submission_moves_strings_and_disconnect_cancels_pending_input() {
 
     queue.submit(vec![Value::String(payload)]).unwrap();
 
-    let input = receiver.recv().unwrap();
+    let input = block_on(receiver.recv()).unwrap();
 
     assert_eq!(input.messages[0].as_str().unwrap().as_ptr(), address);
 
@@ -483,8 +507,7 @@ fn idle_timer_rearms_for_earlier_work_and_stops_with_its_owner() {
 
     let timer = DeadlineTimer::new(move || {
         let _ = tx.send(());
-    })
-    .unwrap();
+    });
 
     assert_eq!(
         rx.recv_timeout(Duration::from_millis(20)),

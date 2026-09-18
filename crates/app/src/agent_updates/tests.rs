@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::time::Duration;
-use std::{env, process};
+use std::time::{Duration, Instant};
+use std::{env, process, thread};
 
 use app::agent_tab::{AgentKind, RecoveryIdentity, RecoveryReadiness, RecoverySnapshot};
 use chrono::Utc;
@@ -64,6 +64,10 @@ fn snapshot_reads_do_not_register_or_rediscover_profiles(cx: &mut TestAppContext
 
 #[gpui::test]
 fn provider_checks_and_updates_notify_registered_views(cx: &mut TestAppContext) {
+    // Provider checks complete on the shared runtime and wake the scheduler
+    // from its worker threads.
+    cx.executor().allow_parking();
+
     let cache = tempfile::tempdir().unwrap();
 
     let profile = AgentProfile {
@@ -98,7 +102,10 @@ fn provider_checks_and_updates_notify_registered_views(cx: &mut TestAppContext) 
 
     cx.update(|cx| manual_check_profiles(&[profile], cx));
 
-    cx.run_until_parked();
+    run_until(
+        || cx.run_until_parked(),
+        || first.borrow().contains(&UpdatePhase::Available),
+    );
 
     assert!(first.borrow().contains(&UpdatePhase::Available));
     assert_eq!(*first.borrow(), *second.borrow());
@@ -114,11 +121,30 @@ fn provider_checks_and_updates_notify_registered_views(cx: &mut TestAppContext) 
         request_update(key, window, cx);
     });
 
-    cx.run_until_parked();
+    run_until(
+        || cx.run_until_parked(),
+        || first.borrow().contains(&UpdatePhase::Updated),
+    );
 
     assert!(first.borrow().contains(&UpdatePhase::WaitingForIdle));
     assert!(first.borrow().contains(&UpdatePhase::Updated));
     assert_eq!(*first.borrow(), *second.borrow());
+}
+
+/// Provider work runs on the shared runtime, outside the test scheduler, so
+/// parking alone cannot observe its completion.
+fn run_until(mut run_until_parked: impl FnMut(), done: impl Fn() -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+
+    loop {
+        run_until_parked();
+
+        if done() || Instant::now() >= deadline {
+            return;
+        }
+
+        thread::sleep(Duration::from_millis(1));
+    }
 }
 
 fn snapshot(phase: UpdatePhase) -> InstallationSnapshot {
@@ -269,11 +295,15 @@ fn testing_mode_uses_only_fake_maintenance_and_a_process_local_cache() {
     let fake = FakeMaintenance::new(ProviderKind::Claude);
     let launcher = AgentCli::new("this-executable-must-never-run", []);
 
-    assert!(fake.probe(&launcher).unwrap().update_available());
+    let block_on = |future| nmt_runtime::handle().block_on(future);
 
-    fake.update(&launcher).unwrap();
+    assert!(block_on(fake.probe(&launcher)).unwrap().update_available());
 
-    assert!(!fake.probe(&launcher).unwrap().update_available());
+    nmt_runtime::handle()
+        .block_on(fake.update(&launcher))
+        .unwrap();
+
+    assert!(!block_on(fake.probe(&launcher)).unwrap().update_available());
 }
 
 #[test]

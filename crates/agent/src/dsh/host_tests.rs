@@ -16,7 +16,7 @@ fn a_starting_launch_does_not_block_another_launch() {
 
     assert!(Arc::ptr_eq(&slot, &host_slot(&launch)));
 
-    let starting = slot.lock();
+    let starting = slot.try_lock().unwrap();
     let (completed, received) = mpsc::channel();
 
     let worker = thread::spawn(move || {
@@ -25,7 +25,7 @@ fn a_starting_launch_does_not_block_another_launch() {
             ..LaunchConfig::default()
         };
 
-        let result = shared(&different_launch);
+        let result = nmt_runtime::handle().block_on(shared(&different_launch));
 
         completed
             .send(matches!(result, Err(HostError::NotInstalled(_))))

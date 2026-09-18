@@ -1,20 +1,28 @@
+use std::future::{Future, poll_fn};
+use std::io::{Read, Write};
+use std::pin::{Pin, pin};
 use std::sync::Arc;
-use std::sync::atomic::AtomicU32;
-use std::{io, sync, time};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use std::task::{Context, Poll as TaskPoll};
+use std::{io, mem, sync, time};
 
+use futures::executor::block_on;
+use futures::task::noop_waker_ref;
 use nmt_config::CursorShape;
 use nmt_config::colors::{Colors, NamedColor};
-use nmt_platform::{EventedPty, ProcessReadWrite, WinsizeBuilder};
+use nmt_platform::{AsyncPty, WinsizeBuilder, poll_nonblocking};
 use parking_lot::Mutex;
+use tokio::runtime::Builder;
+use tokio::sync::oneshot;
+use tokio::time::{sleep, timeout};
 
 use crate::event::{self, VoidListener};
 use crate::ghostty;
 use crate::render_buffer::{FrameStore, RenderBuffer};
 use crate::termio::powershell_compatibility::RESIZE_INPUT_DELAY;
 use crate::termio::{
-    Interest, Poll, PtyState, READ_BUFFER_SIZE, SNAPSHOT_MIN_INTERVAL, SYNC_OUTPUT_TIMEOUT,
-    SessionOptions, Termio, Token, Waker, mode, publish_render_buffer, scrollback_bytes,
-    start_session,
+    PtyState, READ_BUFFER_SIZE, SNAPSHOT_MIN_INTERVAL, SYNC_OUTPUT_TIMEOUT, SessionHandles,
+    SessionOptions, Termio, mode, publish_render_buffer, scrollback_bytes, start_session,
 };
 
 #[test]
@@ -190,12 +198,20 @@ struct FakeWriter {
     data: Vec<u8>,
     budget: Option<usize>,
     flush_pending: bool,
+    resize_pending: bool,
+    resize_completion: Option<oneshot::Receiver<()>>,
+    exited: bool,
+    write_zero: bool,
     operations: Vec<String>,
     observer: Option<sync::mpsc::Sender<Vec<u8>>>,
 }
 
 impl io::Write for FakeWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if self.write_zero {
+            return Ok(0);
+        }
+
         let buf = if let Some(budget) = &mut self.budget {
             if *budget == 0 {
                 return Err(io::ErrorKind::WouldBlock.into());
@@ -236,66 +252,337 @@ struct FakePty {
     writer: FakeWriter,
 }
 
-impl ProcessReadWrite for FakePty {
-    type Reader = FakeReader;
-
-    type Writer = FakeWriter;
-
-    fn reader(&mut self) -> &mut Self::Reader {
-        &mut self.reader
+impl AsyncPty for FakePty {
+    fn poll_read(&mut self, cx: &mut Context<'_>, buf: &mut [u8]) -> TaskPoll<io::Result<usize>> {
+        match self.reader.read(buf) {
+            Ok(0) => TaskPoll::Pending,
+            result => poll_nonblocking(cx, result),
+        }
     }
 
-    fn read_token(&self) -> Token {
-        Token(1)
+    fn poll_write(&mut self, cx: &mut Context<'_>, buf: &[u8]) -> TaskPoll<io::Result<usize>> {
+        poll_nonblocking(cx, self.writer.write(buf))
     }
 
-    fn writer(&mut self) -> &mut Self::Writer {
-        &mut self.writer
+    fn poll_flush(&mut self, cx: &mut Context<'_>) -> TaskPoll<io::Result<()>> {
+        poll_nonblocking(cx, self.writer.flush())
     }
 
-    fn write_token(&self) -> Token {
-        Token(2)
+    fn poll_exit(&mut self, _: &mut Context<'_>) -> TaskPoll<()> {
+        if mem::take(&mut self.writer.exited) {
+            TaskPoll::Ready(())
+        } else {
+            TaskPoll::Pending
+        }
     }
 
-    fn set_winsize(&mut self, size: WinsizeBuilder) -> io::Result<()> {
+    fn poll_resize(
+        &mut self,
+        cx: &mut Context<'_>,
+        size: WinsizeBuilder,
+    ) -> TaskPoll<io::Result<()>> {
+        if let Some(completion) = &mut self.writer.resize_completion {
+            if Pin::new(completion).poll(cx).is_pending() {
+                return TaskPoll::Pending;
+            }
+
+            self.writer.resize_completion = None;
+        }
+
+        if self.writer.resize_pending {
+            return TaskPoll::Pending;
+        }
+
         self.writer
             .operations
             .push(format!("resize:{}x{}", size.cols, size.rows));
 
-        Ok(())
-    }
-
-    fn register(
-        &mut self,
-        _: &Poll,
-        _: &mut dyn Iterator<Item = Token>,
-        _: Interest,
-        _: &sync::Arc<Waker>,
-    ) -> io::Result<()> {
-        Ok(())
-    }
-
-    fn reregister(&mut self, _: &Poll, _: Interest) -> io::Result<()> {
-        Ok(())
-    }
-
-    fn deregister(&mut self, _: &Poll) -> io::Result<()> {
-        Ok(())
-    }
-
-    fn drain_ready(&self) -> Vec<Token> {
-        vec![self.write_token()]
+        TaskPoll::Ready(Ok(()))
     }
 }
 
-impl EventedPty for FakePty {
-    fn child_event_token(&self) -> Token {
-        Token(3)
+#[test]
+fn empty_input_does_not_stall_following_writes() {
+    let mut machine = resized_pipe(b"");
+    let mut state = PtyState::default();
+    let mut cx = Context::from_waker(noop_waker_ref());
+
+    state.write_list.push_back(Vec::new().into());
+    state.write_list.push_back(b"after empty".to_vec().into());
+
+    machine.pty_write(&mut state, &mut cx).unwrap();
+
+    assert_eq!(machine.pty.writer.data, b"after empty");
+    assert!(!state.needs_write());
+
+    machine.pty.writer.write_zero = true;
+
+    state.write_list.push_back(b"stalled".to_vec().into());
+
+    assert_eq!(
+        machine.pty_write(&mut state, &mut cx).unwrap_err().kind(),
+        io::ErrorKind::WriteZero
+    );
+}
+
+#[test]
+fn pending_native_resize_keeps_output_live_and_preserves_input_order() {
+    let mut machine = resized_pipe(b"");
+    let mut state = PtyState::default();
+    let mut cx = Context::from_waker(noop_waker_ref());
+    let mut buf = vec![0; READ_BUFFER_SIZE];
+
+    machine.pty.writer.resize_pending = true;
+    machine.pty.reader.data = b"output during resize".to_vec();
+
+    machine
+        .channel()
+        .send(event::Msg::Resize(WinsizeBuilder {
+            cols: 60,
+            rows: 20,
+            width: 480,
+            height: 320,
+        }))
+        .unwrap();
+
+    machine
+        .channel()
+        .send(event::Msg::Input(b"later".to_vec().into()))
+        .unwrap();
+
+    assert!(matches!(
+        machine.poll_io(&mut state, &mut buf, &mut cx),
+        TaskPoll::Ready(Ok(true))
+    ));
+    assert!(
+        machine
+            .ghostty
+            .format_text(None, false, true)
+            .unwrap()
+            .contains("output during resize")
+    );
+    assert!(machine.pty.writer.operations.is_empty());
+
+    machine.pty.writer.resize_pending = false;
+
+    assert!(matches!(
+        machine.poll_io(&mut state, &mut buf, &mut cx),
+        TaskPoll::Ready(Ok(true))
+    ));
+    assert_eq!(
+        machine.pty.writer.operations,
+        ["resize:60x20", "input:later"]
+    );
+}
+
+#[test]
+fn child_exit_retains_output_beyond_one_parse_batch() {
+    let mut machine = resized_pipe(b"");
+    let mut data = vec![b' '; 3 * READ_BUFFER_SIZE];
+
+    data.extend_from_slice(b"\r\nfinal output");
+
+    let expected_len = data.len();
+    let observed = Arc::new(AtomicUsize::new(0));
+    let count = observed.clone();
+
+    machine.set_output_sink(move |bytes| {
+        count.fetch_add(bytes.len(), Ordering::Relaxed);
+    });
+
+    machine.pty.reader.data = data;
+    machine.pty.writer.exited = true;
+
+    let runtime = Builder::new_current_thread().enable_all().build().unwrap();
+
+    let (mut machine, _) = runtime.block_on(async {
+        timeout(time::Duration::from_secs(2), machine.run_event_loop())
+            .await
+            .unwrap()
+    });
+
+    assert_eq!(observed.load(Ordering::Relaxed), expected_len);
+    assert!(
+        machine
+            .ghostty
+            .format_text(None, false, true)
+            .unwrap()
+            .contains("final output")
+    );
+    assert!(!machine.snapshot_pending);
+}
+
+#[test]
+fn idle_async_loop_parks_until_a_command_arrives() {
+    let machine = resized_pipe(b"");
+    let sender = machine.channel();
+    let polls = Arc::new(AtomicUsize::new(0));
+    let counter = polls.clone();
+    let runtime = Builder::new_current_thread().enable_all().build().unwrap();
+
+    runtime.block_on(async {
+        let task = tokio::spawn(async move {
+            let mut future = pin!(machine.run_event_loop());
+
+            poll_fn(|cx| {
+                counter.fetch_add(1, Ordering::Relaxed);
+
+                future.as_mut().poll(cx)
+            })
+            .await
+        });
+
+        sleep(time::Duration::from_millis(20)).await;
+
+        let parked = polls.load(Ordering::Relaxed);
+
+        assert!(parked > 0);
+
+        sleep(time::Duration::from_millis(60)).await;
+
+        assert_eq!(
+            polls.load(Ordering::Relaxed),
+            parked,
+            "an idle PTY task woke itself"
+        );
+
+        sender
+            .send(event::Msg::Input(b"wake".to_vec().into()))
+            .unwrap();
+
+        sleep(time::Duration::from_millis(20)).await;
+
+        sender.send(event::Msg::Shutdown).unwrap();
+
+        let (machine, _) = timeout(time::Duration::from_secs(2), task)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(machine.pty.writer.data, b"wake");
+    });
+}
+
+#[test]
+fn many_sessions_make_progress_on_one_async_worker() {
+    let runtime = Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+
+    let (tx, rx) = sync::mpsc::channel();
+
+    let mut sessions = Vec::new();
+
+    for id in 0..12 {
+        let mut machine = resized_pipe(b"");
+
+        machine.pty.writer.observer = Some(tx.clone());
+
+        let sender = machine.channel();
+        let task = runtime.spawn(machine.run_event_loop());
+
+        sender.send(event::Msg::Input(vec![id].into())).unwrap();
+        sessions.push((sender, task));
     }
 
-    fn child_exited(&mut self) -> bool {
-        false
+    let mut received = Vec::new();
+
+    for _ in 0..sessions.len() {
+        received.extend(rx.recv_timeout(time::Duration::from_secs(2)).unwrap());
     }
+
+    received.sort_unstable();
+
+    assert_eq!(received, (0..12).collect::<Vec<u8>>());
+
+    runtime.block_on(async {
+        for (sender, task) in sessions {
+            sender.send(event::Msg::Shutdown).unwrap();
+
+            timeout(time::Duration::from_secs(2), task)
+                .await
+                .unwrap()
+                .unwrap();
+        }
+    });
+}
+
+#[test]
+fn delayed_resize_parks_then_rearms_the_input_deadline() {
+    let mut machine = resized_pipe(b"");
+
+    let sender = machine.channel();
+    let (written, received) = sync::mpsc::channel();
+    let (finish_resize, resized) = oneshot::channel();
+    let polls = Arc::new(AtomicUsize::new(0));
+    let counter = polls.clone();
+    let runtime = Builder::new_current_thread().enable_all().build().unwrap();
+
+    machine.pty.writer.observer = Some(written);
+    machine.pty.writer.resize_completion = Some(resized);
+
+    sender
+        .send(event::Msg::PowerShellCompatibility(true))
+        .unwrap();
+
+    sender
+        .send(event::Msg::Resize(WinsizeBuilder {
+            cols: 60,
+            rows: 20,
+            width: 480,
+            height: 320,
+        }))
+        .unwrap();
+
+    sender
+        .send(event::Msg::Input(b"after resize".to_vec().into()))
+        .unwrap();
+
+    runtime.block_on(async {
+        let task = tokio::spawn(async move {
+            let mut future = pin!(machine.run_event_loop());
+
+            poll_fn(|cx| {
+                counter.fetch_add(1, Ordering::Relaxed);
+
+                future.as_mut().poll(cx)
+            })
+            .await
+        });
+
+        sleep(time::Duration::from_millis(20)).await;
+
+        let parked = polls.load(Ordering::Relaxed);
+
+        sleep(RESIZE_INPUT_DELAY + time::Duration::from_millis(20)).await;
+
+        assert_eq!(
+            polls.load(Ordering::Relaxed),
+            parked,
+            "input timeout spun during native resize"
+        );
+        assert!(received.try_recv().is_err());
+
+        finish_resize.send(()).unwrap();
+
+        sleep(RESIZE_INPUT_DELAY + time::Duration::from_millis(20)).await;
+
+        assert_eq!(
+            received
+                .try_recv()
+                .expect("resize completion did not rearm input"),
+            b"after resize"
+        );
+
+        sender.send(event::Msg::Shutdown).unwrap();
+
+        timeout(time::Duration::from_secs(2), task)
+            .await
+            .unwrap()
+            .unwrap();
+    });
 }
 
 #[test]
@@ -327,28 +614,50 @@ fn queued_resize_cannot_overtake_partial_or_buffered_input() {
         .send(event::Msg::Input(b"Z".to_vec().into()))
         .unwrap();
 
-    assert!(machine.drain_recv_channel(&mut state));
+    assert!(
+        machine
+            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
+            .is_some()
+    );
     assert_eq!(machine.ghostty.cols(), 80);
 
-    machine.pty_write(&mut state).unwrap();
+    machine
+        .pty_write(&mut state, &mut Context::from_waker(noop_waker_ref()))
+        .unwrap();
 
-    assert!(machine.drain_recv_channel(&mut state));
+    assert!(
+        machine
+            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
+            .is_some()
+    );
     assert_eq!(machine.ghostty.cols(), 80);
     assert_eq!(machine.pty.writer.data, b"ab");
 
     machine.pty.writer.budget = None;
 
-    machine.pty_write(&mut state).unwrap();
+    machine
+        .pty_write(&mut state, &mut Context::from_waker(noop_waker_ref()))
+        .unwrap();
 
-    assert!(machine.drain_recv_channel(&mut state));
+    assert!(
+        machine
+            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
+            .is_some()
+    );
     assert_eq!(machine.ghostty.cols(), 80);
     assert_eq!(machine.pty.writer.data, b"abc");
 
     machine.pty.writer.flush_pending = false;
 
-    assert!(machine.drain_recv_channel(&mut state));
+    assert!(
+        machine
+            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
+            .is_some()
+    );
 
-    machine.pty_write(&mut state).unwrap();
+    machine
+        .pty_write(&mut state, &mut Context::from_waker(noop_waker_ref()))
+        .unwrap();
 
     assert_eq!(
         machine.pty.writer.operations,
@@ -393,13 +702,25 @@ fn queued_resizes_coalesce_only_until_the_next_input() {
         .send(event::Msg::Input(b"B".to_vec().into()))
         .unwrap();
 
-    assert!(machine.drain_recv_channel(&mut state));
+    assert!(
+        machine
+            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
+            .is_some()
+    );
 
-    machine.pty_write(&mut state).unwrap();
+    machine
+        .pty_write(&mut state, &mut Context::from_waker(noop_waker_ref()))
+        .unwrap();
 
-    assert!(machine.drain_recv_channel(&mut state));
+    assert!(
+        machine
+            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
+            .is_some()
+    );
 
-    machine.pty_write(&mut state).unwrap();
+    machine
+        .pty_write(&mut state, &mut Context::from_waker(noop_waker_ref()))
+        .unwrap();
 
     assert_eq!(
         machine.pty.writer.operations,
@@ -409,8 +730,6 @@ fn queued_resizes_coalesce_only_until_the_next_input() {
 
 #[test]
 fn input_released_after_resize_wakes_an_otherwise_idle_loop() {
-    use std::thread;
-
     let mut machine = resized_pipe(b"");
 
     let (written, received) = sync::mpsc::channel();
@@ -436,17 +755,14 @@ fn input_released_after_resize_wakes_an_otherwise_idle_loop() {
         .send(event::Msg::Input(b"B".to_vec().into()))
         .unwrap();
 
-    let worker = thread::Builder::new()
-        .stack_size(4 * 1024 * 1024)
-        .spawn(move || machine.run_event_loop())
-        .unwrap();
+    let worker = nmt_runtime::handle().spawn(machine.run_event_loop());
 
     let first = received.recv_timeout(time::Duration::from_secs(2));
     let second = received.recv_timeout(time::Duration::from_secs(2));
 
     sender.send(event::Msg::Shutdown).unwrap();
 
-    worker.join().unwrap();
+    nmt_runtime::handle().block_on(worker).unwrap();
 
     assert_eq!(first.unwrap(), b"A");
     assert_eq!(
@@ -477,22 +793,36 @@ fn pending_resize_allows_cursor_replies_and_immediate_shutdown() {
         .send(event::Msg::Input(b"later".to_vec().into()))
         .unwrap();
 
-    assert!(machine.drain_recv_channel(&mut state));
+    assert!(
+        machine
+            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
+            .is_some()
+    );
 
     machine.pty.reader.data.extend_from_slice(b"\x1b[6n");
 
     machine
-        .pty_read(&mut state, &mut [0; READ_BUFFER_SIZE])
+        .pty_read(
+            &mut state,
+            &mut [0; READ_BUFFER_SIZE],
+            &mut Context::from_waker(noop_waker_ref()),
+        )
         .unwrap();
 
-    machine.pty_write(&mut state).unwrap();
+    machine
+        .pty_write(&mut state, &mut Context::from_waker(noop_waker_ref()))
+        .unwrap();
 
     assert_eq!(machine.pty.writer.data, b"\x1b[4;5R");
     assert_eq!(machine.ghostty.cols(), 80);
 
     sender.send(event::Msg::Shutdown).unwrap();
 
-    assert!(!machine.drain_recv_channel(&mut state));
+    assert!(
+        !machine
+            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
+            .is_some()
+    );
     assert_eq!(machine.ghostty.cols(), 80);
     assert_eq!(machine.pty.writer.data, b"\x1b[4;5R");
 }
@@ -534,17 +864,27 @@ fn powershell_pause_keeps_replies_live_and_disabling_releases_ordered_input() {
         .send(event::Msg::Input(b"B".to_vec().into()))
         .unwrap();
 
-    assert!(machine.drain_recv_channel(&mut state));
+    assert!(
+        machine
+            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
+            .is_some()
+    );
     assert!(!state.needs_write());
     assert_eq!(machine.ghostty.cols(), 60);
 
     machine.pty.reader.data.extend_from_slice(b"\x1b[6n");
 
     machine
-        .pty_read(&mut state, &mut [0; READ_BUFFER_SIZE])
+        .pty_read(
+            &mut state,
+            &mut [0; READ_BUFFER_SIZE],
+            &mut Context::from_waker(noop_waker_ref()),
+        )
         .unwrap();
 
-    machine.pty_write(&mut state).unwrap();
+    machine
+        .pty_write(&mut state, &mut Context::from_waker(noop_waker_ref()))
+        .unwrap();
 
     assert_eq!(machine.pty.writer.data, b"\x1b[4;5R");
 
@@ -552,14 +892,26 @@ fn powershell_pause_keeps_replies_live_and_disabling_releases_ordered_input() {
         .send(event::Msg::PowerShellCompatibility(false))
         .unwrap();
 
-    assert!(machine.drain_recv_channel(&mut state));
+    assert!(
+        machine
+            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
+            .is_some()
+    );
 
-    machine.pty_write(&mut state).unwrap();
+    machine
+        .pty_write(&mut state, &mut Context::from_waker(noop_waker_ref()))
+        .unwrap();
 
     assert_eq!(machine.ghostty.cols(), 60);
-    assert!(machine.drain_recv_channel(&mut state));
+    assert!(
+        machine
+            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
+            .is_some()
+    );
 
-    machine.pty_write(&mut state).unwrap();
+    machine
+        .pty_write(&mut state, &mut Context::from_waker(noop_waker_ref()))
+        .unwrap();
 
     assert_eq!(machine.ghostty.cols(), 100);
     assert_eq!(machine.pty.writer.data, b"\x1b[4;5RAB");
@@ -581,18 +933,24 @@ fn powershell_pause_keeps_replies_live_and_disabling_releases_ordered_input() {
         .send(event::Msg::Input(b"discard-on-close".to_vec().into()))
         .unwrap();
 
-    assert!(machine.drain_recv_channel(&mut state));
+    assert!(
+        machine
+            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
+            .is_some()
+    );
 
     sender.send(event::Msg::Shutdown).unwrap();
 
-    assert!(!machine.drain_recv_channel(&mut state));
+    assert!(
+        !machine
+            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
+            .is_some()
+    );
     assert_eq!(machine.pty.writer.data, b"\x1b[4;5RAB");
 }
 
 #[test]
 fn powershell_input_deadline_wakes_a_quiet_event_loop() {
-    use std::thread;
-
     let mut machine = resized_pipe(b"");
 
     let (written, received) = sync::mpsc::channel();
@@ -620,17 +978,14 @@ fn powershell_input_deadline_wakes_a_quiet_event_loop() {
 
     let started = time::Instant::now();
 
-    let worker = thread::Builder::new()
-        .stack_size(4 * 1024 * 1024)
-        .spawn(move || machine.run_event_loop())
-        .unwrap();
+    let worker = nmt_runtime::handle().spawn(machine.run_event_loop());
 
     let bytes = received.recv_timeout(time::Duration::from_secs(2));
     let elapsed = started.elapsed();
 
     sender.send(event::Msg::Shutdown).unwrap();
 
-    worker.join().unwrap();
+    nmt_runtime::handle().block_on(worker).unwrap();
 
     assert_eq!(bytes.expect("input deadline did not wake poll"), b"later");
     assert!(elapsed >= RESIZE_INPUT_DELAY);
@@ -647,29 +1002,55 @@ fn powershell_pause_skips_alternate_screen_and_unchanged_grid_sizes() {
         .send(event::Msg::PowerShellCompatibility(true))
         .unwrap();
 
-    assert!(machine.drain_recv_channel(&mut state));
+    assert!(
+        machine
+            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
+            .is_some()
+    );
 
-    machine.on_resize(WinsizeBuilder {
-        cols: 80,
-        rows: 25,
-        width: 640,
-        height: 400,
-    });
+    sender
+        .send(event::Msg::Resize(WinsizeBuilder {
+            cols: 80,
+            rows: 25,
+            width: 640,
+            height: 400,
+        }))
+        .unwrap();
+
+    assert!(
+        machine
+            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
+            .is_some()
+    );
 
     sender
         .send(event::Msg::Input(b"same-size".to_vec().into()))
         .unwrap();
 
-    assert!(machine.drain_recv_channel(&mut state));
+    assert!(
+        machine
+            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
+            .is_some()
+    );
 
-    machine.pty_write(&mut state).unwrap();
+    machine
+        .pty_write(&mut state, &mut Context::from_waker(noop_waker_ref()))
+        .unwrap();
 
-    machine.on_resize(WinsizeBuilder {
-        cols: 60,
-        rows: 20,
-        width: 480,
-        height: 360,
-    });
+    sender
+        .send(event::Msg::Resize(WinsizeBuilder {
+            cols: 60,
+            rows: 20,
+            width: 480,
+            height: 360,
+        }))
+        .unwrap();
+
+    assert!(
+        machine
+            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
+            .is_some()
+    );
 
     machine.on_pty_chunk(b"\x1b[?1049h");
 
@@ -677,16 +1058,30 @@ fn powershell_pause_skips_alternate_screen_and_unchanged_grid_sizes() {
         .send(event::Msg::Input(b"alternate".to_vec().into()))
         .unwrap();
 
-    assert!(machine.drain_recv_channel(&mut state));
+    assert!(
+        machine
+            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
+            .is_some()
+    );
 
-    machine.pty_write(&mut state).unwrap();
+    machine
+        .pty_write(&mut state, &mut Context::from_waker(noop_waker_ref()))
+        .unwrap();
 
-    machine.on_resize(WinsizeBuilder {
-        cols: 80,
-        rows: 25,
-        width: 640,
-        height: 400,
-    });
+    sender
+        .send(event::Msg::Resize(WinsizeBuilder {
+            cols: 80,
+            rows: 25,
+            width: 640,
+            height: 400,
+        }))
+        .unwrap();
+
+    assert!(
+        machine
+            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
+            .is_some()
+    );
 
     machine.on_pty_chunk(b"\x1b[?1049l");
 
@@ -694,9 +1089,15 @@ fn powershell_pause_skips_alternate_screen_and_unchanged_grid_sizes() {
         .send(event::Msg::Input(b"returned".to_vec().into()))
         .unwrap();
 
-    assert!(machine.drain_recv_channel(&mut state));
+    assert!(
+        machine
+            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
+            .is_some()
+    );
 
-    machine.pty_write(&mut state).unwrap();
+    machine
+        .pty_write(&mut state, &mut Context::from_waker(noop_waker_ref()))
+        .unwrap();
 
     assert_eq!(machine.pty.writer.data, b"same-sizealternatereturned");
 }
@@ -737,33 +1138,71 @@ fn terminal_replies_resume_after_partial_writes_in_input_order() {
     state.write_list.push_back(b"in".to_vec().into());
 
     machine
-        .pty_read(&mut state, &mut [0; READ_BUFFER_SIZE])
+        .pty_read(
+            &mut state,
+            &mut [0; READ_BUFFER_SIZE],
+            &mut Context::from_waker(noop_waker_ref()),
+        )
         .unwrap();
 
     assert!(machine.pty.writer.data.is_empty());
 
-    machine.pty_write(&mut state).unwrap();
+    machine
+        .pty_write(&mut state, &mut Context::from_waker(noop_waker_ref()))
+        .unwrap();
 
     assert_eq!(machine.pty.writer.data, b"in");
     assert!(state.needs_write());
 
     machine.pty.writer.budget = Some(3);
 
-    machine.pty_write(&mut state).unwrap();
+    machine
+        .pty_write(&mut state, &mut Context::from_waker(noop_waker_ref()))
+        .unwrap();
 
     assert_eq!(machine.pty.writer.data, b"in\x1b[1");
     assert!(state.needs_write());
 
     machine.pty.writer.budget = None;
 
-    machine.pty_write(&mut state).unwrap();
+    machine
+        .pty_write(&mut state, &mut Context::from_waker(noop_waker_ref()))
+        .unwrap();
 
     assert_eq!(machine.pty.writer.data, b"in\x1b[1;1R");
     assert!(!state.needs_write());
 }
 
 #[test]
-fn dropping_session_handles_releases_worker_resources_before_returning() {
+fn explicit_session_shutdown_releases_worker_resources_before_returning() {
+    assert_session_cleanup(|handles| block_on(handles.shutdown()));
+}
+
+#[test]
+fn shared_session_shutdown_waits_for_cleanup_from_a_tokio_task() {
+    assert_session_cleanup(|handles| {
+        let runtime = nmt_runtime::handle();
+        let handles = Arc::new(handles);
+
+        runtime
+            .block_on(runtime.spawn(async move {
+                Arc::into_inner(handles)
+                    .expect("sole session owner")
+                    .shutdown()
+                    .await
+            }))
+            .unwrap();
+    });
+}
+
+#[test]
+fn session_shutdown_waits_for_cleanup_from_a_futures_executor() {
+    assert_session_cleanup(|handles| {
+        block_on(handles.shutdown());
+    });
+}
+
+fn assert_session_cleanup(close: impl FnOnce(SessionHandles)) {
     let lifetime = Arc::new(());
     let released = Arc::downgrade(&lifetime);
 
@@ -789,7 +1228,7 @@ fn dropping_session_handles_releases_worker_resources_before_returning() {
     )
     .unwrap();
 
-    drop(handles);
+    close(handles);
 
     assert!(
         released.upgrade().is_none(),
@@ -835,7 +1274,11 @@ fn disabled_terminal_responses_are_forwarded_without_replying() {
     machine.set_terminal_responses_enabled(false);
 
     machine
-        .pty_read(&mut PtyState::default(), &mut [0; READ_BUFFER_SIZE])
+        .pty_read(
+            &mut PtyState::default(),
+            &mut [0; READ_BUFFER_SIZE],
+            &mut Context::from_waker(noop_waker_ref()),
+        )
         .unwrap();
 
     assert_eq!(&*forwarded.lock(), queries);
@@ -889,7 +1332,11 @@ fn resize_message_publishes_snapshot_to_render_buffer() {
 
     let mut state = PtyState::default();
 
-    assert!(machine.drain_recv_channel(&mut state));
+    assert!(
+        machine
+            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
+            .is_some()
+    );
 
     let buffer = render_buffer.load();
 
@@ -935,7 +1382,13 @@ fn theme_refresh_preserves_synchronized_output_until_commit() {
     let mut state = PtyState::default();
     let mut buf = [0u8; READ_BUFFER_SIZE];
 
-    machine.pty_read(&mut state, &mut buf).unwrap();
+    machine
+        .pty_read(
+            &mut state,
+            &mut buf,
+            &mut Context::from_waker(noop_waker_ref()),
+        )
+        .unwrap();
 
     assert_eq!(render_buffer.load().cursor().row.0, 2);
 
@@ -945,14 +1398,24 @@ fn theme_refresh_preserves_synchronized_output_until_commit() {
         .data
         .extend_from_slice(b"\x1b[?2026h\x1b[1;1HWorking");
 
-    machine.pty_read(&mut state, &mut buf).unwrap();
+    machine
+        .pty_read(
+            &mut state,
+            &mut buf,
+            &mut Context::from_waker(noop_waker_ref()),
+        )
+        .unwrap();
 
     machine
         .sender
         .send(event::Msg::Theme(Box::new(colors)))
         .unwrap();
 
-    assert!(machine.drain_recv_channel(&mut state));
+    assert!(
+        machine
+            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
+            .is_some()
+    );
 
     {
         let buffer = render_buffer.load();
@@ -974,7 +1437,13 @@ fn theme_refresh_preserves_synchronized_output_until_commit() {
         .data
         .extend_from_slice(b"\x1b[3;3H\x1b[?2026l");
 
-    machine.pty_read(&mut state, &mut buf).unwrap();
+    machine
+        .pty_read(
+            &mut state,
+            &mut buf,
+            &mut Context::from_waker(noop_waker_ref()),
+        )
+        .unwrap();
 
     {
         let buffer = render_buffer.load();
@@ -993,11 +1462,23 @@ fn theme_refresh_preserves_synchronized_output_until_commit() {
         .data
         .extend_from_slice(b"\x1b[?2026h\x1b[2;1HStuck");
 
-    machine.pty_read(&mut state, &mut buf).unwrap();
+    machine
+        .pty_read(
+            &mut state,
+            &mut buf,
+            &mut Context::from_waker(noop_waker_ref()),
+        )
+        .unwrap();
 
     machine.sync_output_started_at = Some(time::Instant::now() - SYNC_OUTPUT_TIMEOUT);
 
-    machine.pty_read(&mut state, &mut buf).unwrap();
+    machine
+        .pty_read(
+            &mut state,
+            &mut buf,
+            &mut Context::from_waker(noop_waker_ref()),
+        )
+        .unwrap();
 
     {
         let buffer = render_buffer.load();
@@ -1088,7 +1569,13 @@ fn theme_refresh_preserves_progress_cursor_suppression() {
     let mut state = PtyState::default();
     let mut buf = [0u8; READ_BUFFER_SIZE];
 
-    machine.pty_read(&mut state, &mut buf).unwrap();
+    machine
+        .pty_read(
+            &mut state,
+            &mut buf,
+            &mut Context::from_waker(noop_waker_ref()),
+        )
+        .unwrap();
 
     machine
         .pty
@@ -1098,14 +1585,24 @@ fn theme_refresh_preserves_progress_cursor_suppression() {
 
     machine.last_snapshot_at = Some(time::Instant::now() - SNAPSHOT_MIN_INTERVAL);
 
-    machine.pty_read(&mut state, &mut buf).unwrap();
+    machine
+        .pty_read(
+            &mut state,
+            &mut buf,
+            &mut Context::from_waker(noop_waker_ref()),
+        )
+        .unwrap();
 
     machine
         .sender
         .send(event::Msg::Theme(Box::new(colors)))
         .unwrap();
 
-    assert!(machine.drain_recv_channel(&mut state));
+    assert!(
+        machine
+            .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
+            .is_some()
+    );
 
     {
         let buffer = render_buffer.load();
@@ -1127,7 +1624,13 @@ fn theme_refresh_preserves_progress_cursor_suppression() {
 
     machine.last_snapshot_at = Some(time::Instant::now() - SNAPSHOT_MIN_INTERVAL);
 
-    machine.pty_read(&mut state, &mut buf).unwrap();
+    machine
+        .pty_read(
+            &mut state,
+            &mut buf,
+            &mut Context::from_waker(noop_waker_ref()),
+        )
+        .unwrap();
 
     assert!(
         render_buffer.load().cursor_visible(),
@@ -1182,7 +1685,13 @@ fn conpty_echo_after_resize_preserves_addressed_row() {
     let mut state = PtyState::default();
     let mut read_buf = [0u8; READ_BUFFER_SIZE];
 
-    machine.pty_read(&mut state, &mut read_buf).unwrap();
+    machine
+        .pty_read(
+            &mut state,
+            &mut read_buf,
+            &mut Context::from_waker(noop_waker_ref()),
+        )
+        .unwrap();
 
     let snapshot = machine.ghostty.snapshot().unwrap();
 
@@ -1257,7 +1766,13 @@ fn conpty_repaint_after_resize_uses_active_screen_when_scrolled() {
     let mut state = PtyState::default();
     let mut read_buf = [0u8; READ_BUFFER_SIZE];
 
-    machine.pty_read(&mut state, &mut read_buf).unwrap();
+    machine
+        .pty_read(
+            &mut state,
+            &mut read_buf,
+            &mut Context::from_waker(noop_waker_ref()),
+        )
+        .unwrap();
 
     // CUP addresses the active screen even while the viewport shows history.
     let (active_row, snapshot) = {
@@ -1329,7 +1844,13 @@ fn pty_read_events(
     let mut state = PtyState::default();
     let mut buf = [0u8; READ_BUFFER_SIZE];
 
-    machine.pty_read(&mut state, &mut buf).unwrap();
+    machine
+        .pty_read(
+            &mut state,
+            &mut buf,
+            &mut Context::from_waker(noop_waker_ref()),
+        )
+        .unwrap();
 
     let collected = events.lock().clone();
 
@@ -1695,7 +2216,11 @@ fn idle_theme_requests_publish_colors_without_replacing_retained_frames() {
             .send(event::Msg::Theme(Box::new(colors)))
             .unwrap();
 
-        assert!(machine.drain_recv_channel(&mut state));
+        assert!(
+            machine
+                .drain_recv_channel(&mut state, &mut Context::from_waker(noop_waker_ref()))
+                .is_some()
+        );
 
         let frame = machine.render_buffer.load();
 

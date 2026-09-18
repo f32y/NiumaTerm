@@ -24,6 +24,7 @@ libghostty-vt-sys.workspace = true
 nmt_config.workspace = true
 nmt_input.workspace = true
 nmt_platform = { workspace = true, features = ["clipboard"] }
+nmt_runtime.workspace = true
 
 base64.workspace = true
 bitflags.workspace = true
@@ -45,6 +46,7 @@ tracing.workspace = true
 unicode-width.workspace = true
 url.workspace = true
 futures.workspace = true
+tokio.workspace = true
 
 [target.'cfg(enable_profiling)'.dependencies]
 nmt_profiling.workspace = true

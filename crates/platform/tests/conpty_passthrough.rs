@@ -8,13 +8,12 @@
 
 #![cfg(windows)]
 
-use std::io::Read;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::future::poll_fn;
+use std::time::Duration;
 
-use nmt_platform::{
-    Events, Interest, Poll, ProcessReadWrite, PtyOptions, Token, Waker, create_pty_with_env,
-};
+use nmt_platform::{AsyncPty, PtyOptions, create_pty_with_env};
+use tokio::runtime::Builder;
+use tokio::time::timeout;
 
 /// Minimal base64 (standard alphabet, padded) so the test needs no crates.
 fn b64(input: &[u8]) -> String {
@@ -69,9 +68,9 @@ fn drive_conpty_with_title(script: &str, title: Option<&str>) -> Vec<u8> {
     let encoded = b64(&utf16le(script));
     let cmdline = format!("powershell -NoProfile -NonInteractive -EncodedCommand {encoded}");
 
-    let mut poll = Poll::new().expect("failed to create PTY poller");
-
-    let waker = Arc::new(Waker::new(poll.registry(), Token(0)).unwrap());
+    // Declared before the PTY so the PTY's IOCP registration is released
+    // while its runtime is still alive.
+    let runtime = Builder::new_current_thread().enable_all().build().unwrap();
 
     let mut pty = create_pty_with_env(PtyOptions {
         shell: &cmdline,
@@ -85,44 +84,37 @@ fn drive_conpty_with_title(script: &str, title: Option<&str>) -> Vec<u8> {
     })
     .expect("failed to create ConPTY");
 
-    pty.register(&poll, &mut (1..).map(Token), Interest::READABLE, &waker)
-        .expect("failed to register ConPTY");
+    runtime.block_on(async {
+        pty.start_async().expect("failed to register ConPTY");
 
-    let mut events = Events::with_capacity(8);
-    let mut collected: Vec<u8> = Vec::new();
-    let mut buf = [0u8; 4096];
+        let mut collected: Vec<u8> = Vec::new();
+        let mut buf = [0u8; 4096];
 
-    let deadline = Instant::now() + Duration::from_secs(8);
-    let marker = b"MARKER_DONE";
+        let marker = b"MARKER_DONE";
 
-    loop {
-        if Instant::now() > deadline {
-            break;
-        }
-
-        match pty.reader().read(&mut buf) {
-            Ok(0) => poll
-                .poll(&mut events, Some(Duration::from_millis(20)))
-                .unwrap(),
-            Ok(n) => {
+        let _ = timeout(Duration::from_secs(8), async {
+            while let Ok(n) = poll_fn(|cx| pty.poll_read(cx, &mut buf)).await {
                 collected.extend_from_slice(&buf[..n]);
 
                 if find_subslice(&collected, marker).is_some() {
-                    poll.poll(&mut events, Some(Duration::from_millis(50)))
-                        .unwrap();
-
-                    if let Ok(n2) = pty.reader().read(&mut buf) {
-                        collected.extend_from_slice(&buf[..n2]);
+                    // Keep output that trails the marker in a nearby completion.
+                    if let Ok(Ok(n)) = timeout(
+                        Duration::from_millis(50),
+                        poll_fn(|cx| pty.poll_read(cx, &mut buf)),
+                    )
+                    .await
+                    {
+                        collected.extend_from_slice(&buf[..n]);
                     }
 
                     break;
                 }
             }
-            Err(_) => break,
-        }
-    }
+        })
+        .await;
 
-    collected
+        collected
+    })
 }
 
 #[test]

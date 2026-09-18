@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use nmt_config::update::UpdateChannel;
 use nmt_version::Version;
-use reqwest::blocking::Client;
+use reqwest::Client;
 use serde::Deserialize;
 
 use crate::windows::Status;
@@ -110,9 +110,9 @@ pub struct Check {
 }
 
 impl Check {
-    /// Fetch and compare the published release on a worker thread.
-    pub fn run(self) -> CheckedRelease {
-        let found = latest(self.channel, self.version);
+    /// Fetch and compare the published release.
+    pub async fn run(self) -> CheckedRelease {
+        let found = latest(self.channel, self.version).await;
 
         CheckedRelease {
             channel: self.channel,
@@ -128,19 +128,19 @@ pub struct CheckedRelease {
     pub(super) status: Status,
 }
 
-fn latest(channel: UpdateChannel, version: &str) -> Result<Option<Release>, CheckError> {
+async fn latest(channel: UpdateChannel, version: &str) -> Result<Option<Release>, CheckError> {
     let client = Client::builder()
         .timeout(REQUEST_TIMEOUT)
         .build()
         .map_err(|_| CheckError::Unreachable)?;
 
     match channel {
-        UpdateChannel::Stable => select_latest(&get(&client, LATEST_RELEASE_URL, version)?),
-        UpdateChannel::Nightly => select(&get(&client, RELEASES_URL, version)?, channel),
+        UpdateChannel::Stable => select_latest(&get(&client, LATEST_RELEASE_URL, version).await?),
+        UpdateChannel::Nightly => select(&get(&client, RELEASES_URL, version).await?, channel),
     }
 }
 
-fn get(client: &Client, url: &str, version: &str) -> Result<String, CheckError> {
+async fn get(client: &Client, url: &str, version: &str) -> Result<String, CheckError> {
     // The agent string names the build doing the asking, which is what makes
     // the serving edge's log useful when a release turns out to be unreadable
     // for one version and fine for the rest.
@@ -148,6 +148,7 @@ fn get(client: &Client, url: &str, version: &str) -> Result<String, CheckError> 
         .get(url)
         .header("User-Agent", user_agent(version))
         .send()
+        .await
         .map_err(|_| CheckError::Unreachable)?;
 
     if !response.status().is_success() {
@@ -158,7 +159,7 @@ fn get(client: &Client, url: &str, version: &str) -> Result<String, CheckError> 
         return Err(CheckError::Unreadable);
     }
 
-    response.text().map_err(|_| CheckError::Unreadable)
+    response.text().await.map_err(|_| CheckError::Unreadable)
 }
 
 /// Split from the request so the selection can be exercised against a recorded

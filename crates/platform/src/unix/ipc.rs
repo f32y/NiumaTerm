@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use std::{env, mem, thread};
 
+use tokio::net::UnixListener as AsyncUnixListener;
 use tracing::warn;
 
 use crate::ipc_message::read_message;
@@ -117,7 +118,8 @@ pub fn send(message: &str, timeout: Duration, testing: bool) -> io::Result<()> {
 }
 
 /// Run the primary process socket server. Returning `false` from the callback
-/// stops the server thread.
+/// stops the server. The callback runs on the shared runtime and must return
+/// promptly.
 pub fn spawn_server(
     testing: bool,
     on_message: impl FnMut(Vec<u8>) -> bool + Send + 'static,
@@ -137,17 +139,26 @@ pub fn spawn_server(
 
     fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
 
-    thread::Builder::new()
-        .name("nmt-ipc".into())
-        .spawn(move || serve_socket(listener, on_message))
-        .map(|_| ())
+    listener.set_nonblocking(true)?;
+
+    let listener = {
+        let _runtime = nmt_runtime::handle().enter();
+
+        AsyncUnixListener::from_std(listener)?
+    };
+
+    nmt_runtime::handle().spawn(serve_socket(listener, on_message));
+
+    Ok(())
 }
 
-fn serve_socket(listener: UnixListener, mut on_message: impl FnMut(Vec<u8>) -> bool) {
-    for stream in listener.incoming() {
-        let Ok(stream) = stream else { continue };
+async fn serve_socket(listener: AsyncUnixListener, mut on_message: impl FnMut(Vec<u8>) -> bool) {
+    loop {
+        let Ok((stream, _)) = listener.accept().await else {
+            continue;
+        };
 
-        let Some(bytes) = read_message(stream) else {
+        let Some(bytes) = read_message(stream).await else {
             continue;
         };
 

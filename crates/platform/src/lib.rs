@@ -1,5 +1,4 @@
-pub use mio::{Events, Interest, Poll, Token, Waker};
-
+pub use crate::async_pty::{AsyncPty, poll_nonblocking};
 #[cfg(not(windows))]
 pub use crate::unix::*;
 #[cfg(windows)]
@@ -13,20 +12,17 @@ pub mod macos_notifications;
 #[cfg(windows)]
 pub mod windows;
 
+mod async_pty;
+mod child_output;
 mod environment_override;
 mod ipc_message;
 mod process_lifetime;
 #[cfg(not(windows))]
 mod unix;
 
-use std::{io, sync};
+use std::io;
 
-/// The `mio` types this crate's `ProcessReadWrite`/`EventedPty` surface is built
-/// on, re-exported so consumers drive the PTY event loop through
-/// `nmt_platform::{Poll, ...}` without taking their own (possibly mismatched)
-/// `mio` dependency.
 use libc::c_ushort;
-use mio::event::Event;
 
 #[cfg(not(windows))]
 use crate::unix as platform;
@@ -57,75 +53,6 @@ pub struct Winsize {
     ws_col: c_ushort,
     ws_xpixel: c_ushort,
     ws_ypixel: c_ushort,
-}
-
-pub trait ProcessReadWrite {
-    type Reader: io::Read;
-
-    /// Nonblocking input writer. `flush` reports `WouldBlock` while accepted
-    /// bytes are still waiting for native writes, and completion must wake the
-    /// registered poller. Successful flush does not mean the child consumed
-    /// the input; it permits a subsequent resize to be submitted in order.
-    type Writer: io::Write;
-
-    fn reader(&mut self) -> &mut Self::Reader;
-
-    fn read_token(&self) -> Token;
-
-    fn writer(&mut self) -> &mut Self::Writer;
-
-    fn write_token(&self) -> Token;
-
-    fn set_winsize(&mut self, _: WinsizeBuilder) -> Result<(), io::Error>;
-
-    /// Register the PTY's sources with the event loop's `Poll`, pulling tokens from
-    /// the iterator. Windows output reads use IOCP directly; input completion
-    /// and child exit signal this `waker`. The Unix path registers fds and
-    /// ignores the waker. Read callers must drive the registered poller.
-    fn register(
-        &mut self,
-        _: &Poll,
-        _: &mut dyn Iterator<Item = Token>,
-        _: Interest,
-        _: &sync::Arc<Waker>,
-    ) -> io::Result<()>;
-
-    fn reregister(&mut self, _: &Poll, _: Interest) -> io::Result<()>;
-
-    fn deregister(&mut self, _: &Poll) -> io::Result<()>;
-
-    /// Tokens with locally retained readiness (Windows buffered output, input
-    /// completion, and child exit). The Unix path returns an empty iterator.
-    /// The event loop feeds these through the same `match token` arms it uses for
-    /// real `Poll` events.
-    fn drain_ready(&self) -> Vec<Token>;
-
-    /// Whether any source has locally retained work (Windows ConPTY readiness),
-    /// without allocating or clearing it. The event loop checks this before blocking
-    /// in `poll()`: a `pty_read` capped by `MAX_LOCKED_READ` can return with data still
-    /// buffered, and mio only reports the initial read completion, so
-    /// a blocking `poll(None)` would sleep forever on already-signalled data. The Unix
-    /// path has real OS readiness (re-armed by `EPOLL_CTL_MOD`) and returns `false`.
-    fn has_ready(&self) -> bool {
-        false
-    }
-
-    /// Whether readiness reports that the native PTY read side has closed.
-    fn read_closed(&self, _event: &Event) -> bool {
-        false
-    }
-
-    /// Whether a read error represents native PTY hangup.
-    fn is_hangup_error(&self, _error: &io::Error) -> bool {
-        false
-    }
-}
-
-pub trait EventedPty: ProcessReadWrite {
-    fn child_event_token(&self) -> Token;
-
-    /// Reports whether a child exit has been observed without waiting.
-    fn child_exited(&mut self) -> bool;
 }
 
 #[derive(Debug, Clone)]

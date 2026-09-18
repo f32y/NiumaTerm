@@ -1,7 +1,7 @@
 #[cfg(windows)]
-use std::sync::atomic::{AtomicBool, Ordering};
-#[cfg(windows)]
 use std::sync::{Arc, mpsc};
+#[cfg(windows)]
+use std::time::Instant;
 #[cfg(windows)]
 use std::{fs, thread};
 
@@ -138,7 +138,9 @@ if ($initialized.method -ne 'initialized' -or $request.method -ne 'account/rateL
 "#,
     );
 
-    let usage = fetch(&launcher, &AtomicBool::new(false)).unwrap();
+    let usage = nmt_runtime::handle()
+        .block_on(fetch(&launcher, &FetchCancellation::default()))
+        .unwrap();
 
     assert_eq!(usage.five_hour.unwrap().remaining_percentage, 73);
     assert!(usage.updated_at.is_some());
@@ -154,13 +156,16 @@ Start-Sleep -Seconds 30
 "#,
     );
 
-    let cancelled = Arc::new(AtomicBool::new(false));
+    let cancellation = Arc::new(FetchCancellation::default());
     let (tx, rx) = mpsc::channel();
 
     let worker = thread::spawn({
-        let cancelled = cancelled.clone();
+        let cancellation = cancellation.clone();
 
-        move || tx.send(fetch(&launcher, &cancelled)).unwrap()
+        move || {
+            tx.send(nmt_runtime::handle().block_on(fetch(&launcher, &cancellation)))
+                .unwrap()
+        }
     });
 
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -171,7 +176,7 @@ Start-Sleep -Seconds 30
         thread::sleep(Duration::from_millis(20));
     }
 
-    cancelled.store(true, Ordering::Relaxed);
+    cancellation.cancel();
 
     let error = rx
         .recv_timeout(Duration::from_secs(1))

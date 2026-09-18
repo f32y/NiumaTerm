@@ -36,11 +36,11 @@ enum VersionSupport {
 
 /// Ask the installed harness what it is.
 fn describe_version(cli: &AgentCli) -> VersionSupport {
-    let run = match run_bounded(
+    let run = match nmt_runtime::handle().block_on(run_bounded(
         cli,
         ["--version"],
         ProcessLimits::new(VERSION_TIMEOUT, VERSION_OUTPUT_LIMIT),
-    ) {
+    )) {
         Ok(run) => run,
         Err(error) => return VersionSupport::Unknown(error.to_string()),
     };

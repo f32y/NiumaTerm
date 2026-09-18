@@ -5,7 +5,6 @@ mod progress_tests;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::thread;
 
 use serde_json::{Value, json};
 
@@ -65,9 +64,9 @@ pub(super) fn read_plan(path: &Path) -> Option<Value> {
     plan
 }
 
-/// Read the plan recorded in the thread log at `path` off the caller's thread
-/// and deliver it as a `PLAN_RESTORED` notification. The log can be large,
-/// and `thread_id` with `revision` let the receiver drop a plan that a newer
+/// Read the plan recorded in the thread log at `path` on the blocking pool and
+/// deliver it as a `PLAN_RESTORED` notification. The log can be large, and
+/// `thread_id` with `revision` let the receiver drop a plan that a newer
 /// thread switch or checklist update has already superseded.
 pub(super) fn spawn_plan_restore(
     path: PathBuf,
@@ -75,13 +74,11 @@ pub(super) fn spawn_plan_restore(
     revision: u64,
     deliver: SessionDelivery,
 ) {
-    let _ = thread::Builder::new()
-        .name("codex-plan-restore".into())
-        .spawn(move || {
-            deliver(json!({"method": PLAN_RESTORED, "params": {
-                "threadId": thread_id, "revision": revision, "value": read_plan(&path)
-            }}));
-        });
+    nmt_runtime::handle().spawn_blocking(move || {
+        deliver(json!({"method": PLAN_RESTORED, "params": {
+            "threadId": thread_id, "revision": revision, "value": read_plan(&path)
+        }}));
+    });
 }
 
 pub(super) fn goal_request(id: u64, thread_id: &str, arguments: &str) -> Value {

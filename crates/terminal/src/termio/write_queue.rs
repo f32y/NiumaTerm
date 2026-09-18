@@ -1,6 +1,13 @@
 use std::borrow::Cow;
 use std::collections::VecDeque;
-use std::io::{self, ErrorKind, Write};
+use std::io::{self, ErrorKind};
+use std::task::{Context, Poll};
+
+use nmt_platform::AsyncPty;
+
+/// Bound one write pass so a writer that keeps accepting cannot monopolize
+/// the owner task ahead of output reads and queued commands.
+const MAX_WRITE_BATCH: usize = 64 * 1024;
 
 #[derive(Default)]
 pub struct PtyState {
@@ -13,19 +20,53 @@ impl PtyState {
     /// block. A partially written chunk stays current, so the next writable
     /// event resumes it where this one stopped.
     #[inline]
-    pub(super) fn write_to(&mut self, writer: &mut impl Write) -> io::Result<()> {
+    pub(super) fn write_to(
+        &mut self,
+        writer: &mut impl AsyncPty,
+        cx: &mut Context<'_>,
+    ) -> io::Result<usize> {
+        let mut written = 0;
+
         self.ensure_next();
 
         'write_many: while let Some(mut current) = self.take_current() {
             'write_one: loop {
-                match writer.write(current.remaining_bytes()) {
-                    Ok(0) => {
+                if current.finished() {
+                    self.goto_next();
+
+                    break 'write_one;
+                }
+
+                if written >= MAX_WRITE_BATCH {
+                    self.set_current(Some(current));
+
+                    break 'write_many;
+                }
+
+                let remaining = current.remaining_bytes();
+
+                let result = match writer.poll_write(
+                    cx,
+                    &remaining[..remaining.len().min(MAX_WRITE_BATCH - written)],
+                ) {
+                    Poll::Ready(result) => result,
+                    Poll::Pending => {
                         self.set_current(Some(current));
 
                         break 'write_many;
                     }
+                };
+
+                match result {
+                    Ok(0) => {
+                        self.set_current(Some(current));
+
+                        return Err(ErrorKind::WriteZero.into());
+                    }
                     Ok(n) => {
                         current.advance(n);
+
+                        written += n;
 
                         if current.finished() {
                             self.goto_next();
@@ -45,7 +86,7 @@ impl PtyState {
             }
         }
 
-        Ok(())
+        Ok(written)
     }
 
     #[inline]

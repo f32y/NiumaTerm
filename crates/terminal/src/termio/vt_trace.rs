@@ -7,10 +7,12 @@
 //! dump is O(scrollback) and must never run in production). Override the output dir
 //! with `NMT_VT_TRACE_DIR`.
 
+use std::fs::{self, OpenOptions};
 use std::io::Write as _;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::{env, fmt, fs, sync, time};
+use std::sync::mpsc::{self, Receiver, SyncSender};
+use std::{env, fmt, sync, thread, time};
 
 use crate::ghostty::GhosttyTerminal;
 use crate::grid::Style;
@@ -150,11 +152,56 @@ fn trailing_pad_report(s: &RenderBuffer) -> String {
     out
 }
 
-fn append_master(dir: &Path, line: &str) {
-    let path = dir.join("nmt-vt-trace.log");
+struct TraceRecord {
+    line: String,
+    dump: Option<(String, String)>,
+}
 
-    if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(path) {
-        let _ = f.write_all(line.as_bytes());
+fn submit(line: String, dump: Option<(String, String)>) {
+    static WRITER: sync::OnceLock<Option<SyncSender<TraceRecord>>> = sync::OnceLock::new();
+
+    // Disk writes are blocking work. One dedicated thread keeps the log open
+    // and serializes records, instead of hopping to a blocking pool per call.
+    let writer = WRITER.get_or_init(|| {
+        let (sender, receiver) = mpsc::sync_channel(64);
+
+        thread::Builder::new()
+            .name("vt-trace".into())
+            .spawn(move || write_records(receiver))
+            .ok()
+            .map(|_| sender)
+    });
+
+    let Some(writer) = writer else {
+        return;
+    };
+
+    // Diagnostics must not stall terminal I/O or grow without bound when
+    // storage is slow. The queue preserves submission order across writes.
+    if writer.try_send(TraceRecord { line, dump }).is_err() {
+        tracing::warn!("VT trace queue is full; dropping a diagnostic record");
+    }
+}
+
+fn write_records(receiver: Receiver<TraceRecord>) {
+    let dir = log_dir();
+
+    let _ = fs::create_dir_all(&dir);
+
+    let mut log = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("nmt-vt-trace.log"))
+        .ok();
+
+    for record in receiver {
+        if let Some(log) = &mut log {
+            let _ = log.write_all(record.line.as_bytes());
+        }
+
+        if let Some((name, body)) = record.dump {
+            let _ = fs::write(dir.join(name), body);
+        }
     }
 }
 
@@ -189,10 +236,7 @@ pub(crate) fn trace_read(route: usize, engine: &GhosttyTerminal, bytes: &[u8]) {
 
     line.push('\n');
 
-    let dir = log_dir();
-    let _ = fs::create_dir_all(&dir);
-
-    append_master(&dir, &line);
+    submit(line, None);
 }
 
 /// Emit a trace point: one summary line to the master log + a full content dump to
@@ -206,8 +250,6 @@ pub fn trace(label: &str, engine: &mut GhosttyTerminal, detail: &str) {
 
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
     let ts = now_ms();
-    let dir = log_dir();
-    let _ = fs::create_dir_all(&dir);
 
     let snapshot = engine.snapshot();
 
@@ -237,14 +279,12 @@ pub fn trace(label: &str, engine: &mut GhosttyTerminal, detail: &str) {
         Err(e) => format!("[vt-trace] #{seq:06} ts={ts} {label} | {detail} | snapshot_err={e:?}\n"),
     };
 
-    append_master(&dir, &summary);
-
     let safe_label: String = label
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
         .collect();
 
-    let path = dir.join(format!("{seq:06}-{safe_label}.txt"));
+    let name = format!("{seq:06}-{safe_label}.txt");
 
     let mut body = String::new();
 
@@ -276,5 +316,5 @@ pub fn trace(label: &str, engine: &mut GhosttyTerminal, detail: &str) {
         body.push('\n');
     }
 
-    let _ = fs::write(&path, body);
+    submit(summary, Some((name, body)));
 }

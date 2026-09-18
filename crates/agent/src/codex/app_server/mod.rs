@@ -43,6 +43,7 @@ use std::time::Duration;
 #[cfg(test)]
 use std::time::UNIX_EPOCH;
 
+use futures::future::{BoxFuture, FutureExt as _, ready};
 use serde_json::{Value, json};
 
 use crate::LaunchConfig;
@@ -222,8 +223,8 @@ impl Session {
     /// Attach a conversation to the shared app-server, starting and
     /// initializing the host only when no compatible generation is live.
     /// Messages for this conversation are handed to `deliver` from the host's
-    /// reader thread, so callers hop threads before invoking [`Session::process`].
-    pub fn spawn(
+    /// reader task, so callers hop threads before invoking [`Session::process`].
+    pub async fn spawn(
         launch: &LaunchConfig,
         host_catalog: &[LaunchConfig],
         workspace: &AgentWorkspace,
@@ -238,12 +239,13 @@ impl Session {
             deliver,
             on_stderr,
         )
+        .await
     }
 
     /// Attach directly to an existing thread without creating a disposable
     /// empty thread first. Replay can be suppressed when the caller already
     /// retains the visible transcript in place.
-    pub fn spawn_resuming(
+    pub async fn spawn_resuming(
         launch: &LaunchConfig,
         host_catalog: &[LaunchConfig],
         workspace: &AgentWorkspace,
@@ -264,9 +266,10 @@ impl Session {
             deliver,
             on_stderr,
         )
+        .await
     }
 
-    fn spawn_inner(
+    async fn spawn_inner(
         launch: &LaunchConfig,
         host_catalog: &[LaunchConfig],
         workspace: &AgentWorkspace,
@@ -275,7 +278,7 @@ impl Session {
         on_stderr: impl Fn(String) + Send + 'static,
     ) -> Result<Self, String> {
         let thread_profile: ThreadProfile = launch.into();
-        let host = CodexHost::acquire(launch, host_catalog, on_stderr)?;
+        let host = CodexHost::acquire(launch, host_catalog, on_stderr).await?;
         let deliver: SessionDelivery = Arc::new(deliver);
         let root_delivery = Arc::clone(&deliver);
         let registration_id = host.register(move |message| root_delivery(message));
@@ -319,9 +322,15 @@ impl Session {
             || self.conversation.compaction.active.is_some()
     }
 
-    pub fn shutdown(&mut self, timeout: Duration, force: bool) -> Result<(), String> {
+    /// Detach from the shared host now; the returned future waits for the
+    /// host process only when this session was its last owner.
+    pub fn shutdown(
+        &mut self,
+        timeout: Duration,
+        force: bool,
+    ) -> BoxFuture<'static, Result<(), String>> {
         if self.detached {
-            return Ok(());
+            return ready(Ok(())).boxed();
         }
 
         self.cancel_title_generation();
@@ -346,21 +355,18 @@ impl Session {
             }));
         }
 
-        let result = if let Some(host) = self.host.take() {
-            if host.detach(self.registration_id) {
-                host.shutdown(timeout, force)
-            } else {
-                Ok(())
+        let stopping = match self.host.take() {
+            Some(host) if host.detach(self.registration_id) => {
+                host.shutdown(timeout, force).boxed()
             }
-        } else {
-            Ok(())
+            _ => ready(Ok(())).boxed(),
         };
 
         self.control.close();
 
         self.detached = true;
 
-        result
+        stopping
     }
 
     fn sync_descendant_owners(&self) {
@@ -1289,7 +1295,7 @@ impl Session {
 
 impl Drop for Session {
     fn drop(&mut self) {
-        let _ = self.shutdown(Duration::from_millis(250), true);
+        nmt_runtime::handle().spawn(self.shutdown(Duration::from_millis(250), true));
     }
 }
 

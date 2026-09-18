@@ -1,17 +1,17 @@
 use std::error;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
-use std::thread::{Builder, JoinHandle};
 
 use nmt_config::CursorShape;
 use nmt_config::colors::Colors;
-use nmt_platform::EventedPty;
+use nmt_platform::AsyncPty;
+use tokio::task::JoinHandle;
 
 use crate::event::{EventListener, Msg, MsgSender};
 use crate::render_buffer::{FrameStore, RenderBuffer};
 use crate::termio::Termio;
 
-/// Observes the exact VT bytes accepted by the engine, on the owner thread.
+/// Observes the exact VT bytes accepted by the engine, in the owner task.
 /// Returning before the next command preserves checkpoint and output ordering;
 /// observers must not wait for work submitted to this same event loop.
 pub type OutputSink = Arc<dyn Fn(Arc<[u8]>) + Send + Sync>;
@@ -54,15 +54,15 @@ pub struct SessionHandles {
     /// VT modes published by the pipe; the input path reads them lock-free.
     pub vt_modes: Arc<AtomicU32>,
 
-    /// Sender for input, resize, and shutdown messages to the PTY thread.
+    /// Sender for input, resize, and shutdown messages to the PTY task.
     pub messenger: MsgSender,
 }
 
-/// Keeps the PTY worker alive until its owner closes the session, then waits
-/// for final frame publication and PTY cleanup before releasing shared state.
+/// Owns the async PTY task. Dropping requests shutdown; explicit shutdown
+/// awaits final publication and native cleanup without blocking a runtime worker.
 pub struct SessionWorker {
     messenger: MsgSender,
-    thread: Option<JoinHandle<()>>,
+    task: Option<JoinHandle<()>>,
 }
 
 #[cfg(test)]
@@ -70,25 +70,39 @@ impl SessionWorker {
     pub(crate) fn without_thread_for_test(messenger: MsgSender) -> Self {
         Self {
             messenger,
-            thread: None,
+            task: None,
+        }
+    }
+}
+
+impl SessionWorker {
+    pub async fn shutdown(mut self) {
+        let _ = self.messenger.send(Msg::Shutdown);
+
+        if let Some(task) = self.task.take()
+            && let Err(error) = task.await
+        {
+            tracing::warn!(%error, "PTY task did not finish normally");
         }
     }
 }
 
 impl Drop for SessionWorker {
     fn drop(&mut self) {
+        // The task owns native resources until cleanup finishes. Awaiting it
+        // here could deadlock the runtime that must process this shutdown.
         let _ = self.messenger.send(Msg::Shutdown);
+    }
+}
 
-        if let Some(thread) = self.thread.take()
-            && thread.join().is_err()
-        {
-            tracing::warn!("PTY worker panicked");
-        }
+impl SessionHandles {
+    pub async fn shutdown(self) {
+        self.worker.shutdown().await;
     }
 }
 
 /// Build the engine and render buffer, configure the pipe, and start the PTY
-/// event-loop thread. The single construction entry point: callers receive
+/// async task. The single construction entry point: callers receive
 /// every shared handle from one call instead of assembling buffers up front
 /// and extracting handles from a half-built pipe in the right order.
 pub fn start_session<T, U>(
@@ -97,7 +111,7 @@ pub fn start_session<T, U>(
     options: SessionOptions,
 ) -> Result<SessionHandles, Box<dyn error::Error>>
 where
-    T: EventedPty + Send + 'static,
+    T: AsyncPty + Send + 'static,
     U: EventListener + Send + 'static,
 {
     let render_buffer = Arc::new(FrameStore::new(RenderBuffer::new(
@@ -116,7 +130,7 @@ where
     )?;
 
     // Configure the engine before transferring exclusive ownership to the
-    // event-loop thread, so the first publication uses the requested cursor.
+    // event-loop task, so the first publication uses the requested cursor.
     pipe.ghostty
         .set_default_cursor_shape(options.cursor_shape)
         .map_err(|error| Box::new(error) as Box<dyn error::Error>)?;
@@ -132,14 +146,23 @@ where
 
     let messenger = pipe.channel();
 
-    let thread = Builder::new().name("PTY reader".into()).spawn(move || {
-        pipe.run_event_loop();
-    })?;
+    let task = nmt_runtime::handle().spawn(async move {
+        let finished = pipe.run_event_loop().await;
+
+        // Native console destruction can wait for the host and its descendants.
+        // Finite native teardown uses the blocking pool; I/O waits suspend.
+        if let Err(error) = nmt_runtime::handle()
+            .spawn_blocking(move || drop(finished))
+            .await
+        {
+            tracing::warn!(%error, "PTY cleanup did not finish normally");
+        }
+    });
 
     Ok(SessionHandles {
         worker: SessionWorker {
             messenger: messenger.clone(),
-            thread: Some(thread),
+            task: Some(task),
         },
         render_buffer,
         vt_modes,

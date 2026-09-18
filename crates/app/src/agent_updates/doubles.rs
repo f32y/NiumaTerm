@@ -1,5 +1,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use futures::FutureExt as _;
+use futures::future::{BoxFuture, ready};
 use nmt_agent::launcher::AgentCli;
 use nmt_agent::update::{
     DiscoverySupport, ProviderKind, ProviderMaintenance, UpdateError, UpdateErrorKind,
@@ -17,12 +19,20 @@ impl ProviderMaintenance for UnavailableMaintenance {
         self.provider
     }
 
-    fn probe(&self, _: &AgentCli) -> Result<VersionStatus, UpdateError> {
-        Err(UpdateError::new(UpdateErrorKind::Unsupported, &self.reason))
+    fn probe<'a>(&'a self, _: &'a AgentCli) -> BoxFuture<'a, Result<VersionStatus, UpdateError>> {
+        ready(Err(UpdateError::new(
+            UpdateErrorKind::Unsupported,
+            &self.reason,
+        )))
+        .boxed()
     }
 
-    fn update(&self, _: &AgentCli) -> Result<String, UpdateError> {
-        Err(UpdateError::new(UpdateErrorKind::Unsupported, &self.reason))
+    fn update<'a>(&'a self, _: &'a AgentCli) -> BoxFuture<'a, Result<String, UpdateError>> {
+        ready(Err(UpdateError::new(
+            UpdateErrorKind::Unsupported,
+            &self.reason,
+        )))
+        .boxed()
     }
 }
 
@@ -47,14 +57,14 @@ impl ProviderMaintenance for FakeMaintenance {
         self.provider
     }
 
-    fn probe(&self, _: &AgentCli) -> Result<VersionStatus, UpdateError> {
+    fn probe<'a>(&'a self, _: &'a AgentCli) -> BoxFuture<'a, Result<VersionStatus, UpdateError>> {
         let current = if self.updated.load(Ordering::SeqCst) {
             Version::new(1, 1, 0)
         } else {
             Version::new(1, 0, 0)
         };
 
-        Ok(VersionStatus {
+        ready(Ok(VersionStatus {
             provider: self.provider,
             current: Some(current),
             available: Some(Version::new(1, 1, 0)),
@@ -63,12 +73,13 @@ impl ProviderMaintenance for FakeMaintenance {
             can_update: true,
             support: DiscoverySupport::Supported,
             remediation: None,
-        })
+        }))
+        .boxed()
     }
 
-    fn update(&self, _: &AgentCli) -> Result<String, UpdateError> {
+    fn update<'a>(&'a self, _: &'a AgentCli) -> BoxFuture<'a, Result<String, UpdateError>> {
         self.updated.store(true, Ordering::SeqCst);
 
-        Ok("testing provider updated".to_string())
+        ready(Ok("testing provider updated".to_string())).boxed()
     }
 }

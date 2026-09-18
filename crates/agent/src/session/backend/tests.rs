@@ -148,16 +148,17 @@ mod team {
             restore_transcript: false,
         };
 
-        let mut backend = Backend::spawn_team(
-            AgentKind::Claude,
-            &launch,
-            &[],
-            &AgentWorkspace::default(),
-            None,
-            policy,
-            |_| {},
-        )
-        .unwrap_or_else(|error| panic!("Claude Team startup failed: {error}"));
+        let mut backend = nmt_runtime::handle()
+            .block_on(Backend::spawn_team(
+                AgentKind::Claude,
+                &launch,
+                &[],
+                &AgentWorkspace::default(),
+                None,
+                policy,
+                |_| {},
+            ))
+            .unwrap_or_else(|error| panic!("Claude Team startup failed: {error}"));
 
         let Backend::Claude(session) = &mut backend else {
             panic!("Claude Team did not start the ordinary backend");
@@ -179,6 +180,8 @@ mod team {
                 .any(|event| matches!(event, Event::ApprovalRequested { .. }))
         );
 
-        backend.shutdown(Duration::from_secs(2), true).unwrap();
+        nmt_runtime::handle()
+            .block_on(backend.shutdown(Duration::from_secs(2), true))
+            .unwrap();
     }
 }

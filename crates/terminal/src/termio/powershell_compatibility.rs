@@ -35,14 +35,12 @@ impl PowerShellCompatibility {
         self.enabled.then_some(now + MAX_QUEUED_INPUT_DELAY)
     }
 
-    pub(super) fn timeout(&self, input_limit: Option<Instant>, now: Instant) -> Option<Duration> {
+    /// An expired deadline is still reported until the queued input executes;
+    /// returning None there could park a quiet session indefinitely.
+    pub(super) fn deadline(&self, input_limit: Option<Instant>) -> Option<Instant> {
         // Interleaved input/resize bursts retain submission order. An old input
         // must eventually bypass later resize pauses instead of accumulating
         // another 80 ms for every size change ahead of it.
-        let deadline = self.resize_deadline?.min(input_limit?);
-
-        // An expired deadline still wakes poll until the queued input executes;
-        // returning None here could park a quiet session indefinitely.
-        Some(deadline.saturating_duration_since(now))
+        Some(self.resize_deadline?.min(input_limit?))
     }
 }

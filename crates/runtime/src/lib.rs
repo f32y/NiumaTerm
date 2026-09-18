@@ -15,7 +15,7 @@ use std::sync::OnceLock;
 use tokio::runtime::{Builder, Handle, Runtime};
 
 /// The work is dominated by waiting on sockets, so a small pool suffices.
-const WORKER_THREADS: usize = 4;
+const WORKER_THREADS: usize = 8;
 
 static RUNTIME: OnceLock<Runtime> = OnceLock::new();
 

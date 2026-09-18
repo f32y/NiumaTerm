@@ -5,10 +5,11 @@
 mod events_tests;
 
 use std::collections::HashMap;
-use std::sync::{Arc, Weak, mpsc};
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use futures::{SinkExt as _, StreamExt as _};
+use parking_lot::Mutex;
 use serde_json::{Value, json};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
@@ -25,18 +26,32 @@ use crate::dsh::host::Host;
 const RECONNECT_DELAY: Duration = Duration::from_millis(500);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// How long closing waits for the cancelled reader to let go of the delivery
-/// callback. Cancellation lands at the reader's next suspension point, and it
-/// never blocks between two of them, so this only bounds a stalled runtime.
-const CLOSE_TIMEOUT: Duration = Duration::from_secs(1);
-
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
+
+type Delivery = Arc<dyn Fn(Value) + Send + Sync>;
 
 pub(crate) struct Downlinks {
     reader: AbortHandle,
+    gate: DeliveryGate,
+}
 
-    /// Disconnects once the reader has released everything it held.
-    exited: mpsc::Receiver<()>,
+/// The reader's only path to the tab. A delivery runs under the gate's lock,
+/// and closing takes the callback out under that lock, so once closing returns
+/// no frame can reach the tab and the callback has been released. Closing
+/// waits only for a delivery already under way, never for the reader task.
+#[derive(Clone)]
+struct DeliveryGate(Arc<Mutex<Option<Delivery>>>);
+
+impl DeliveryGate {
+    fn deliver(&self, frame: Value) {
+        if let Some(deliver) = self.0.lock().as_ref() {
+            deliver(frame);
+        }
+    }
+
+    fn close(&self) -> Option<Delivery> {
+        self.0.lock().take()
+    }
 }
 
 impl Downlinks {
@@ -69,20 +84,26 @@ impl Downlinks {
         deliver: Arc<dyn Fn(Value) + Send + Sync>,
     ) -> (Self, oneshot::Receiver<Result<Value, String>>) {
         let (connected_tx, connected) = oneshot::channel();
-        let (exited_tx, exited) = mpsc::channel();
+        let gate = DeliveryGate(Arc::new(Mutex::new(Some(deliver))));
 
-        let reader = nmt_runtime::handle().spawn(async move {
-            // Declared ahead of the reader so it is released after it: by the
-            // time the owner sees the disconnect, the callback is gone too.
-            let _exited = exited_tx;
+        let gated: Delivery = {
+            let gate = gate.clone();
 
-            run_downlink(client, host, session_id, deliver, connected_tx).await;
-        });
+            Arc::new(move |frame| gate.deliver(frame))
+        };
+
+        let reader = nmt_runtime::handle().spawn(run_downlink(
+            client,
+            host,
+            session_id,
+            gated,
+            connected_tx,
+        ));
 
         (
             Self {
                 reader: reader.abort_handle(),
-                exited,
+                gate,
             },
             connected,
         )
@@ -142,10 +163,8 @@ impl Drop for Downlinks {
         self.reader.abort();
 
         // A frame delivered after this returns would reach a tab that has
-        // already moved to another conversation, so the reader is waited out.
-        if self.exited.recv_timeout(CLOSE_TIMEOUT) == Err(mpsc::RecvTimeoutError::Timeout) {
-            warn!("deepseek downlink reader did not stop in time");
-        }
+        // already moved to another conversation, so delivery closes here.
+        drop(self.gate.close());
     }
 }
 

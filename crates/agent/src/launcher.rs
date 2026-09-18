@@ -8,19 +8,21 @@ use std::cmp::Reverse;
 use std::collections::VecDeque;
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitStatus, Stdio};
-use std::time::{Duration, Instant};
-use std::{env, fmt, io, thread};
+use std::process::{Command, ExitStatus};
+use std::time::Duration;
+use std::{env, fmt, io};
 
 use nmt_platform::environment::override_value;
 use nmt_platform::process::{
-    KillOnCloseJob, decode_child_output, hidden_cmd_command, launch_env_var,
+    KillOnCloseJob, PipedChild, decode_child_output, hidden_cmd_command, launch_env_var,
+    spawn_piped,
 };
 use thiserror::Error;
+use tokio::io::{AsyncRead, AsyncReadExt};
+use tokio::task::JoinHandle;
+use tokio::time::timeout;
 
 use crate::LaunchConfig;
-
-const POLL_INTERVAL: Duration = Duration::from_millis(20);
 
 /// A configured executable plus its effective environment. All logical CLI
 /// arguments remain separate even though `cmd.exe` is used for Windows
@@ -263,11 +265,11 @@ fn diagnostic_suffix(diagnostic: &str) -> String {
     }
 }
 
-/// Run a configured launcher with bounded time and output. Reader threads keep
+/// Run a configured launcher with bounded time and output. Reader tasks keep
 /// draining after their retained suffix is full so a verbose child cannot
 /// deadlock on a pipe; the Job Object kills the complete owned process tree on
 /// timeout or early error.
-pub(crate) fn run_bounded<I, S>(
+pub(crate) async fn run_bounded<I, S>(
     launcher: &AgentCli,
     arguments: I,
     limits: ProcessLimits,
@@ -276,27 +278,23 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let started = Instant::now();
-
-    let mut command = launcher.command(arguments);
-
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    let mut child = command.spawn().map_err(|error| {
+    let PipedChild {
+        mut child,
+        stdin,
+        stdout,
+        stderr,
+    } = spawn_piped(launcher.command(arguments)).map_err(|error| {
         ProcessError::Failed(format!(
             "could not run configured launcher `{}`: {error}",
             launcher.executable()
         ))
     })?;
 
-    let job = KillOnCloseJob::attach_or_kill(&mut child)
-        .map_err(|error| ProcessError::Failed(error.to_string()))?;
+    // Maintenance commands take no input; closing it lets a prompt fail fast.
+    drop(stdin);
 
-    let stdout = child.stdout.take().expect("piped stdout");
-    let stderr = child.stderr.take().expect("piped stderr");
+    let job = KillOnCloseJob::attach_spawned_or_kill(&mut child)
+        .map_err(|error| ProcessError::Failed(error.to_string()))?;
 
     // Retain enough additional bytes to recognize a secret that straddles the
     // public output boundary, then redact before applying the configured cap.
@@ -307,48 +305,47 @@ where
     let stdout_reader = spawn_bounded_reader(stdout, capture_limit);
     let stderr_reader = spawn_bounded_reader(stderr, capture_limit);
 
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if started.elapsed() < limits.timeout => thread::sleep(POLL_INTERVAL),
-            Ok(None) => {
-                drop(job);
+    // Descendants can hold the pipes open after the root exits. Dropping the
+    // job ends them, so the readers are joined only afterwards.
+    let status = match timeout(limits.timeout, child.wait()).await {
+        Ok(Ok(status)) => status,
+        Ok(Err(error)) => {
+            drop(job);
 
-                let _ = child.wait();
-                let stdout = join_reader(stdout_reader)?;
-                let stderr = join_reader(stderr_reader)?;
+            let _ = child.wait().await;
+            let _ = stdout_reader.await;
+            let _ = stderr_reader.await;
 
-                let raw_diagnostic = if stderr.is_empty() {
-                    decode_child_output(&stdout)
-                } else {
-                    decode_child_output(&stderr)
-                };
+            return Err(ProcessError::Failed(format!(
+                "could not observe configured launcher exit: {error}"
+            )));
+        }
+        Err(_) => {
+            drop(job);
 
-                let diagnostic = launcher.redact(&raw_diagnostic);
+            let _ = child.wait().await;
+            let stdout = join_reader(stdout_reader).await?;
+            let stderr = join_reader(stderr_reader).await?;
 
-                return Err(ProcessError::TimedOut {
-                    after: limits.timeout,
-                    diagnostic: diagnostic.trim().chars().take(4_096).collect(),
-                });
-            }
-            Err(error) => {
-                drop(job);
+            let raw_diagnostic = if stderr.is_empty() {
+                decode_child_output(&stdout)
+            } else {
+                decode_child_output(&stderr)
+            };
 
-                let _ = child.wait();
-                let _ = stdout_reader.join();
-                let _ = stderr_reader.join();
+            let diagnostic = launcher.redact(&raw_diagnostic);
 
-                return Err(ProcessError::Failed(format!(
-                    "could not observe configured launcher exit: {error}"
-                )));
-            }
+            return Err(ProcessError::TimedOut {
+                after: limits.timeout,
+                diagnostic: diagnostic.trim().chars().take(4_096).collect(),
+            });
         }
     };
 
     drop(job);
 
-    let stdout = join_reader(stdout_reader)?;
-    let stderr = join_reader(stderr_reader)?;
+    let stdout = join_reader(stdout_reader).await?;
+    let stderr = join_reader(stderr_reader).await?;
     let raw_stdout = utf8_suffix(&decode_child_output(&stdout), limits.max_output_bytes);
 
     Ok(ProcessOutput {
@@ -375,15 +372,15 @@ fn utf8_suffix(value: &str, max_bytes: usize) -> String {
 
 /// Drain `reader` to the end, keeping only its last `limit` bytes.
 fn spawn_bounded_reader(
-    mut reader: impl io::Read + Send + 'static,
+    mut reader: impl AsyncRead + Unpin + Send + 'static,
     limit: usize,
-) -> thread::JoinHandle<io::Result<Vec<u8>>> {
-    thread::spawn(move || {
+) -> JoinHandle<io::Result<Vec<u8>>> {
+    nmt_runtime::handle().spawn(async move {
         let mut retained = VecDeque::with_capacity(limit.min(64 * 1024));
         let mut buffer = [0_u8; 8 * 1024];
 
         loop {
-            let read = reader.read(&mut buffer)?;
+            let read = reader.read(&mut buffer).await?;
 
             if read == 0 {
                 break;
@@ -404,9 +401,9 @@ fn spawn_bounded_reader(
     })
 }
 
-fn join_reader(reader: thread::JoinHandle<io::Result<Vec<u8>>>) -> Result<Vec<u8>, ProcessError> {
+async fn join_reader(reader: JoinHandle<io::Result<Vec<u8>>>) -> Result<Vec<u8>, ProcessError> {
     reader
-        .join()
+        .await
         .map_err(|_| ProcessError::Failed("configured launcher output reader panicked".into()))?
         .map_err(|error| ProcessError::Failed(format!("could not read launcher output: {error}")))
 }

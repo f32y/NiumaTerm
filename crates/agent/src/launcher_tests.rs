@@ -32,12 +32,13 @@ fn effective_environment_matches_child_case_rules_and_last_override() {
     #[cfg(unix)]
     let body = "[ \"$NMT_CASE_PROBE\" = upper ] && [ \"$nmt_case_probe\" = lower ]";
 
-    let output = run_bounded(
-        &launcher,
-        script(body),
-        ProcessLimits::new(Duration::from_secs(3), 1024),
-    )
-    .unwrap();
+    let output = nmt_runtime::handle()
+        .block_on(run_bounded(
+            &launcher,
+            script(body),
+            ProcessLimits::new(Duration::from_secs(3), 1024),
+        ))
+        .unwrap();
 
     assert!(output.success());
 }
@@ -81,12 +82,13 @@ fn bounded_runner_retains_suffix_and_redacts_environment_values() {
     #[cfg(unix)]
     let body = "echo \"1234567890$NMT_TEST_SECRET\"";
 
-    let output = run_bounded(
-        &launcher,
-        script(body),
-        ProcessLimits::new(Duration::from_secs(3), 20),
-    )
-    .unwrap();
+    let output = nmt_runtime::handle()
+        .block_on(run_bounded(
+            &launcher,
+            script(body),
+            ProcessLimits::new(Duration::from_secs(3), 20),
+        ))
+        .unwrap();
 
     assert!(output.success());
     assert!(!output.stdout.contains(secret));
@@ -103,12 +105,13 @@ fn structured_probe_parsing_precedes_diagnostic_redaction() {
     #[cfg(unix)]
     let body = "echo '{\"codexVersion\":\"1.2.3\"}'";
 
-    let output = run_bounded(
-        &launcher,
-        script(body),
-        ProcessLimits::new(Duration::from_secs(3), 256),
-    )
-    .unwrap();
+    let output = nmt_runtime::handle()
+        .block_on(run_bounded(
+            &launcher,
+            script(body),
+            ProcessLimits::new(Duration::from_secs(3), 256),
+        ))
+        .unwrap();
 
     assert!(output.stdout.contains("<redacted>Version"));
     assert!(output.stdout_for_parsing().contains("codexVersion"));
@@ -123,12 +126,13 @@ fn bounded_runner_times_out_and_reports_bounded_diagnostics() {
     #[cfg(unix)]
     let body = "echo before-timeout; sleep 6";
 
-    let error = run_bounded(
-        &shell_launcher(),
-        script(body),
-        ProcessLimits::new(Duration::from_millis(100), 64),
-    )
-    .unwrap_err();
+    let error = nmt_runtime::handle()
+        .block_on(run_bounded(
+            &shell_launcher(),
+            script(body),
+            ProcessLimits::new(Duration::from_millis(100), 64),
+        ))
+        .unwrap_err();
 
     assert!(matches!(error, ProcessError::TimedOut { .. }));
     assert!(error.to_string().len() < 4_200);

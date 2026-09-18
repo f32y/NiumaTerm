@@ -3,11 +3,11 @@
 mod title_generation_tests;
 
 use std::sync::Arc;
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde_json::{Map, Value, json};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+use tokio::time::{Instant, timeout_at};
 
 use crate::chat::Event;
 use crate::codex::app_server::host::{CodexHost, HOST_EXIT_METHOD, RegistrationId};
@@ -43,7 +43,7 @@ pub(super) struct TitleGenerationHandle {
     pub(super) generation_id: u64,
     pub(super) root_thread_id: String,
     pub(super) provisional_title: String,
-    cancel_tx: Sender<Value>,
+    cancel_tx: UnboundedSender<Value>,
 }
 
 impl TitleGenerationHandle {
@@ -124,7 +124,7 @@ impl Session {
 
         let generation_id = self.next_title_generation_id;
 
-        match start_title_generation(
+        self.title_generation = Some(start_title_generation(
             Arc::clone(host),
             Arc::clone(&self.deliver),
             TitleGenerationRequest {
@@ -135,10 +135,7 @@ impl Session {
                 profile: self.thread_profile.clone(),
                 workspace: self.workspace.clone(),
             },
-        ) {
-            Ok(generation) => self.title_generation = Some(generation),
-            Err(_) => self.queue_thread_name(provisional_title),
-        }
+        ));
     }
 
     pub(super) fn apply_title_generation_result(&mut self, params: &Value) -> Vec<Event> {
@@ -179,41 +176,38 @@ impl Session {
     }
 }
 
+/// Cancellation arrives as a message rather than by aborting the task, so the
+/// cleanup that interrupts the title turn and detaches the registration runs.
 fn start_title_generation(
     host: Arc<CodexHost>,
     deliver: Delivery,
     request: TitleGenerationRequest,
-) -> Result<TitleGenerationHandle, String> {
-    let (tx, rx) = mpsc::channel();
+) -> TitleGenerationHandle {
+    let (tx, rx) = unbounded_channel();
     let callback_tx = tx.clone();
 
     let registration_id = host.register(move |message| {
         let _ = callback_tx.send(message);
     });
 
-    let worker_host = Arc::clone(&host);
     let generation_id = request.generation_id;
     let root_thread_id = request.root_thread_id.clone();
     let provisional_title = request.provisional_title.clone();
 
-    let spawn = thread::Builder::new()
-        .name("codex-title".to_string())
-        .spawn(move || {
-            run_title_generation(worker_host, registration_id, rx, deliver, request);
-        });
+    nmt_runtime::handle().spawn(run_title_generation(
+        host,
+        registration_id,
+        rx,
+        deliver,
+        request,
+    ));
 
-    if let Err(error) = spawn {
-        host.detach(registration_id);
-
-        return Err(format!("Could not start Codex title generation: {error}"));
-    }
-
-    Ok(TitleGenerationHandle {
+    TitleGenerationHandle {
         generation_id,
         root_thread_id,
         provisional_title,
         cancel_tx: tx,
-    })
+    }
 }
 
 pub(super) fn parse_title_generation_result(
@@ -232,10 +226,10 @@ pub(super) fn parse_title_generation_result(
     })
 }
 
-fn run_title_generation(
+async fn run_title_generation(
     host: Arc<CodexHost>,
     registration_id: RegistrationId,
-    rx: Receiver<Value>,
+    mut rx: UnboundedReceiver<Value>,
     deliver: Delivery,
     request: TitleGenerationRequest,
 ) {
@@ -263,12 +257,7 @@ fn run_title_generation(
         )
         .is_ok()
     {
-        while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
-            let message = match rx.recv_timeout(remaining) {
-                Ok(message) => message,
-                Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => break,
-            };
-
+        while let Ok(Some(message)) = timeout_at(deadline, rx.recv()).await {
             if message["method"].as_str() == Some(TITLE_GENERATION_CANCEL_METHOD) {
                 cancelled = true;
 

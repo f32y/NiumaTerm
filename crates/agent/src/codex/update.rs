@@ -2,6 +2,8 @@
 #[path = "update_tests.rs"]
 mod update_tests;
 
+use futures::FutureExt as _;
+use futures::future::BoxFuture;
 use serde_json::Value;
 
 use crate::json::collapse;
@@ -20,18 +22,24 @@ impl ProviderMaintenance for CodexMaintenance {
         ProviderKind::Codex
     }
 
-    fn probe(&self, launcher: &AgentCli) -> Result<VersionStatus, UpdateError> {
-        match run_bounded(launcher, ["doctor", "--json"], PROBE_LIMITS) {
-            Ok(output) => match parse_codex_doctor(output.stdout_for_parsing()) {
-                Ok(status) => Ok(status),
-                Err(doctor_error) => version_fallback(launcher, doctor_error.message()),
-            },
-            Err(error) => version_fallback(launcher, &error.to_string()),
+    fn probe<'a>(
+        &'a self,
+        launcher: &'a AgentCli,
+    ) -> BoxFuture<'a, Result<VersionStatus, UpdateError>> {
+        async move {
+            match run_bounded(launcher, ["doctor", "--json"], PROBE_LIMITS).await {
+                Ok(output) => match parse_codex_doctor(output.stdout_for_parsing()) {
+                    Ok(status) => Ok(status),
+                    Err(doctor_error) => version_fallback(launcher, doctor_error.message()).await,
+                },
+                Err(error) => version_fallback(launcher, &error.to_string()).await,
+            }
         }
+        .boxed()
     }
 
-    fn update(&self, launcher: &AgentCli) -> Result<String, UpdateError> {
-        vendor_update(launcher, ProviderKind::Codex)
+    fn update<'a>(&'a self, launcher: &'a AgentCli) -> BoxFuture<'a, Result<String, UpdateError>> {
+        vendor_update(launcher, ProviderKind::Codex).boxed()
     }
 }
 
@@ -102,10 +110,10 @@ fn parse_codex_doctor(json: &str) -> Result<VersionStatus, UpdateError> {
     })
 }
 
-fn version_fallback(launcher: &AgentCli, reason: &str) -> Result<VersionStatus, UpdateError> {
+async fn version_fallback(launcher: &AgentCli, reason: &str) -> Result<VersionStatus, UpdateError> {
     Ok(VersionStatus::unsupported(
         ProviderKind::Codex,
-        current_version_fallback(launcher),
+        current_version_fallback(launcher).await,
         reason,
     ))
 }

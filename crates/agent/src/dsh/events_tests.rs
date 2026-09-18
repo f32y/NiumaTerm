@@ -21,7 +21,14 @@ fn item(stream: &str, value: Value) -> Value {
 fn closing_downlinks_interrupts_handshakes_and_idle_reads_and_joins_delivery() {
     for ready in [false, true] {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let client = ApiClient::new(format!("http://{}", listener.local_addr().unwrap())).unwrap();
+
+        let client = nmt_runtime::handle()
+            .block_on(ApiClient::new(format!(
+                "http://{}",
+                listener.local_addr().unwrap()
+            )))
+            .unwrap();
+
         let (reading, entered) = mpsc::channel();
 
         let server = thread::spawn(move || {
@@ -101,7 +108,13 @@ fn closing_downlinks_interrupts_handshakes_and_idle_reads_and_joins_delivery() {
 #[test]
 fn a_lost_stream_without_a_serving_host_reports_the_host_exit() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let client = ApiClient::new(format!("http://{}", listener.local_addr().unwrap())).unwrap();
+
+    let client = nmt_runtime::handle()
+        .block_on(ApiClient::new(format!(
+            "http://{}",
+            listener.local_addr().unwrap()
+        )))
+        .unwrap();
 
     let server = thread::spawn(move || {
         let (stream, _) = listener.accept().unwrap();
@@ -355,7 +368,14 @@ fn an_interaction_for_another_conversation_is_passed_without_being_shown() {
 #[test]
 fn a_stalled_pass_reply_does_not_stop_heartbeat_answers() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let client = ApiClient::new(format!("http://{}", listener.local_addr().unwrap())).unwrap();
+
+    let client = nmt_runtime::handle()
+        .block_on(ApiClient::new(format!(
+            "http://{}",
+            listener.local_addr().unwrap()
+        )))
+        .unwrap();
+
     let (ponged_tx, ponged) = mpsc::channel();
 
     let server = thread::spawn(move || {

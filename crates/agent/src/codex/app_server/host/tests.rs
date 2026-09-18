@@ -1,9 +1,10 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use std::sync::mpsc::{Receiver, channel, sync_channel};
+use std::sync::mpsc::{Receiver, channel};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
+use tokio::sync::oneshot;
 
 use crate::LaunchConfig;
 use crate::codex::ProviderConfig;
@@ -15,7 +16,8 @@ use crate::subprocess::{InputTicket, OUTPUT_FAILURE_METHOD};
 
 #[test]
 fn startup_preserves_the_protocol_failure_reason() {
-    let (tx, rx) = sync_channel(1);
+    let (tx, mut rx) = oneshot::channel();
+
     let router = Router::new(tx);
 
     router.on_message(json!({"method":OUTPUT_FAILURE_METHOD,"params":{"message":"Agent protocol JSON is invalid"}}));
@@ -95,7 +97,7 @@ fn expired_queued_requests_report_not_sent_and_ignore_late_success() {
 }
 
 fn router() -> Router {
-    let (startup_tx, _startup_rx) = sync_channel(1);
+    let (startup_tx, _startup_rx) = oneshot::channel();
 
     Router::new(startup_tx)
 }

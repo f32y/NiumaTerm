@@ -62,14 +62,7 @@ impl ApiClient {
     /// The printed URL points at the browser entry page; API paths belong on
     /// its origin, outside the token query. Cookies stay in memory and redirects
     /// are disabled so credentials cannot travel to another server.
-    ///
-    /// Callers are threads outside the shared runtime: host startup already
-    /// waits on the process, so it waits on the login the same way.
-    pub(crate) fn new(address: String) -> Result<Self, String> {
-        nmt_runtime::handle().block_on(Self::connect(address))
-    }
-
-    async fn connect(address: String) -> Result<Self, String> {
+    pub(crate) async fn new(address: String) -> Result<Self, String> {
         let url = Url::parse(&address)
             .map_err(|_| "the harness printed an invalid startup URL".to_string())?;
 

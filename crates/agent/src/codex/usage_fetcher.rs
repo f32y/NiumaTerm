@@ -4,24 +4,28 @@
 #[path = "usage_fetcher_tests.rs"]
 mod usage_fetcher_tests;
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
-use std::time::{Duration, Instant};
+use std::sync::Arc;
+use std::time::Duration;
 
 use parking_lot::Mutex;
 use serde_json::{Value, json};
+use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
+use tokio::time::timeout;
 
 use crate::launcher::AgentCli;
 use crate::subprocess::{JsonLineProcess, OUTPUT_FAILURE_METHOD};
 use crate::usage::{
-    FIVE_HOUR_WINDOW_MINUTES, UsageResetCredits, UsageSnapshot, UsageWindow, WEEKLY_WINDOW_MINUTES,
-    parse_timestamp_millis,
+    FIVE_HOUR_WINDOW_MINUTES, FetchCancellation, UsageResetCredits, UsageSnapshot, UsageWindow,
+    WEEKLY_WINDOW_MINUTES, parse_timestamp_millis,
 };
 
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 
-pub fn fetch(launcher: &AgentCli, cancelled: &AtomicBool) -> Result<UsageSnapshot, String> {
-    if cancelled.load(Ordering::Relaxed) {
+pub async fn fetch(
+    launcher: &AgentCli,
+    cancellation: &FetchCancellation,
+) -> Result<UsageSnapshot, String> {
+    if cancellation.is_cancelled() {
         return Err("Codex usage request cancelled".into());
     }
 
@@ -37,7 +41,8 @@ pub fn fetch(launcher: &AgentCli, cancelled: &AtomicBool) -> Result<UsageSnapsho
         "app-server",
     ]);
 
-    let (tx, rx) = mpsc::sync_channel(64);
+    let (tx, mut rx) = unbounded_channel();
+
     let stderr = Arc::new(Mutex::new(String::new()));
 
     let mut process = JsonLineProcess::spawn_with_stdout_closed(
@@ -56,18 +61,24 @@ pub fn fetch(launcher: &AgentCli, cancelled: &AtomicBool) -> Result<UsageSnapsho
         || {},
     )?;
 
-    let result =
-        read_rate_limits(&mut process, &rx, cancelled).map(UsageSnapshot::with_updated_now);
+    let result = tokio::select! {
+        biased;
+        () = cancellation.cancelled() => Err("Codex usage request cancelled".to_string()),
+        read = timeout(FETCH_TIMEOUT, read_rate_limits(&mut process, &mut rx)) => {
+            read.unwrap_or_else(|_| Err("Codex app-server timed out".into()))
+        }
+    }
+    .map(UsageSnapshot::with_updated_now);
 
     drop(rx);
 
-    let timeout = if cancelled.load(Ordering::Relaxed) {
+    let grace = if cancellation.is_cancelled() {
         Duration::ZERO
     } else {
         Duration::from_millis(250)
     };
 
-    let _ = process.shutdown(timeout, true);
+    let _ = process.shutdown(grace, true).await;
 
     result.map_err(|error| {
         let stderr = stderr.lock();
@@ -82,10 +93,9 @@ pub fn fetch(launcher: &AgentCli, cancelled: &AtomicBool) -> Result<UsageSnapsho
     })
 }
 
-fn read_rate_limits(
+async fn read_rate_limits(
     process: &mut JsonLineProcess,
-    messages: &mpsc::Receiver<Value>,
-    cancelled: &AtomicBool,
+    messages: &mut UnboundedReceiver<Value>,
 ) -> Result<UsageSnapshot, String> {
     process
         .write_line(json!({
@@ -94,27 +104,12 @@ fn read_rate_limits(
         }))
         .map_err(|error| error.to_string())?;
 
-    let deadline = Instant::now() + FETCH_TIMEOUT;
-
     let mut requested_limits = false;
 
     loop {
-        if cancelled.load(Ordering::Relaxed) {
-            return Err("Codex usage request cancelled".into());
-        }
-
-        let remaining = deadline.saturating_duration_since(Instant::now());
-
-        if remaining.is_zero() {
-            return Err("Codex app-server timed out".into());
-        }
-
-        let message = match messages.recv_timeout(remaining.min(Duration::from_millis(50))) {
-            Ok(message) => message,
-            Err(mpsc::RecvTimeoutError::Timeout) => continue,
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                return Err("Codex app-server closed its output".into());
-            }
+        // The sender lives in the reader task, which ends with the output.
+        let Some(message) = messages.recv().await else {
+            return Err("Codex app-server closed its output".into());
         };
 
         if message["method"] == OUTPUT_FAILURE_METHOD {

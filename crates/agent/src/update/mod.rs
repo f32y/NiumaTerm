@@ -15,6 +15,7 @@ use std::time::Duration;
 use std::{fmt, fs, io};
 
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use futures::future::BoxFuture;
 use nmt_platform::filesystem::{installation_path_spelling, replace_file};
 use parking_lot::Mutex;
 use semver::Version;
@@ -253,33 +254,41 @@ impl UpdateError {
     }
 }
 
+/// Provider probes and updates wait on child processes and the network, so
+/// both run on the shared runtime.
 pub trait ProviderMaintenance: Send + Sync {
     fn provider(&self) -> ProviderKind;
 
-    fn probe(&self, launcher: &AgentCli) -> Result<VersionStatus, UpdateError>;
+    fn probe<'a>(
+        &'a self,
+        launcher: &'a AgentCli,
+    ) -> BoxFuture<'a, Result<VersionStatus, UpdateError>>;
 
-    fn update(&self, launcher: &AgentCli) -> Result<String, UpdateError>;
+    fn update<'a>(&'a self, launcher: &'a AgentCli) -> BoxFuture<'a, Result<String, UpdateError>>;
 }
 
-pub(crate) fn current_version_fallback(launcher: &AgentCli) -> Option<Version> {
+pub(crate) async fn current_version_fallback(launcher: &AgentCli) -> Option<Version> {
     run_bounded(launcher, ["--version"], PROBE_LIMITS)
+        .await
         .ok()
         .and_then(|output| extract_version(output.stdout_for_parsing()))
 }
 
-pub(crate) fn vendor_update(
+pub(crate) async fn vendor_update(
     launcher: &AgentCli,
     provider: ProviderKind,
 ) -> Result<String, UpdateError> {
-    let output = run_bounded(launcher, ["update"], UPDATE_LIMITS).map_err(|error| {
-        let kind = if matches!(error, ProcessError::TimedOut { .. }) {
-            UpdateErrorKind::TimedOut
-        } else {
-            UpdateErrorKind::Launch
-        };
+    let output = run_bounded(launcher, ["update"], UPDATE_LIMITS)
+        .await
+        .map_err(|error| {
+            let kind = if matches!(error, ProcessError::TimedOut { .. }) {
+                UpdateErrorKind::TimedOut
+            } else {
+                UpdateErrorKind::Launch
+            };
 
-        UpdateError::new(kind, error.to_string())
-    })?;
+            UpdateError::new(kind, error.to_string())
+        })?;
 
     if !output.success() {
         return Err(classify_vendor_failure(provider, &output));
@@ -472,7 +481,11 @@ impl UpdateCoordinator {
     /// Check an installation. Automatic callers reuse a successful result for
     /// one hour; manual callers always probe the provider and clear a previous
     /// notification dismissal when the check succeeds.
-    pub fn check(&self, key: &InstallationKey, manual: bool) -> Result<VersionStatus, UpdateError> {
+    pub async fn check(
+        &self,
+        key: &InstallationKey,
+        manual: bool,
+    ) -> Result<VersionStatus, UpdateError> {
         let (launcher, maintenance) = {
             let mut inner = self.inner.lock();
 
@@ -509,7 +522,7 @@ impl UpdateCoordinator {
             (record.launcher.clone(), record.maintenance.clone())
         };
 
-        let result = maintenance.probe(&launcher);
+        let result = maintenance.probe(&launcher).await;
 
         let mut inner = self.inner.lock();
 
@@ -603,16 +616,16 @@ impl UpdateCoordinator {
         }
     }
 
-    pub fn run_vendor_update(&self, key: &InstallationKey) -> Result<String, UpdateError> {
+    pub async fn run_vendor_update(&self, key: &InstallationKey) -> Result<String, UpdateError> {
         let (launcher, maintenance) = self.operation_parts(key)?;
 
-        maintenance.update(&launcher)
+        maintenance.update(&launcher).await
     }
 
-    pub fn verify(&self, key: &InstallationKey) -> Result<VersionStatus, UpdateError> {
+    pub async fn verify(&self, key: &InstallationKey) -> Result<VersionStatus, UpdateError> {
         let (launcher, maintenance) = self.operation_parts(key)?;
 
-        maintenance.probe(&launcher)
+        maintenance.probe(&launcher).await
     }
 
     pub fn finish_update(

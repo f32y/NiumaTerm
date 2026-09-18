@@ -28,7 +28,7 @@ mod workspace_dirs;
 mod tests;
 
 use std::path::PathBuf;
-use std::{collections, io, iter, path, thread, time};
+use std::{collections, io, iter, path, time};
 
 use app::agent_tab::execution::AgentSession;
 use app::agent_tab::team::{TeamPane, TeamRuntime};

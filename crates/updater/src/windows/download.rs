@@ -5,12 +5,15 @@
 mod download_tests;
 
 use std::fs::{self, File};
-use std::io::{self, Read as _, Write as _};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use reqwest::blocking::{Client, Response};
+use reqwest::{Client, Response};
 use sha2::{Digest as _, Sha256};
+use tokio::fs::File as AsyncFile;
+use tokio::io::AsyncWriteExt as _;
+use tokio::task::spawn_blocking;
 use tracing::warn;
 
 use crate::windows::InstallError;
@@ -41,9 +44,9 @@ pub struct Download {
 }
 
 impl Download {
-    /// Download, verify, unpack, and select replacement files on a worker thread.
-    pub fn run(self) -> Result<Installation, InstallError> {
-        let staged = stage(&self.release, &self.staging, self.version)?;
+    /// Download, verify, unpack, and select replacement files.
+    pub async fn run(self) -> Result<Installation, InstallError> {
+        let staged = stage(&self.release, &self.staging, self.version).await?;
 
         Ok(Installation::new(
             self.release,
@@ -62,21 +65,21 @@ impl Download {
 /// installed file. It travels with the package rather than independently of it,
 /// so it does not establish who built the package, only that what arrived is
 /// what was published.
-fn stage(release: &Release, staging: &Path, version: &str) -> Result<PathBuf, InstallError> {
+///
+/// Transfers wait on the network. Preparing the directory, hashing, and
+/// unpacking are disk and CPU work, so they run as blocking stages.
+async fn stage(release: &Release, staging: &Path, version: &str) -> Result<PathBuf, InstallError> {
     let (package, checksum) = package_assets(&release.assets).ok_or(InstallError::NoPackage)?;
 
     let name = sanitized(&release.label);
     let directory = staging.join(&name);
 
-    // A staging directory left by an earlier attempt may hold files from
-    // another release, which unpacking over would mix into this one.
-    let _ = fs::remove_dir_all(&directory);
+    blocking({
+        let directory = directory.clone();
 
-    fs::create_dir_all(&directory).map_err(|error| {
-        warn!("update: creating {} failed: {error}", directory.display());
-
-        InstallError::Unreachable
-    })?;
+        move || prepare(&directory)
+    })
+    .await?;
 
     // The archive is kept beside the unpacked directory rather than inside it,
     // because that directory is read back as the list of files to install: a
@@ -84,15 +87,43 @@ fn stage(release: &Release, staging: &Path, version: &str) -> Result<PathBuf, In
     // be installed as though the package had shipped it.
     let archive = staging.join(format!("{name}.zip"));
 
-    download(&package.url, &archive, version)?;
+    download(&package.url, &archive, version).await?;
 
-    verify(&archive, &fetch_text(&checksum.url, version)?)?;
+    let published = fetch_text(&checksum.url, version).await?;
 
-    unpack(&archive, &directory)?;
+    blocking(move || {
+        verify(&archive, &published)?;
 
-    let _ = fs::remove_file(&archive);
+        unpack(&archive, &directory)?;
 
-    Ok(directory)
+        let _ = fs::remove_file(&archive);
+
+        Ok(directory)
+    })
+    .await
+}
+
+/// Run one blocking stage without occupying an I/O worker.
+async fn blocking<T: Send + 'static>(
+    stage: impl FnOnce() -> Result<T, InstallError> + Send + 'static,
+) -> Result<T, InstallError> {
+    spawn_blocking(stage).await.unwrap_or_else(|error| {
+        warn!("update: a staging step did not finish: {error}");
+
+        Err(InstallError::Unpack)
+    })
+}
+
+fn prepare(directory: &Path) -> Result<(), InstallError> {
+    // A staging directory left by an earlier attempt may hold files from
+    // another release, which unpacking over would mix into this one.
+    let _ = fs::remove_dir_all(directory);
+
+    fs::create_dir_all(directory).map_err(|error| {
+        warn!("update: creating {} failed: {error}", directory.display());
+
+        InstallError::Unreachable
+    })
 }
 
 /// The package and the checksum published for it. Both must be present: a
@@ -122,10 +153,11 @@ fn client(version: &str) -> Result<Client, InstallError> {
         .map_err(|_| InstallError::Unreachable)
 }
 
-fn download(url: &str, into: &Path, version: &str) -> Result<(), InstallError> {
+async fn download(url: &str, into: &Path, version: &str) -> Result<(), InstallError> {
     let mut response = client(version)?
         .get(url)
         .send()
+        .await
         .and_then(Response::error_for_status)
         .map_err(|error| {
             warn!("update: downloading the package failed: {error}");
@@ -137,31 +169,54 @@ fn download(url: &str, into: &Path, version: &str) -> Result<(), InstallError> {
         return Err(InstallError::Unreachable);
     }
 
-    let mut file = File::create(into).map_err(|_| InstallError::NotWritable)?;
+    let mut file = AsyncFile::create(into)
+        .await
+        .map_err(|_| InstallError::NotWritable)?;
 
-    // Copying through a bounded reader rather than trusting the declared length,
+    // Counting what actually arrives rather than trusting the declared length,
     // which a response is free to understate.
-    let copied = io::copy(&mut response.by_ref().take(MAX_PACKAGE_BYTES), &mut file)
-        .map_err(|_| InstallError::Unreachable)?;
+    let mut copied = 0u64;
 
-    if copied == MAX_PACKAGE_BYTES {
-        return Err(InstallError::Unreachable);
+    while let Some(chunk) = response.chunk().await.map_err(|error| {
+        warn!("update: downloading the package failed: {error}");
+
+        InstallError::Unreachable
+    })? {
+        copied += chunk.len() as u64;
+
+        if copied >= MAX_PACKAGE_BYTES {
+            return Err(InstallError::Unreachable);
+        }
+
+        file.write_all(&chunk)
+            .await
+            .map_err(|_| InstallError::NotWritable)?;
     }
 
-    file.flush().map_err(|_| InstallError::NotWritable)
+    file.flush().await.map_err(|_| InstallError::NotWritable)
 }
 
-fn fetch_text(url: &str, version: &str) -> Result<String, InstallError> {
-    client(version)?
-        .get(url)
-        .send()
-        .and_then(Response::error_for_status)
-        .and_then(Response::text)
-        .map_err(|error| {
-            warn!("update: downloading the checksum failed: {error}");
+async fn fetch_text(url: &str, version: &str) -> Result<String, InstallError> {
+    let fetched = async {
+        client(version)
+            .map_err(|_| None)?
+            .get(url)
+            .send()
+            .await
+            .and_then(Response::error_for_status)
+            .map_err(Some)?
+            .text()
+            .await
+            .map_err(Some)
+    };
 
-            InstallError::Unreachable
-        })
+    fetched.await.map_err(|error| {
+        if let Some(error) = error {
+            warn!("update: downloading the checksum failed: {error}");
+        }
+
+        InstallError::Unreachable
+    })
 }
 
 fn verify(archive: &Path, published: &str) -> Result<(), InstallError> {

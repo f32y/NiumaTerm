@@ -116,10 +116,15 @@ fn a_steered_message_is_consumed_without_another_submission() {
 
     let (tx, frames) = channel();
 
-    let mut session = Session::create(&launch(), &AgentWorkspace::default(), move |frame| {
-        let _ = tx.send(frame);
-    })
-    .unwrap();
+    let mut session = nmt_runtime::handle()
+        .block_on(Session::create(
+            &launch(),
+            &AgentWorkspace::default(),
+            move |frame| {
+                let _ = tx.send(frame);
+            },
+        ))
+        .unwrap();
 
     session
         .send_user_message("queue-probe first", &[])
@@ -187,14 +192,15 @@ fn a_configured_profile_consumes_steering_without_resubmission() {
 
     let (tx, frames) = channel();
 
-    let mut session = Session::create(
-        &launch,
-        &AgentWorkspace::single(Some(workspace.display().to_string())),
-        move |frame| {
-            let _ = tx.send(frame);
-        },
-    )
-    .unwrap();
+    let mut session = nmt_runtime::handle()
+        .block_on(Session::create(
+            &launch,
+            &AgentWorkspace::single(Some(workspace.display().to_string())),
+            move |frame| {
+                let _ = tx.send(frame);
+            },
+        ))
+        .unwrap();
 
     let (_, ready) = collect_until(
         &mut session,
@@ -308,10 +314,15 @@ fn a_configured_profile_consumes_steering_without_resubmission() {
 fn a_turn_streams_and_survives_being_stopped() {
     let (tx, frames) = channel();
 
-    let mut session = Session::create(&launch(), &AgentWorkspace::default(), move |frame| {
-        let _ = tx.send(frame);
-    })
-    .expect("the harness host should start and open a conversation");
+    let mut session = nmt_runtime::handle()
+        .block_on(Session::create(
+            &launch(),
+            &AgentWorkspace::default(),
+            move |frame| {
+                let _ = tx.send(frame);
+            },
+        ))
+        .expect("the harness host should start and open a conversation");
 
     assert!(session.session_id().is_some());
 
@@ -415,7 +426,9 @@ fn a_turn_streams_and_survives_being_stopped() {
 #[test]
 #[ignore = "starts a real harness host"]
 fn the_host_serves_whether_or_not_it_knows_the_no_browser_flag() {
-    let host = Host::start(&launch()).expect("the installed harness should serve");
+    let host = nmt_runtime::handle()
+        .block_on(Host::start(&launch()))
+        .expect("the installed harness should serve");
 
     assert!(host.is_running());
 }
@@ -425,10 +438,15 @@ fn the_host_serves_whether_or_not_it_knows_the_no_browser_flag() {
 fn a_session_opens_and_receives_its_preset_catalog() {
     let (tx, frames) = channel();
 
-    let mut session = Session::create(&launch(), &AgentWorkspace::default(), move |frame| {
-        let _ = tx.send(frame);
-    })
-    .expect("the harness should create a conversation through its local API");
+    let mut session = nmt_runtime::handle()
+        .block_on(Session::create(
+            &launch(),
+            &AgentWorkspace::default(),
+            move |frame| {
+                let _ = tx.send(frame);
+            },
+        ))
+        .expect("the harness should create a conversation through its local API");
 
     assert!(session.session_id().is_some());
 
@@ -447,17 +465,27 @@ fn a_session_opens_and_receives_its_preset_catalog() {
 fn two_sessions_share_one_host_and_do_not_see_each_other() {
     let (first_tx, first_frames) = channel();
 
-    let mut first = Session::create(&launch(), &AgentWorkspace::default(), move |frame| {
-        let _ = first_tx.send(frame);
-    })
-    .expect("the first conversation should open");
+    let mut first = nmt_runtime::handle()
+        .block_on(Session::create(
+            &launch(),
+            &AgentWorkspace::default(),
+            move |frame| {
+                let _ = first_tx.send(frame);
+            },
+        ))
+        .expect("the first conversation should open");
 
     let (second_tx, second_frames) = channel();
 
-    let mut second = Session::create(&launch(), &AgentWorkspace::default(), move |frame| {
-        let _ = second_tx.send(frame);
-    })
-    .expect("the second conversation should reuse the running host");
+    let mut second = nmt_runtime::handle()
+        .block_on(Session::create(
+            &launch(),
+            &AgentWorkspace::default(),
+            move |frame| {
+                let _ = second_tx.send(frame);
+            },
+        ))
+        .expect("the second conversation should reuse the running host");
 
     assert_ne!(first.session_id(), second.session_id());
 
@@ -499,10 +527,15 @@ fn an_approval_is_raised_answered_and_the_turn_continues() {
 
     let (tx, frames) = channel();
 
-    let mut session = Session::create(&launch(), &AgentWorkspace::default(), move |frame| {
-        let _ = tx.send(frame);
-    })
-    .expect("the harness host should start and open a conversation");
+    let mut session = nmt_runtime::handle()
+        .block_on(Session::create(
+            &launch(),
+            &AgentWorkspace::default(),
+            move |frame| {
+                let _ = tx.send(frame);
+            },
+        ))
+        .expect("the harness host should start and open a conversation");
 
     // Writing outside the workspace is denied under the default sandbox, and
     // the model escalates, which is what raises the approval.
@@ -588,14 +621,15 @@ fn a_real_turn_shows_its_commands_and_file_changes() {
 
     let (tx, frames) = channel();
 
-    let mut session = Session::create(
-        &launch(),
-        &AgentWorkspace::single(Some(workspace.display().to_string())),
-        move |frame| {
-            let _ = tx.send(frame);
-        },
-    )
-    .expect("the harness host should start and open a conversation");
+    let mut session = nmt_runtime::handle()
+        .block_on(Session::create(
+            &launch(),
+            &AgentWorkspace::single(Some(workspace.display().to_string())),
+            move |frame| {
+                let _ = tx.send(frame);
+            },
+        ))
+        .expect("the harness host should start and open a conversation");
 
     session
         .send_user_message(
@@ -710,10 +744,15 @@ fn a_profile_pinning_an_unserved_effort_is_told_rather_than_ignored() {
 
     let (tx, frames) = channel();
 
-    let mut session = Session::create(&launch, &AgentWorkspace::default(), move |frame| {
-        let _ = tx.send(frame);
-    })
-    .expect("the harness host should start and open a conversation");
+    let mut session = nmt_runtime::handle()
+        .block_on(Session::create(
+            &launch,
+            &AgentWorkspace::default(),
+            move |frame| {
+                let _ = tx.send(frame);
+            },
+        ))
+        .expect("the harness host should start and open a conversation");
 
     let (seen, refused) = collect_until(&mut session, &frames, Duration::from_secs(60), |e| {
         matches!(e, Event::EffortRejected { .. })
@@ -740,10 +779,15 @@ fn a_profile_pinning_an_unserved_effort_is_told_rather_than_ignored() {
 fn the_agent_preset_roster_reaches_the_picker() {
     let (tx, frames) = channel();
 
-    let mut session = Session::create(&launch(), &AgentWorkspace::default(), move |frame| {
-        let _ = tx.send(frame);
-    })
-    .expect("the harness host should start and open a conversation");
+    let mut session = nmt_runtime::handle()
+        .block_on(Session::create(
+            &launch(),
+            &AgentWorkspace::default(),
+            move |frame| {
+                let _ = tx.send(frame);
+            },
+        ))
+        .expect("the harness host should start and open a conversation");
 
     let (seen, listed) = collect_until(&mut session, &frames, Duration::from_secs(60), |e| {
         matches!(e, Event::AgentPresets { .. })
@@ -781,10 +825,15 @@ fn the_agent_preset_roster_reaches_the_picker() {
 fn a_question_is_answered_and_the_turn_continues() {
     let (tx, frames) = channel();
 
-    let mut session = Session::create(&launch(), &AgentWorkspace::default(), move |frame| {
-        let _ = tx.send(frame);
-    })
-    .unwrap();
+    let mut session = nmt_runtime::handle()
+        .block_on(Session::create(
+            &launch(),
+            &AgentWorkspace::default(),
+            move |frame| {
+                let _ = tx.send(frame);
+            },
+        ))
+        .unwrap();
 
     session.send_user_message("Ask the protocol-probe question using ask_user_question. Offer Yes and No, then report the answer.", &[]).assert_started_a_turn();
 
@@ -841,10 +890,15 @@ fn a_profile_can_declare_and_select_an_image_model() {
 
     let (tx, frames) = channel();
 
-    let mut session = Session::create(&launch, &AgentWorkspace::default(), move |frame| {
-        let _ = tx.send(frame);
-    })
-    .unwrap();
+    let mut session = nmt_runtime::handle()
+        .block_on(Session::create(
+            &launch,
+            &AgentWorkspace::default(),
+            move |frame| {
+                let _ = tx.send(frame);
+            },
+        ))
+        .unwrap();
 
     let (seen, _) = collect_until(&mut session, &frames, Duration::from_secs(5), |_| false);
 
@@ -876,10 +930,15 @@ fn permission_commands_update_the_session_preset() {
 
     let (tx, frames) = channel();
 
-    let mut session = Session::create(&launch, &AgentWorkspace::default(), move |frame| {
-        let _ = tx.send(frame);
-    })
-    .expect("the isolated harness should open a conversation");
+    let mut session = nmt_runtime::handle()
+        .block_on(Session::create(
+            &launch,
+            &AgentWorkspace::default(),
+            move |frame| {
+                let _ = tx.send(frame);
+            },
+        ))
+        .expect("the isolated harness should open a conversation");
 
     let (seen, received) = collect_until(&mut session, &frames, Duration::from_secs(15), |event| {
         matches!(
@@ -1004,10 +1063,15 @@ fn a_conversation_change_is_requested_without_waiting() {
 
     let (tx, frames) = channel();
 
-    let mut session = Session::create(&launch, &AgentWorkspace::default(), move |frame| {
-        let _ = tx.send(frame);
-    })
-    .expect("the isolated harness should open a conversation");
+    let mut session = nmt_runtime::handle()
+        .block_on(Session::create(
+            &launch,
+            &AgentWorkspace::default(),
+            move |frame| {
+                let _ = tx.send(frame);
+            },
+        ))
+        .expect("the isolated harness should open a conversation");
 
     let id = session.session_id().unwrap().to_string();
 

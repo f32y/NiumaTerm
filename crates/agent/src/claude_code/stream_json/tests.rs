@@ -69,12 +69,9 @@ fn request_deadlines_wake_without_output_and_release_the_delivery_on_close() {
 
     let mut state = ControlState::default();
 
-    state.set_timer(
-        DeadlineTimer::new(move || {
-            let _ = tx.send(());
-        })
-        .unwrap(),
-    );
+    state.set_timer(DeadlineTimer::new(move || {
+        let _ = tx.send(());
+    }));
 
     state.record_admitted("slow".into(), RequestClass::Mutation, Instant::now());
 
@@ -427,7 +424,9 @@ fn acceptance_uses_one_root_provider_identity_per_turn() {
         |event| matches!(event, Event::ProviderTurnAccepted { id } if id == "response:api-next")
     ));
 
-    session.shutdown(Duration::from_secs(2), true).unwrap();
+    nmt_runtime::handle()
+        .block_on(session.shutdown(Duration::from_secs(2), true))
+        .unwrap();
 }
 
 #[cfg(windows)]
@@ -576,9 +575,8 @@ fn control_responses_do_not_fall_through_or_revive_cancelled_titles() {
 
     session.compacting = true;
 
-    session
-        .process
-        .shutdown(Duration::from_secs(1), true)
+    nmt_runtime::handle()
+        .block_on(session.process.shutdown(Duration::from_secs(1), true))
         .unwrap();
 
     session.control.pending_approval = Some(PendingApproval {
@@ -972,7 +970,9 @@ fn pending_queries_do_not_block_an_atomic_settings_and_prompt_batch() {
     assert_eq!(session.applied_permission.as_deref(), Some("plan"));
     assert_eq!(session.control.effort(), Some("high"));
 
-    session.shutdown(Duration::from_secs(5), false).unwrap();
+    nmt_runtime::handle()
+        .block_on(session.shutdown(Duration::from_secs(5), false))
+        .unwrap();
 
     let lines: Vec<Value> = fs::read_to_string(&log)
         .unwrap()

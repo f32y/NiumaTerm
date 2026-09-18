@@ -36,7 +36,10 @@ fn reads_only_a_nonempty_claude_oauth_access_token() {
 fn the_panel_supplement_runs_only_for_a_live_reading_without_fable() {
     // Cancelled up front, so the guard is exercised without an
     // interactive Claude process: reaching the panel returns immediately.
-    let cancelled = AtomicBool::new(true);
+    let cancelled = FetchCancellation::default();
+
+    cancelled.cancel();
+
     let five_hour = Some(UsageWindow::new(88, FIVE_HOUR_WINDOW_MINUTES));
     let fable = Some(UsageWindow::new(35, WEEKLY_WINDOW_MINUTES));
 
@@ -47,13 +50,19 @@ fn the_panel_supplement_runs_only_for_a_live_reading_without_fable() {
         ..UsageSnapshot::default()
     };
 
-    assert_eq!(supplement_from_cli(complete.clone(), &cancelled), complete);
+    assert_eq!(
+        nmt_runtime::handle().block_on(supplement_from_cli(complete.clone(), &cancelled)),
+        complete
+    );
 
     // An endpoint that described no window at all describes an account the
     // panel cannot be trusted to describe either.
     let empty = UsageSnapshot::default();
 
-    assert_eq!(supplement_from_cli(empty.clone(), &cancelled), empty);
+    assert_eq!(
+        nmt_runtime::handle().block_on(supplement_from_cli(empty.clone(), &cancelled)),
+        empty
+    );
 
     // A supplement that cannot run leaves the reading it was adding to.
     let partial = UsageSnapshot {
@@ -61,7 +70,10 @@ fn the_panel_supplement_runs_only_for_a_live_reading_without_fable() {
         ..UsageSnapshot::default()
     };
 
-    assert_eq!(supplement_from_cli(partial.clone(), &cancelled), partial);
+    assert_eq!(
+        nmt_runtime::handle().block_on(supplement_from_cli(partial.clone(), &cancelled)),
+        partial
+    );
 }
 
 #[test]
@@ -170,7 +182,12 @@ fn keeps_cli_output_bounded_to_the_newest_bytes() {
 /// second, and it reaches neither the network nor an interactive CLI here.
 #[test]
 fn a_cancelled_request_reports_cancellation_not_failure() {
-    let error = fetch_with_cancel(&AtomicBool::new(true))
+    let cancelled = FetchCancellation::default();
+
+    cancelled.cancel();
+
+    let error = nmt_runtime::handle()
+        .block_on(fetch_with_cancel(&cancelled))
         .expect_err("a cancelled fetch produces no snapshot");
 
     assert!(

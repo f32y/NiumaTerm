@@ -18,7 +18,7 @@ mod usage_refresh;
 mod usage_sources;
 mod workspace;
 
-use std::future::{Ready, ready};
+use std::future::Future;
 use std::rc::Rc;
 use std::{env, path, process, time};
 
@@ -514,10 +514,10 @@ fn on_window_closed(cx: &mut App, window_id: WindowId) {
     }
 }
 
-fn on_app_quit(cx: &mut App) -> Ready<()> {
-    if let Err(error) = input_history::flush(cx) {
-        warn!("failed to flush Agent input history: {error}");
-    }
+fn on_app_quit(cx: &mut App) -> impl Future<Output = ()> + use<> {
+    // Started before the synchronous saves below so both proceed together; the
+    // application waits for it before exiting.
+    let history_flushed = input_history::flush(cx);
 
     // Settings edits live in the global until something writes
     // them out. Closing the settings surface does that, and so
@@ -554,7 +554,11 @@ fn on_app_quit(cx: &mut App) -> Ready<()> {
         warn!("failed to save local_state.toml: {err}");
     }
 
-    ready(())
+    async move {
+        if let Err(error) = history_flushed.await {
+            warn!("failed to flush Agent input history: {error}");
+        }
+    }
 }
 
 fn startup_error_and_exit(file: &str, error: &str) -> ! {

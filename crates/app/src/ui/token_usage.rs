@@ -11,6 +11,7 @@ mod token_usage_tests;
 use std::borrow::Cow;
 use std::time::Duration;
 
+use app::utils::on_runtime;
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, Context, Entity, FontWeight, IntoElement, Pixels, SharedString, Window, div,
@@ -127,7 +128,7 @@ impl TokenUsageView {
 
         cx.notify();
 
-        let worker = cx.background_executor().spawn(async move { fetch.run() });
+        let worker = cx.background_executor().spawn(on_runtime(fetch.run()));
 
         cx.spawn(async move |view, cx| {
             let fetched = worker.await;

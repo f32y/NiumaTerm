@@ -77,7 +77,7 @@ impl Session {
             .collect();
     }
 
-    pub fn spawn_team(
+    pub async fn spawn_team(
         launch: &LaunchConfig,
         host_catalog: &[LaunchConfig],
         workspace: &AgentWorkspace,
@@ -98,6 +98,7 @@ impl Session {
             deliver,
             on_stderr,
         )
+        .await
     }
 
     pub fn team_capabilities(&self, backend_generation: u64) -> ModeratorAdmission {

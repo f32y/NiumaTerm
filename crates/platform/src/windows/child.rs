@@ -5,11 +5,9 @@ mod child_tests;
 use std::ffi::c_void;
 use std::io::Error;
 use std::ptr;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicPtr, Ordering};
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::task::{Context, Poll};
 
-use mio::Waker;
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::System::Threading::{
     INFINITE, RegisterWaitForSingleObject, UnregisterWaitEx, WT_EXECUTEINWAITTHREAD,
@@ -17,14 +15,6 @@ use windows_sys::Win32::System::Threading::{
 };
 
 use crate::windows::readiness::SoftReady;
-
-/// Context handed to the WinAPI wait callback. The exit event is delivered over a
-/// `std::sync::mpsc` channel (mio 1.2 has no pollable channel); the soft-ready handle
-/// wakes the event loop's `Poll` so it re-checks the receiver.
-struct CallbackCtx {
-    event_tx: Sender<()>,
-    soft: SoftReady,
-}
 
 /// WinAPI callback to run when child process exits.
 extern "system" fn child_exit_callback(ctx: *mut c_void, timed_out: bool) {
@@ -36,21 +26,20 @@ extern "system" fn child_exit_callback(ctx: *mut c_void, timed_out: bool) {
     // blocking UnregisterWaitEx has excluded any in-flight callback. Taking
     // ownership here would leak the box whenever the child outlives the
     // watcher (the callback never fires, nobody frees the allocation).
-    let ctx = unsafe { &*(ctx as *const CallbackCtx) };
+    let soft = unsafe { &*(ctx as *const SoftReady) };
 
-    let _ = ctx.event_tx.send(());
-
-    ctx.soft.set_ready();
+    // The flag records the exit before any task registers, and waking the
+    // registered task lets it observe the flag.
+    soft.set_ready();
 }
 
 /// Owns `child_handle`: the process handle is closed on drop, so callers must
 /// hand over a handle (or a duplicate) they will not close themselves.
 pub struct ChildExitWatcher {
     wait_handle: AtomicPtr<c_void>,
-    event_rx: Receiver<()>,
     soft: SoftReady,
     child_handle: HANDLE,
-    ctx: *mut CallbackCtx,
+    ctx: *mut SoftReady,
 }
 
 // HANDLE is not Send, so Send is not derived automatically for ChildExitWatcher, but raw pointers
@@ -60,15 +49,11 @@ unsafe impl Send for ChildExitWatcher {}
 
 impl ChildExitWatcher {
     pub fn new(child_handle: HANDLE) -> Result<ChildExitWatcher, Error> {
-        let (event_tx, event_rx) = channel::<()>();
         let soft = SoftReady::new();
 
         let mut wait_handle: HANDLE = ptr::null_mut();
 
-        let ctx = Box::into_raw(Box::new(CallbackCtx {
-            event_tx,
-            soft: soft.clone(),
-        }));
+        let ctx = Box::into_raw(Box::new(soft.clone()));
 
         let success = unsafe {
             RegisterWaitForSingleObject(
@@ -96,7 +81,6 @@ impl ChildExitWatcher {
         } else {
             Ok(ChildExitWatcher {
                 wait_handle: wait_handle.into(),
-                event_rx,
                 soft,
                 child_handle,
                 ctx,
@@ -104,19 +88,21 @@ impl ChildExitWatcher {
         }
     }
 
-    pub fn event_rx(&self) -> &Receiver<()> {
-        &self.event_rx
+    /// Reports whether the child has exited without waiting.
+    pub fn exited(&self) -> bool {
+        self.soft.is_ready()
     }
 
-    /// The soft-ready handle, so the `Pty` can inject the loop `Waker` at
-    /// `register()` time and surface child-exit through `drain_ready()`.
-    pub fn soft(&self) -> &SoftReady {
-        &self.soft
-    }
+    /// Complete once the child exits. The waker is installed before the check
+    /// so an exit reported between the two still wakes the task.
+    pub fn poll_exit(&self, cx: &mut Context<'_>) -> Poll<()> {
+        self.soft.register_task_waker(cx.waker());
 
-    /// Install the event loop's waker so child exit wakes the `Poll`.
-    pub fn set_waker(&self, waker: Arc<Waker>) {
-        self.soft.set_waker(waker);
+        if self.exited() {
+            Poll::Ready(())
+        } else {
+            Poll::Pending
+        }
     }
 }
 
