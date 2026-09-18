@@ -196,7 +196,15 @@ fn main() {
     // only the builder owns; the app context handed to `run` cannot reach it.
     app.on_reopen(reopen_after_last_window_closed);
 
-    app.run(move |cx: &mut App| on_finish_launching(cx, testing, platform_handle, cli_rx));
+    app.run(move |cx: &mut App| {
+        on_finish_launching(
+            cx,
+            testing,
+            #[cfg(windows)]
+            platform_handle,
+            cli_rx,
+        )
+    });
 }
 
 fn parse_startup_args() -> StartupArgs {
