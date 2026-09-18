@@ -2469,9 +2469,8 @@ impl AgentPane {
         }
 
         let cwd = self.cwd(cx);
-        let epoch = self.session.borrow().runtime().epoch();
 
-        self.history_ui.load_filesystem_history(cwd, epoch, cx);
+        self.history_ui.load_filesystem_history(cwd, cx);
     }
 
     fn seed_restored_settings(&mut self, seed: SettingsSeed) {

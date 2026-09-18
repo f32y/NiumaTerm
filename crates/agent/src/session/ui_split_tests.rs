@@ -174,14 +174,14 @@ fn summary(id: &str) -> SessionSummary {
 fn search_retires_disk_reads_and_next_history_page_replaces_matches() {
     let mut history = SessionHistory::default();
 
-    let request = history.begin_filesystem_history(None, 1);
+    let request = history.begin_filesystem_history(None);
 
     assert!(history.search_results(vec![summary("match")]));
     assert!(matches!(
-        history.publish_filesystem_count(&request, None, 1, 8),
+        history.publish_filesystem_count(&request, None, 8),
         CountPublication::Stale
     ));
-    assert!(!history.publish_filesystem_rows(&request, None, 1, vec![summary("old")]));
+    assert!(!history.publish_filesystem_rows(&request, None, vec![summary("old")]));
 
     history.append_page(vec![summary("recent"), summary("recent")]);
 
