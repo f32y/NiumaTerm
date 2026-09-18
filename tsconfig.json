@@ -9,5 +9,5 @@
     "noEmit": true,
     "isolatedModules": true
   },
-  "include": ["relay/src/**/*.ts", "downloads/src/**/*.ts"]
+  "include": ["downloads/src/**/*.ts"]
 }

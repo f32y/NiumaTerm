@@ -24,7 +24,6 @@ actions!(
         ToggleBackgroundTasks,
         ToggleWorkflows,
         ShowSettings,
-        NewRemoteTab,
         NewAgentTab,
         NewTeamTab,
         QuoteGitLine,

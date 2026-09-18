@@ -30,6 +30,3 @@ mod scrollbar;
 mod terminal_view;
 mod theme;
 mod wake;
-
-#[cfg(test)]
-mod remote_tests;

@@ -18,7 +18,6 @@ members = [
     "crates/platform",
     "crates/profiling",
     "crates/profile",
-    "crates/remote_net",
     "crates/runtime",
     "crates/shell_extension",
     "crates/terminal",
@@ -87,7 +86,6 @@ libghostty-vt-sys = { path = "third_party/libghostty-vt-sys" }
 nmt_platform = { path = "crates/platform" }
 nmt_profiling = { path = "crates/profiling" }
 nmt_profile = { path = "crates/profile" }
-nmt_remote_net = { path = "crates/remote_net" }
 nmt_runtime = { path = "crates/runtime" }
 nmt_terminal = { path = "crates/terminal" }
 nmt_updater = { path = "crates/updater" }
@@ -102,11 +100,7 @@ aes-gcm = "0.10"
 hex = "0.4"
 subtle = "2.6"
 
-# Remote session wire protocol
-base32 = "0.5"
-postcard = { version = "1", features = ["use-std"] }
 sha2 = "0.10"
-snow = "0.10"
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots"] }
 

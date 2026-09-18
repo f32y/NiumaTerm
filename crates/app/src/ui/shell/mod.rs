@@ -1,5 +1,3 @@
-#[cfg(windows)]
-pub(crate) use crate::ui::shell::actions::NewRemoteTab;
 pub(crate) use crate::ui::shell::actions::{
     CloseTab, NewAgentTab, NewTab, NewWindow, NewWorkspace, NextTab, NextWorkspace, PrevTab,
     PrevWorkspace, QuoteGitLine, ResizePaneDown, ResizePaneLeft, ResizePaneRight, ResizePaneUp,
@@ -70,11 +68,7 @@ use tracing::warn;
 use crate::agent_updates::AgentUpdates;
 use crate::agent_usage::AgentUsageView;
 use crate::cli::CliAction;
-#[cfg(windows)]
-use crate::remote;
 use crate::tabs::{Tab, TabId, TabManager};
-#[cfg(windows)]
-use crate::terminal_tab::terminal_launch::attach_remote;
 use crate::terminal_tab::terminal_launch::spawn_default_pane;
 use crate::terminal_tab::terminal_layout::TerminalLayout;
 use crate::ui::background_tasks::BackgroundTasksView;
@@ -1507,7 +1501,7 @@ impl AppWindow {
             }
 
             if settings {
-                self.retire_settings_workspace(cx);
+                self.retire_settings_workspace();
             }
 
             if was_active {
@@ -1834,70 +1828,6 @@ impl AppWindow {
             window,
             cx,
         );
-    }
-
-    /// Open a remote-session tab: connect to a paired host in the background,
-    /// then add a tab whose terminal is fed over the network by `NetPty`.
-    #[cfg(windows)]
-    pub(crate) fn on_new_remote_tab(
-        &mut self,
-        _: &NewRemoteTab,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let hosts = remote::known_hosts();
-
-        let Some(host) = hosts.into_iter().next() else {
-            window.push_notification(t!("shell-remote-no-hosts"), cx);
-
-            return;
-        };
-
-        // Connects to the first paired host; a host picker is only meaningful
-        // once a user keeps several hosts paired at the same time.
-        let id = Self::alloc_id(&mut self.next_id);
-
-        cx.spawn_in(window, async move |this, cx| {
-            let connected = cx
-                .background_executor()
-                .spawn(async move { remote::connect_new_session(&host) })
-                .await;
-
-            let _ = this.update_in(cx, |this, window, cx| match connected {
-                Ok(remote) => match attach_remote(cx, id, remote) {
-                    Ok(pane) => {
-                        this.leave_settings_workspace();
-
-                        this.register_agent_pane(&pane, cx);
-
-                        this.insert_tab(
-                            TabId(id),
-                            TabSurface::Live(TerminalLayout::new_leaf(PaneId(id), pane)),
-                            t!("shell-remote-tab-title").to_string(),
-                            window,
-                            cx,
-                        );
-                    }
-                    Err(e) => {
-                        window.push_notification(
-                            t!("shell-remote-session-failed", error = e)
-                                .into_owned()
-                                .as_str(),
-                            cx,
-                        );
-                    }
-                },
-                Err(e) => {
-                    window.push_notification(
-                        t!("shell-remote-connect-failed", error = e)
-                            .into_owned()
-                            .as_str(),
-                        cx,
-                    );
-                }
-            });
-        })
-        .detach();
     }
 
     /// Open an agent tab: an agent chat conversation in place of a terminal.
@@ -2574,11 +2504,7 @@ impl AppWindow {
 
     /// Drop the settings surface after its edits have been saved successfully.
     /// Reached from every path that removes the settings entry.
-    pub(super) fn retire_settings_workspace(&mut self, _cx: &mut Context<Self>) {
-        // Pick up relay URL / token edits made while the entry was open.
-        #[cfg(windows)]
-        ui::settings::reconcile_remote_host(_cx);
-
+    pub(super) fn retire_settings_workspace(&mut self) {
         self.settings.retire();
     }
 
@@ -3128,9 +3054,6 @@ impl AppWindow {
     }
 
     fn bind_actions(element: Div, cx: &mut Context<Self>) -> Div {
-        #[cfg(windows)]
-        let element = element.on_action(cx.listener(Self::on_new_remote_tab));
-
         element
             .on_action(cx.listener(Self::on_new_tab))
             .on_action(cx.listener(Self::on_close_tab))

@@ -1,9 +1,7 @@
 {
-  "name": "niumaterm-relay",
+  "name": "niumaterm-workers",
   "private": true,
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

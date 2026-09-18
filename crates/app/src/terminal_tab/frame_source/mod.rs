@@ -19,9 +19,11 @@ use nmt_terminal::event::BlockEvent;
 use nmt_terminal::ghostty::BlockHandle;
 use nmt_terminal::graphics::UpdateQueues;
 use nmt_terminal::render_buffer::RenderBuffer;
+#[cfg(test)]
+use nmt_terminal::session::EngineError;
 use nmt_terminal::session::page::{PAGE_ROWS, PageSource, RowPage};
 use nmt_terminal::session::{
-    BlockPoint, EngineError, SessionChange, SessionObserver, TerminalSession, TerminalSessionConfig,
+    BlockPoint, SessionChange, SessionObserver, TerminalSession, TerminalSessionConfig,
 };
 use parking_lot::Mutex;
 use tracing::trace;
@@ -75,6 +77,7 @@ impl TerminalFrameSource {
         Self::new(launch, surface_id, Some(wake_sender), colors)
     }
 
+    #[cfg(test)]
     pub(super) fn attach(
         wake: WakeSignal,
         id: u64,

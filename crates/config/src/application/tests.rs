@@ -117,7 +117,6 @@ fn patch_settings(doc: &mut DocumentMut) {
             cursor_shape: CursorShape::Beam,
             agent: &sample_agent(),
             system: &sample_system(),
-            remote_session: &remote_session::RemoteSessionConfig::default(),
             update: &update::UpdateConfig::default(),
             profiles: &sample_profiles(),
             default_profile: "PowerShell",
@@ -186,7 +185,6 @@ fn settings_patch_preserves_unknown_group_keys_and_removes_cleared_image() {
 appearance = { future-appearance = 42, background-image = "old.png" }
 agent = { future-agent = "keep" }
 system = { future-system = true }
-remote-session = { future-remote = [1, 2] }
 update = { future-update = "keep" }
 "#
     .parse::<DocumentMut>()
@@ -205,7 +203,6 @@ update = { future-update = "keep" }
             cursor_shape: CursorShape::Beam,
             agent: &sample_agent(),
             system: &sample_system(),
-            remote_session: &remote_session::RemoteSessionConfig::default(),
             update: &update::UpdateConfig::default(),
             profiles: &sample_profiles(),
             default_profile: "PowerShell",
@@ -222,13 +219,6 @@ update = { future-update = "keep" }
     );
     assert_eq!(doc["agent"]["future-agent"].as_str(), Some("keep"));
     assert_eq!(doc["system"]["future-system"].as_bool(), Some(true));
-    assert_eq!(
-        doc["remote-session"]["future-remote"]
-            .as_array()
-            .unwrap()
-            .len(),
-        2
-    );
     assert_eq!(doc["update"]["future-update"].as_str(), Some("keep"));
     assert!(
         doc["appearance"]
@@ -264,7 +254,6 @@ fn save_settings_to_creates_updates_and_rejects_invalid() {
                 cursor_shape: CursorShape::Beam,
                 agent: &sample_agent(),
                 system: &sample_system(),
-                remote_session: &remote_session::RemoteSessionConfig::default(),
                 update: &update::UpdateConfig::default(),
                 profiles: &sample_profiles(),
                 default_profile: "PowerShell",
