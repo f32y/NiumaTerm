@@ -1,4 +1,6 @@
+use std::cell::Cell;
 use std::collections::BTreeSet;
+use std::rc::Rc;
 use std::time::Duration;
 use std::{fs, io};
 
@@ -9,6 +11,7 @@ use gpui::{
     ScrollDelta, ScrollWheelEvent, StatefulInteractiveElement as _, TestAppContext, div, list,
     point, px, size,
 };
+use gpui_component::Root;
 use nmt_config::Config;
 use nmt_config::appearance::SmoothScrollingMode;
 use nmt_config::builtin_themes::{THEMES as BUILTIN_THEMES, get as builtin_theme_source};
@@ -358,7 +361,7 @@ fn paired_theme_switch_preserves_geometry_and_survives_config_reload(cx: &mut Te
         ("claude_dark", AppearanceTheme::Dark),
     ] {
         cx.update(|cx| {
-            assert!(select_theme(id.into(), cx));
+            assert!(select_theme(id.into(), Config::load_named_theme(id), cx));
             assert_eq!(cx.theme().mode.is_dark(), mode == AppearanceTheme::Dark);
             assert_eq!(cx.theme().radius, CONTROL_RADIUS);
             assert_eq!(cx.theme().radius_lg, CARD_RADIUS);
@@ -379,7 +382,11 @@ fn paired_theme_switch_preserves_geometry_and_survives_config_reload(cx: &mut Te
     cx.update(|cx| {
         let background = cx.theme().background;
 
-        assert!(!select_theme("../missing-theme".into(), cx));
+        assert!(!select_theme(
+            "../missing-theme".into(),
+            Err("missing theme".into()),
+            cx
+        ));
         assert_eq!(cx.global::<AppSettings>().config().theme, "claude_dark");
         assert_eq!(cx.theme().background, background);
     });
@@ -1293,4 +1300,74 @@ fn windows_notification_switch_keeps_setting_after_registration_failure(cx: &mut
         );
         assert!(field.is_resettable(cx));
     });
+}
+
+#[gpui::test]
+fn background_save_completes_only_after_edits_made_during_the_write_are_saved(
+    cx: &mut TestAppContext,
+) {
+    use gpui::VisualTestContext;
+
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("config.toml");
+
+    fs::write(&path, "# retained\n").unwrap();
+
+    let completed = Rc::new(Cell::new(None));
+
+    cx.update(|cx| {
+        gpui_component::init(cx);
+
+        cx.set_global(AppSettings::default());
+    });
+
+    let window = cx.add_window(|window, cx| {
+        let content = cx.new(|_| SettingsHost(SettingsSurface::default()));
+
+        Root::new(content, window, cx)
+    });
+
+    let mut cx = VisualTestContext::from_window(window.into(), cx);
+
+    cx.update(|window, cx| {
+        let completed = completed.clone();
+
+        save_settings_to(path.clone(), window, cx, move |saved, _, _| {
+            completed.set(Some(saved))
+        });
+
+        cx.global_mut::<AppSettings>()
+            .edit_appearance(|appearance| appearance.reduce_motion = true);
+
+        assert_eq!(fs::read_to_string(&path).unwrap(), "# retained\n");
+    });
+
+    assert_eq!(completed.get(), None);
+
+    cx.run_until_parked();
+
+    assert_eq!(completed.get(), Some(true));
+
+    let config: Config = toml::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+
+    assert!(config.appearance.reduce_motion);
+
+    fs::write(&path, "invalid [ configuration").unwrap();
+    completed.set(None);
+
+    cx.update(|window, cx| {
+        let completed = completed.clone();
+
+        save_settings_to(path.clone(), window, cx, move |saved, _, _| {
+            completed.set(Some(saved))
+        });
+    });
+
+    cx.run_until_parked();
+
+    assert_eq!(completed.get(), Some(false));
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        "invalid [ configuration"
+    );
 }

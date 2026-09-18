@@ -54,7 +54,7 @@ use nmt_agent::{
     AgentActivityPolicy, AgentEvent, AgentMonitor, AgentNotification, AgentRoute,
     AgentRuntimeStatus, AgentWorkspace, MonitorMutation, agent_process, request_native_delivery,
 };
-use nmt_config::local_state::{TabState, WindowLocalState, WindowState};
+use nmt_config::local_state::{WindowLocalState, WindowState};
 use nmt_config::system::WarnBeforeTerminatingShell;
 use nmt_config::{config_dir_path, get};
 use nmt_platform::filesystem::path_identity;
@@ -99,6 +99,7 @@ use crate::ui::shell::updates_layer::UpdateNotificationLayer;
 use crate::ui::shell::workspace_dirs::{
     RootAvailability, open_new_workspace_dialog, open_workspace_dirs_dialog,
 };
+use crate::ui::tab_bar::menu::refresh_saved_rooms;
 use crate::ui::tab_bar::{TabStrip, VerticalTabList, WorkspaceTabs};
 use crate::ui::title_bar::{PanelToggle, TitleBarInputs, TitleCenter, WindowTitleBar};
 use crate::ui::token_usage::TokenUsageView;
@@ -405,6 +406,8 @@ pub(crate) struct AppWindow {
     /// the close-last-workspace dialog, so it must not be restored on the
     /// next launch. Only set on the quit path — cancelling keeps everything.
     pub(crate) doomed_workspace: Option<WorkspaceId>,
+
+    settings_close_pending: bool,
 }
 
 impl Drop for AppWindow {
@@ -419,6 +422,10 @@ impl AppWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        if cx.global::<AppSettings>().config().agent.enable_agent_team {
+            refresh_saved_rooms(cx);
+        }
+
         cx.observe_global_in::<AppSettings>(window, |this, window, cx| {
             this.sync_team_setting(window, cx);
 
@@ -520,6 +527,7 @@ impl AppWindow {
             update_notifications: UpdateNotificationLayer::default(),
             root_availability: RootAvailability::default(),
             doomed_workspace: None,
+            settings_close_pending: false,
         };
 
         this.sync_session_memory(cx);
@@ -1415,8 +1423,26 @@ impl AppWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let saved = ui::settings::save_settings(window, cx);
+        if self.settings_close_pending {
+            return false;
+        }
 
+        self.settings_close_pending = true;
+
+        let shell = cx.weak_entity();
+
+        ui::settings::save_settings(window, cx, move |saved, window, cx| {
+            let _ = shell.update(cx, |this, cx| {
+                this.settings_close_pending = false;
+
+                this.finish_window_close(saved, window, cx);
+            });
+        });
+
+        false
+    }
+
+    fn finish_window_close(&mut self, saved: bool, window: &mut Window, cx: &mut Context<Self>) {
         let count: io::Result<usize> = self
             .workspaces
             .all_tabs()
@@ -1434,7 +1460,9 @@ impl AppWindow {
                 &count,
             )
         {
-            return true;
+            window.remove_window();
+
+            return;
         }
 
         let mut description = close_description(
@@ -1454,7 +1482,7 @@ impl AppWindow {
         if !saved {
             open_save_failed_close(description, note, window, cx);
 
-            return false;
+            return;
         }
 
         open_close_confirm(
@@ -1465,8 +1493,6 @@ impl AppWindow {
             note,
             |_, window, _| window.remove_window(),
         );
-
-        false
     }
 
     fn close_workspace_now(
@@ -1475,6 +1501,20 @@ impl AppWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.workspaces.kind_of(id) == Some(WorkspaceKind::Settings) {
+            let shell = cx.weak_entity();
+
+            ui::settings::save_settings(window, cx, move |saved, window, cx| {
+                if saved {
+                    let _ = shell.update(cx, |this, cx| this.remove_workspace(id, window, cx));
+                }
+            });
+        } else {
+            self.remove_workspace(id, window, cx);
+        }
+    }
+
+    fn remove_workspace(&mut self, id: WorkspaceId, window: &mut Window, cx: &mut Context<Self>) {
         let routes = self
             .workspaces
             .tabs_of(id)
@@ -1488,10 +1528,6 @@ impl AppWindow {
             .unwrap_or_default();
 
         let settings = self.workspaces.kind_of(id) == Some(WorkspaceKind::Settings);
-
-        if settings && !ui::settings::save_settings(window, cx) {
-            return;
-        }
 
         let was_active = self.workspaces.list().active_id() == id;
 
@@ -1713,16 +1749,18 @@ impl AppWindow {
             ),
         };
 
-        let surface = match runtime {
-            Ok(runtime) => TabSurface::Team(cx.new(|cx| TeamPane::new(runtime, window, cx))),
-            Err(error) => TabSurface::TeamUnavailable {
-                saved: Box::new(TabState {
-                    team_room: saved.map(|id| id.to_string()),
-                    ..TabState::default()
-                }),
-                message: error.to_string(),
-            },
-        };
+        let mut refreshed = false;
+
+        cx.observe(&runtime, move |_, runtime, cx| {
+            if !refreshed && !runtime.read(cx).loading() {
+                refreshed = true;
+
+                refresh_saved_rooms(cx);
+            }
+        })
+        .detach();
+
+        let surface = TabSurface::Team(cx.new(|cx| TeamPane::new(runtime, window, cx)));
 
         let id = Self::alloc_id(&mut self.next_id);
 

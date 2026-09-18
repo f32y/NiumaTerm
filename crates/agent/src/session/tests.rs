@@ -107,7 +107,7 @@ fn cli_session_starts_sends_images_and_rejects_cross_provider_recovery_without_a
                 bytes: &[1, 2, 3],
                 media_type: "image/png",
             }],
-            scratch: &scratch.0.join("images"),
+            image_paths: &[],
             title: None,
         })
     });

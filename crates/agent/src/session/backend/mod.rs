@@ -1,10 +1,9 @@
 #[cfg(test)]
 mod tests;
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use std::{fs, io};
 
 use futures::future::{BoxFuture, FutureExt as _, ready};
 use serde_json::Value;
@@ -70,8 +69,8 @@ pub struct PromptRequest<'a> {
     pub skill: Option<&'a SkillReference>,
     pub images: &'a [ImageAttachment<'a>],
 
-    /// Where a harness that reads images from disk has them written.
-    pub scratch: &'a Path,
+    /// Files prepared before submission for a harness that reads images by path.
+    pub image_paths: &'a [PathBuf],
 
     /// Present when this message should give the conversation its first title.
     pub title: Option<&'a ConversationTitleRequest>,
@@ -237,8 +236,7 @@ impl Backend {
     }
 
     /// Send a message and the images it carries. Each harness takes them in
-    /// its own shape: Codex reads files from disk, so the attachments are
-    /// written under the request's scratch directory first, while Claude Code
+    /// its own shape: Codex receives prepared file paths, while Claude Code
     /// and DeepSeek Harness take the bytes inline.
     ///
     /// A request carrying a title gives an unnamed conversation its first
@@ -252,30 +250,29 @@ impl Backend {
             settings,
             skill,
             images,
-            scratch,
+            image_paths,
             title,
         } = *request;
 
         match self {
             Backend::Codex(session) => {
-                let paths = match write_attachments(images.iter().copied(), scratch) {
-                    Ok(paths) => paths,
-                    Err(error) => {
-                        return SendOutcome::Rejected {
-                            message: format!("Could not save message attachments: {error}"),
-                        };
-                    }
-                };
+                if image_paths.len() != images.len() {
+                    return SendOutcome::Rejected {
+                        message: "Message images are not ready".into(),
+                    };
+                }
 
                 match title {
                     Some(title) => session.send_user_message_with_generated_title(
                         text,
                         settings,
                         skill,
-                        &paths,
+                        image_paths,
                         &title.provisional_title,
                     ),
-                    None => session.send_user_message_with_skill(text, settings, skill, &paths),
+                    None => {
+                        session.send_user_message_with_skill(text, settings, skill, image_paths)
+                    }
                 }
             }
             Backend::Claude(session) => {
@@ -952,32 +949,6 @@ fn inline_images<'a>(attachments: impl Iterator<Item = ImageAttachment<'a>>) -> 
         .map(|attachment| MessageImage {
             bytes: attachment.bytes.to_vec(),
             media_type: attachment.media_type.to_string(),
-        })
-        .collect()
-}
-
-/// All images must be available before sending so a failed write cannot
-/// silently change the message the user composed.
-fn write_attachments<'a>(
-    attachments: impl Iterator<Item = ImageAttachment<'a>>,
-    scratch: &Path,
-) -> io::Result<Vec<PathBuf>> {
-    let mut attachments = attachments.peekable();
-
-    if attachments.peek().is_none() {
-        return Ok(Vec::new());
-    }
-
-    fs::create_dir_all(scratch)?;
-
-    attachments
-        .enumerate()
-        .map(|(index, attachment)| {
-            // Position-based names overwrite matching images on later sends
-            // instead of creating a new set of filenames for every turn.
-            let path = scratch.join(format!("image-{}.png", index + 1));
-
-            fs::write(&path, attachment.bytes).map(|()| path)
         })
         .collect()
 }

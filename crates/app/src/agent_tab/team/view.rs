@@ -7,8 +7,8 @@ mod tests;
 
 use gpui::prelude::*;
 use gpui::{
-    Anchor, AnyElement, App, Context, Entity, FocusHandle, Focusable, Render, Subscription, Window,
-    div, px,
+    Anchor, AnyElement, App, Context, Entity, FocusHandle, Focusable, Render, Subscription, Task,
+    Window, div, px,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{Enter, Escape, Textarea, TextareaState};
@@ -46,11 +46,22 @@ pub struct TeamPane {
     timeline: TimelineMirror,
     member_draft: MemberDraft,
     error: Option<String>,
+    loaded: bool,
+    submitting: bool,
+    adding_member: bool,
+    abandoning: bool,
     _observers: Vec<Subscription>,
 }
 
 impl TeamPane {
     pub fn new(runtime: Entity<TeamRuntime>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        cx.on_release(|this, cx| {
+            this.runtime
+                .update(cx, |runtime, cx| runtime.close(cx))
+                .detach();
+        })
+        .detach();
+
         let input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .auto_grow(1, 8)
@@ -63,6 +74,11 @@ impl TeamPane {
         let transcript = cx.new(|_| TranscriptView::new(AgentKind::Codex, None));
 
         let changed = cx.observe(&runtime, |this, _, cx| {
+            if !this.loaded && !this.runtime.read(cx).loading() {
+                this.targeting = DiscussionTargeting::from_room(this.runtime.read(cx).room());
+                this.loaded = true;
+            }
+
             this.timeline
                 .sync_timeline(&this.runtime, &this.transcript, cx);
 
@@ -70,6 +86,8 @@ impl TeamPane {
         });
 
         let targeting = DiscussionTargeting::from_room(runtime.read(cx).room());
+
+        let loaded = !runtime.read(cx).loading();
 
         let mut pane = Self {
             runtime,
@@ -81,6 +99,10 @@ impl TeamPane {
             timeline: TimelineMirror::default(),
             member_draft,
             error: None,
+            loaded,
+            submitting: false,
+            adding_member: false,
+            abandoning: false,
             _observers: vec![changed],
         };
 
@@ -91,7 +113,7 @@ impl TeamPane {
     }
 
     pub fn room_id(&self, cx: &App) -> RoomId {
-        self.runtime.read(cx).room().id()
+        self.runtime.read(cx).id()
     }
 
     pub fn runtime(&self) -> &Entity<TeamRuntime> {
@@ -102,35 +124,47 @@ impl TeamPane {
         self.input.update(cx, |input, cx| input.focus(window, cx));
     }
 
-    fn perform(&mut self, command: TeamCommand, cx: &mut Context<Self>) -> bool {
-        match self
+    fn perform(&mut self, command: TeamCommand, cx: &mut Context<Self>) -> Task<bool> {
+        let result = self
             .runtime
-            .update(cx, |runtime, cx| runtime.command(command, cx))
-        {
-            Ok(()) => {
-                self.error = None;
+            .update(cx, |runtime, cx| runtime.command(command, cx));
 
-                true
-            }
-            Err(error) => {
-                self.error = Some(match error {
-                    TeamError::Unavailable => self
-                        .runtime
-                        .read(cx)
-                        .error()
-                        .map(str::to_owned)
-                        .unwrap_or_else(|| t!("team-unavailable").into_owned()),
-                    error => error.to_string(),
-                });
+        cx.spawn(async move |this, cx| {
+            let result = result.await;
 
-                cx.notify();
+            this.update(cx, |this, cx| match result {
+                Ok(()) => {
+                    this.error = None;
 
-                false
-            }
-        }
+                    cx.notify();
+
+                    true
+                }
+                Err(error) => {
+                    this.error = Some(match error {
+                        TeamError::Unavailable => this
+                            .runtime
+                            .read(cx)
+                            .error()
+                            .map(str::to_owned)
+                            .unwrap_or_else(|| t!("team-unavailable").into_owned()),
+                        error => error.to_string(),
+                    });
+
+                    cx.notify();
+
+                    false
+                }
+            })
+            .unwrap_or(false)
+        })
     }
 
     fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.submitting || self.runtime.read(cx).loading() {
+            return;
+        }
+
         let input = UserInput {
             text: self.input.read(cx).text().to_string(),
             ..UserInput::default()
@@ -159,16 +193,43 @@ impl TeamPane {
             }
         };
 
-        if self.perform(command, cx) {
-            self.input
-                .update(cx, |input, cx| input.set_value("", window, cx));
+        let text = self.input.read(cx).text().to_string();
 
-            self.transcript.update(cx, |transcript, cx| {
-                transcript.scroll_to_bottom();
+        self.submitting = true;
 
-                cx.notify();
-            });
-        }
+        cx.notify();
+
+        let result = self.perform(command, cx);
+        let pane = cx.weak_entity();
+
+        window
+            .spawn(cx, async move |cx| {
+                let saved = result.await;
+
+                let _ = cx.update(|window, cx| {
+                    let _ = pane.update(cx, |this, cx| {
+                        this.submitting = false;
+
+                        cx.notify();
+
+                        if !saved {
+                            return;
+                        }
+
+                        if *this.input.read(cx).text() == text {
+                            this.input
+                                .update(cx, |input, cx| input.set_value("", window, cx));
+                        }
+
+                        this.transcript.update(cx, |transcript, cx| {
+                            transcript.scroll_to_bottom();
+
+                            cx.notify();
+                        });
+                    });
+                });
+            })
+            .detach();
     }
 
     fn stop(&mut self, cx: &mut Context<Self>) {
@@ -182,7 +243,7 @@ impl TeamPane {
             .collect();
 
         for member in members {
-            self.perform(TeamCommand::Stop(member), cx);
+            self.perform(TeamCommand::Stop(member), cx).detach();
         }
     }
 
@@ -200,6 +261,10 @@ impl TeamPane {
     }
 
     fn add_member(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.adding_member || self.runtime.read(cx).loading() {
+            return;
+        }
+
         let Some((profile, config)) = self
             .member_draft
             .configuration(self.runtime.read(cx).room().workspace().clone(), cx)
@@ -207,23 +272,40 @@ impl TeamPane {
             return;
         };
 
-        match self
+        self.adding_member = true;
+
+        let task = self
             .runtime
-            .update(cx, |runtime, cx| runtime.add_member(profile, config, cx))
-        {
-            Ok(id) => {
-                self.targeting.member_added(id);
+            .update(cx, |runtime, cx| runtime.add_member(profile, config, cx));
 
-                self.member_draft.clear(window, cx);
+        let pane = cx.weak_entity();
 
-                self.error = None;
+        window
+            .spawn(cx, async move |cx| {
+                let result = task.await;
 
-                window.close_dialog(cx);
-            }
-            Err(error) => self.error = Some(error.to_string()),
-        }
+                let _ = cx.update(|window, cx| {
+                    let _ = pane.update(cx, |this, cx| {
+                        this.adding_member = false;
 
-        cx.notify();
+                        match result {
+                            Ok(id) => {
+                                this.targeting.member_added(id);
+
+                                this.member_draft.clear(window, cx);
+
+                                this.error = None;
+
+                                window.close_dialog(cx);
+                            }
+                            Err(error) => this.error = Some(error.to_string()),
+                        }
+
+                        cx.notify();
+                    });
+                });
+            })
+            .detach();
     }
 
     fn render_controls(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -232,7 +314,6 @@ impl TeamPane {
         let pending_recovery: Vec<_> = self
             .runtime
             .read(cx)
-            .session
             .pending_recovery()
             .map(|attempt| {
                 (
@@ -272,7 +353,8 @@ impl TeamPane {
                                 pane.perform(
                                     TeamCommand::AutomaticSummaries(!controls.automatic_summaries),
                                     cx,
-                                );
+                                )
+                                .detach();
                             });
                         }),
                 )
@@ -317,18 +399,64 @@ impl TeamPane {
                                         )
                                         .into_owned(),
                                     )
-                                    .on_ok(move |_, _, cx| {
-                                        pane.update(cx, |pane, cx| {
-                                            for (id, _) in &attempts {
-                                                if !pane
-                                                    .perform(TeamCommand::AbandonRestored(*id), cx)
-                                                {
-                                                    return false;
-                                                }
+                                    .on_ok(move |_, window, cx| {
+                                        let started = pane.update(cx, |pane, _| {
+                                            if pane.abandoning {
+                                                return false;
                                             }
 
+                                            pane.abandoning = true;
+
                                             true
-                                        })
+                                        });
+
+                                        if !started {
+                                            return false;
+                                        }
+
+                                        let pane = pane.downgrade();
+                                        let attempts = attempts.clone();
+
+                                        window
+                                            .spawn(cx, async move |cx| {
+                                                let mut saved = true;
+
+                                                for (id, _) in attempts {
+                                                    let task = cx.update(|_, cx| {
+                                                        pane.update(cx, |pane, cx| {
+                                                            pane.perform(
+                                                                TeamCommand::AbandonRestored(id),
+                                                                cx,
+                                                            )
+                                                        })
+                                                    });
+
+                                                    let Ok(Ok(task)) = task else {
+                                                        return;
+                                                    };
+
+                                                    if !task.await {
+                                                        saved = false;
+
+                                                        break;
+                                                    }
+                                                }
+
+                                                let _ = cx.update(|window, cx| {
+                                                    let _ = pane.update(cx, |pane, cx| {
+                                                        pane.abandoning = false;
+
+                                                        cx.notify();
+                                                    });
+
+                                                    if saved {
+                                                        window.close_dialog(cx);
+                                                    }
+                                                });
+                                            })
+                                            .detach();
+
+                                        false
                                     })
                             });
                         }),
@@ -351,14 +479,7 @@ impl TeamPane {
                 let progress = Button::new("team-progress")
                     .ghost()
                     .small()
-                    .disabled(
-                        self.runtime
-                            .read(cx)
-                            .session
-                            .pending_recovery()
-                            .next()
-                            .is_some(),
-                    )
+                    .disabled(self.runtime.read(cx).pending_recovery().next().is_some())
                     .label(if paused {
                         t!("team-continue")
                     } else {
@@ -372,7 +493,8 @@ impl TeamPane {
                                 TeamCommand::Pause(id)
                             },
                             cx,
-                        );
+                        )
+                        .detach();
                     }));
 
                 let actions = Button::new("team-discussion-actions")
@@ -392,14 +514,15 @@ impl TeamPane {
                                             count: 4,
                                         },
                                         cx,
-                                    );
+                                    )
+                                    .detach();
                                 });
                             },
                         ))
                         .item(
                             PopupMenuItem::new(t!("team-finish")).on_click(move |_, _, cx| {
                                 finish.update(cx, |pane, cx| {
-                                    pane.perform(TeamCommand::Finish(id), cx);
+                                    pane.perform(TeamCommand::Finish(id), cx).detach();
                                 });
                             }),
                         )
@@ -427,9 +550,20 @@ impl TeamPane {
                 return;
             };
 
-            if !self.perform(command, cx) {
-                return;
-            }
+            let result = self.perform(command, cx);
+
+            cx.spawn(async move |this, cx| {
+                if result.await {
+                    let _ = this.update(cx, |this, cx| {
+                        this.targeting.set_mode(selection);
+
+                        cx.notify();
+                    });
+                }
+            })
+            .detach();
+
+            return;
         }
 
         self.targeting.set_mode(selection);
@@ -450,8 +584,20 @@ impl TeamPane {
         if let Some(id) = active
             && let Some(command) =
                 DiscussionTargeting::change_mode(id, self.targeting.moderated(), Some(author))
-            && !self.perform(command, cx)
         {
+            let result = self.perform(command, cx);
+
+            cx.spawn(async move |this, cx| {
+                if result.await {
+                    let _ = this.update(cx, |this, cx| {
+                        this.targeting.set_author(author);
+
+                        cx.notify();
+                    });
+                }
+            })
+            .detach();
+
             return;
         }
 
@@ -482,7 +628,6 @@ impl TeamPane {
             });
 
             let needs_recovery = runtime
-                .session
                 .pending_recovery()
                 .any(|attempt| attempt.intent.recipient == member.id());
 
@@ -611,6 +756,7 @@ impl Render for TeamPane {
         let runtime = self.runtime.read(cx);
         let empty = runtime.room().members().is_empty();
         let running = runtime.hosts.values().any(|host| host.active.is_some());
+        let loading = runtime.loading();
 
         let failure = self
             .error
@@ -623,7 +769,7 @@ impl Render for TeamPane {
         let send = send_button(
             "team-send",
             running,
-            !running && self.targeting.selected().is_empty(),
+            loading || self.submitting || (!running && self.targeting.selected().is_empty()),
         )
         .on_click(cx.listener(move |this, _, window, cx| {
             if running {

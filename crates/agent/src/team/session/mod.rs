@@ -181,6 +181,16 @@ impl TeamSession {
         id: AttemptId,
         send: impl FnOnce(&DispatchIntent) -> SendOutcome,
     ) -> Result<SendOutcome, TeamError> {
+        let intent = self.prepare_dispatch(id)?;
+        let outcome = send(&intent);
+
+        self.finish_dispatch(id, &outcome)?;
+
+        Ok(outcome)
+    }
+
+    /// Persist the charged attempt before handing its request to a transport.
+    pub fn prepare_dispatch(&mut self, id: AttemptId) -> Result<DispatchIntent, TeamError> {
         let attempt = self
             .store
             .room()
@@ -209,7 +219,16 @@ impl TeamSession {
             return Err(TeamError::Busy);
         }
 
-        Ok(dispatch::dispatch(&mut self.store, id, send)?)
+        Ok(dispatch::prepare(&mut self.store, id)?)
+    }
+
+    /// Record the transport result before processing provider events for it.
+    pub fn finish_dispatch(
+        &mut self,
+        id: AttemptId,
+        outcome: &SendOutcome,
+    ) -> Result<(), TeamError> {
+        Ok(dispatch::finish(&mut self.store, id, outcome)?)
     }
 
     fn has_live_attempts(&self) -> bool {

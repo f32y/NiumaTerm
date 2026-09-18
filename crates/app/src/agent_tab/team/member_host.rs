@@ -7,7 +7,6 @@ use nmt_agent::session::{PromptRequest, RecoveryIdentity};
 use nmt_agent::team::attempt::DispatchIntent;
 use nmt_agent::team::model::{AttemptId, InteractionId};
 
-use crate::agent_tab::composer::attachments::scratch_dir;
 use crate::agent_tab::execution::SessionOwner;
 use crate::agent_tab::team::dispatch::{WorkStatus, work_status};
 
@@ -88,8 +87,6 @@ impl MemberHost {
                 return SendOutcome::NotReady;
             }
 
-            let scratch = scratch_dir(session.agent_route().as_str());
-
             let result = state.submit(
                 intent.prepared_text.clone(),
                 |backend, text| {
@@ -98,7 +95,7 @@ impl MemberHost {
                         settings,
                         skill: None,
                         images: &[],
-                        scratch: &scratch,
+                        image_paths: &[],
                         title: None,
                     })
                 },

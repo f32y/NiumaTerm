@@ -1,10 +1,55 @@
+use std::fs;
 use std::io::Cursor;
 
-use gpui::{Image, ImageFormat};
+use gpui::{ClipboardEntry, Image, ImageFormat, TestAppContext};
+use tempfile::tempdir;
 
 use crate::agent_tab::composer::attachments::{
     AttachError, MAX_ATTACHMENTS, MAX_IMAGE_EDGE, PendingAttachments, attach_png, placeholder_text,
+    prepare_paste,
 };
+
+#[gpui::test]
+async fn prepared_images_use_distinct_files_and_discarded_results_are_cleaned(
+    cx: &mut TestAppContext,
+) {
+    let directory = tempdir().unwrap();
+    let scratch = directory.path().join("attachments");
+    let executor = cx.executor();
+    let output = scratch.clone();
+    let worker = executor.clone();
+
+    let (mut first, second) = executor
+        .spawn(async move {
+            let first = prepare_paste(
+                vec![ClipboardEntry::Image(png(4, 5))],
+                Some(output.clone()),
+                worker.clone(),
+            )
+            .unwrap();
+
+            let second =
+                prepare_paste(vec![ClipboardEntry::Image(png(8, 9))], Some(output), worker)
+                    .unwrap();
+
+            (first, second)
+        })
+        .await;
+
+    let accepted = first.path.take().unwrap();
+    let discarded = second.path.clone().unwrap();
+
+    assert_ne!(accepted, discarded);
+    assert_eq!(fs::read(&accepted).unwrap(), first.image.bytes());
+    assert_eq!(fs::read(&discarded).unwrap(), second.image.bytes());
+
+    drop(second);
+
+    cx.run_until_parked();
+
+    assert!(!discarded.exists());
+    assert!(accepted.exists());
+}
 
 /// A real encoded PNG, because attaching decodes what it is given.
 fn png(width: u32, height: u32) -> Image {

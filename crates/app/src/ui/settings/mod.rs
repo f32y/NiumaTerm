@@ -32,6 +32,7 @@ mod agent_profile_page;
 mod appearance_page;
 mod card;
 mod fields;
+mod hooks;
 #[cfg(target_os = "macos")]
 mod macos_page;
 mod opacity;
@@ -48,9 +49,11 @@ mod theme_gallery;
 mod tests;
 
 use std::borrow::Cow;
-use std::{io, path};
+use std::io;
+use std::path::PathBuf;
 
 use app::design::SETTINGS_NAV_WIDTH;
+use app::utils::background_write;
 #[cfg(test)]
 use gpui::WindowBackgroundAppearance;
 use gpui::{
@@ -74,11 +77,10 @@ use gpui_component::{
     ActiveTheme as _, Disableable as _, Sizable as _, Theme, WindowExt as _, h_flex, v_flex,
 };
 use nmt_agent::HookInstallStatus;
-use nmt_agent::claude_code::hook as claude_hook;
-use nmt_agent::codex::hook as codex_hook;
 use nmt_agent::update::{DiscoverySupport, InstallationKey, ProviderKind, UpdatePhase};
 #[cfg(test)]
 use nmt_config::CursorShape;
+use nmt_config::config_file_path;
 use nmt_config::system::{NewlineShortcut, WarnBeforeTerminatingShell};
 #[cfg(windows)]
 use nmt_platform::{
@@ -88,7 +90,6 @@ use nmt_platform::{
 use rust_i18n::t;
 use tracing::warn;
 
-#[cfg(windows)]
 #[cfg(windows)]
 use crate::PlatformHandle;
 use crate::agent_updates::AgentUpdates;
@@ -104,6 +105,7 @@ use crate::ui::settings::fields::{
     background_image_field, background_image_opacity_field, background_opacity_field,
     tab_shape_field,
 };
+use crate::ui::settings::hooks::{AgentHooks, Hook};
 #[cfg(test)]
 use crate::ui::settings::opacity::{
     effective_background_image_layer_opacity, effective_background_opacity,
@@ -152,6 +154,9 @@ struct OpenSettings {
 
 impl SettingsSurface {
     pub(super) fn open(&mut self, window: &mut Window, cx: &mut Context<AppWindow>) {
+        Hook::Claude.refresh(None, cx);
+        Hook::Codex.refresh(None, cx);
+
         let state = SettingsState::owned(SelectIndex::default(), window, cx);
         let editing = cx.new(|_| SettingsEditing::default());
 
@@ -190,6 +195,9 @@ fn new_settings_view(
         cx.observe_global::<AgentUpdates>(|view, cx| view.refresh(cx))
             .detach();
 
+        cx.observe_global::<AgentHooks>(|view, cx| view.refresh(cx))
+            .detach();
+
         cx.observe_global::<Theme>(|view, cx| view.refresh(cx))
             .detach();
 
@@ -201,8 +209,46 @@ struct SettingsSaveFailure;
 
 /// Keep failed edits in memory and offer another write after the user fixes
 /// the configuration file or its permissions.
-pub(crate) fn save_settings(window: &mut Window, cx: &mut App) -> bool {
-    match cx.global::<AppSettings>().save() {
+pub(crate) fn save_settings(
+    window: &mut Window,
+    cx: &mut App,
+    completed: impl FnOnce(bool, &mut Window, &mut App) + 'static,
+) {
+    save_settings_to(config_file_path(), window, cx, completed);
+}
+
+fn save_settings_to(
+    path: PathBuf,
+    window: &mut Window,
+    cx: &mut App,
+    completed: impl FnOnce(bool, &mut Window, &mut App) + 'static,
+) {
+    let settings = cx.global::<AppSettings>().clone();
+    let config = settings.config().clone();
+    let target = path.clone();
+    let saved = background_write(cx, move || settings.save_to(&target));
+
+    window
+        .spawn(cx, async move |cx| {
+            let result = saved.await;
+
+            let _ = cx.update(|window, cx| {
+                if result.is_ok() && *cx.global::<AppSettings>().config() != config {
+                    save_settings_to(path, window, cx, completed);
+
+                    return;
+                }
+
+                let saved = settings_save_completed(result, window, cx);
+
+                completed(saved, window, cx);
+            });
+        })
+        .detach();
+}
+
+fn settings_save_completed(result: io::Result<()>, window: &mut Window, cx: &mut App) -> bool {
+    match result {
         Ok(()) => {
             window.remove_notification::<SettingsSaveFailure>(cx);
 
@@ -225,7 +271,7 @@ pub(crate) fn save_settings(window: &mut Window, cx: &mut App) -> bool {
                         Button::new("retry-settings-save")
                             .label(t!("shell-updates-retry"))
                             .on_click(|_, window, cx| {
-                                save_settings(window, cx);
+                                save_settings(window, cx, |_, _, _| {});
                             })
                     }),
                 cx,

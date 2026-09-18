@@ -5,103 +5,345 @@ mod controls;
 mod dispatch;
 mod events;
 mod member_host;
+mod operations;
 mod view;
 
-use std::collections::BTreeMap;
+#[cfg(test)]
+mod tests;
+
+use std::collections::{BTreeMap, VecDeque};
 use std::path::Path;
 
-use gpui::{App, AppContext as _, Context, Entity};
+use futures::channel::oneshot;
+use gpui::{App, AppContext as _, BackgroundExecutor, Context, Entity, Task};
 use nmt_agent::AgentWorkspace;
-use nmt_agent::session::lifecycle::Status;
-use nmt_agent::session::team_capabilities::{ModeratorAdmission, TeamLaunch};
+use nmt_agent::chat::SendOutcome;
+use nmt_agent::session::team_capabilities::TeamLaunch;
 use nmt_agent::session::{AgentKind, RecoveryIdentity};
-use nmt_agent::team::attempt::{AttemptState, BudgetScope, Invocation};
-use nmt_agent::team::discussion::{DiscussionState, PauseReason};
+use nmt_agent::team::attempt::{Attempt, AttemptState, Invocation};
 use nmt_agent::team::member::MemberConfig;
-use nmt_agent::team::model::{AttemptId, InteractionId, MemberId, RoomId};
+use nmt_agent::team::model::{AttemptId, MemberId, RoomId};
 use nmt_agent::team::room::Room;
 use nmt_agent::team::session::{AttemptEventKey, TeamError, TeamSession};
 use nmt_config::profile::AgentProfile;
 
 use crate::agent_tab::execution::{AgentSession, ExecutionSignal, SessionOwner};
 use crate::agent_tab::settings::AgentSettings;
-use crate::agent_tab::team::dispatch::{CONTEXT_LIMITS, WorkStatus, work_status};
-use crate::agent_tab::team::events::DecisionArguments;
 use crate::agent_tab::team::member_host::MemberHost;
+use crate::agent_tab::team::operations::MemberSnapshot;
 
-/// Session owners stay alive when the Team view is hidden. Provider events
-/// update the durable room before another arrangement becomes eligible.
+type Operation = Box<dyn FnOnce(&mut TeamRuntime, &mut Context<TeamRuntime>)>;
+
+/// The UI observes the last saved room. One operation owns the session on a
+/// background thread until its complete storage update has finished.
 pub struct TeamRuntime {
-    session: TeamSession,
+    session: Option<TeamSession>,
+    room: Room,
+    id: RoomId,
+    recovery: Vec<Attempt>,
+    revision: u64,
+    pending: VecDeque<Operation>,
+    executor: BackgroundExecutor,
     hosts: BTreeMap<MemberId, MemberHost>,
     error: Option<String>,
     scheduled: bool,
+    refresh_again: bool,
+    loading: bool,
+    load_failed: bool,
     closed: bool,
 }
 
 impl Drop for TeamRuntime {
     fn drop(&mut self) {
-        if !self.closed
-            && let Err(error) = self.session.close()
-        {
-            tracing::warn!("could not save closed Team: {error}");
+        if let Some(mut session) = self.session.take() {
+            self.executor
+                .spawn(async move {
+                    if let Err(error) = session.close() {
+                        tracing::warn!("could not save closed Team: {error}");
+                    }
+                })
+                .detach();
         }
     }
 }
 
 impl TeamRuntime {
-    pub fn create(
-        data_directory: &Path,
-        workspace: AgentWorkspace,
-        cx: &mut App,
-    ) -> Result<Entity<Self>, TeamError> {
-        let session = TeamSession::create(data_directory, Room::new(workspace))?;
+    pub fn create(directory: &Path, workspace: AgentWorkspace, cx: &mut App) -> Entity<Self> {
+        let room = Room::new(workspace);
+        let directory = directory.to_owned();
+        let initial = room.clone();
 
-        Ok(cx.new(|_| Self::new(session)))
+        Self::load(
+            room.id(),
+            room,
+            move || TeamSession::create(&directory, initial),
+            cx,
+        )
     }
 
-    pub fn open(
-        data_directory: &Path,
+    pub fn open(directory: &Path, id: RoomId, cx: &mut App) -> Entity<Self> {
+        let directory = directory.to_owned();
+
+        Self::load(
+            id,
+            Room::new(AgentWorkspace::default()),
+            move || TeamSession::open(&directory, id),
+            cx,
+        )
+    }
+
+    fn load(
         id: RoomId,
+        room: Room,
+        load: impl FnOnce() -> Result<TeamSession, TeamError> + Send + 'static,
         cx: &mut App,
-    ) -> Result<Entity<Self>, TeamError> {
-        let session = TeamSession::open(data_directory, id)?;
-        let entity = cx.new(|_| Self::new(session));
+    ) -> Entity<Self> {
+        let task = cx.background_executor().spawn(async move { load() });
 
-        entity.update(cx, |this, cx| {
-            let members: Vec<_> = this.room().members().iter().filter(|member| !member.excluded()).cloned().collect();
-
-            for member in members {
-                let profile = cx.global::<AgentSettings>().profiles.iter().find(|profile| profile.kind == member.profile().kind && profile.name == member.profile().name).cloned();
-
-                match profile {
-                    Some(profile) => this.attach_member(member.id(), profile, cx),
-                    None => { this.error = Some(format!("The profile for {} is unavailable. Restore that profile before continuing.", member.name())); }
-                }
-            }
-
-            this.schedule(cx);
-        });
-
-        Ok(entity)
-    }
-
-    fn new(session: TeamSession) -> Self {
-        Self {
-            session,
+        let entity = cx.new(|cx| Self {
+            session: None,
+            room,
+            id,
+            recovery: Vec::new(),
+            revision: 0,
+            pending: VecDeque::new(),
+            executor: cx.background_executor().clone(),
             hosts: BTreeMap::new(),
             error: None,
             scheduled: false,
+            refresh_again: false,
+            loading: true,
+            load_failed: false,
+            closed: false,
+        });
+
+        entity.update(cx, |_, cx| {
+            cx.on_app_quit(|this, cx| {
+                let closed = this.close(cx);
+
+                async move {
+                    let _ = closed.await;
+                }
+            })
+            .detach();
+        });
+
+        let weak = entity.downgrade();
+        let keep_alive = entity.clone();
+        let executor = cx.background_executor().clone();
+
+        cx.spawn(async move |cx| {
+            let mut loaded = Some(task.await);
+
+            let _ = weak.update(cx, |this, cx| {
+                this.loading = false;
+
+                match loaded.take().unwrap() {
+                    Ok(session) => {
+                        this.install(session);
+
+                        if !this.closed {
+                            let members: Vec<_> = this
+                                .room
+                                .members()
+                                .iter()
+                                .filter(|member| !member.excluded())
+                                .cloned()
+                                .collect();
+
+                            for member in members {
+                                let profile = cx
+                                    .global::<AgentSettings>()
+                                    .profiles
+                                    .iter()
+                                    .find(|profile| {
+                                        profile.kind == member.profile().kind
+                                            && profile.name == member.profile().name
+                                    })
+                                    .cloned();
+
+                                if let Some(profile) = profile {
+                                    this.attach_member(member.id(), profile, cx);
+                                } else {
+                                    this.error = Some(format!(
+                                        "The profile for {} is unavailable. Restore that profile before continuing.",
+                                        member.name()
+                                    ));
+                                }
+                            }
+
+                            this.schedule(cx);
+                        }
+
+                        this.start_next(cx);
+                    }
+                    Err(error) => {
+                        this.load_failed = true;
+                        this.error = Some(error.to_string());
+
+                        this.pending.clear();
+                    }
+                }
+
+                cx.notify();
+            });
+
+            if let Some(Ok(mut session)) = loaded {
+                executor
+                    .spawn(async move {
+                        let _ = session.close();
+                    })
+                    .detach();
+            }
+
+            drop(keep_alive);
+        })
+        .detach();
+
+        entity
+    }
+
+    #[cfg(test)]
+    fn new(session: TeamSession, executor: BackgroundExecutor) -> Self {
+        let room = session.store().room().clone();
+
+        Self {
+            id: room.id(),
+            room,
+            recovery: session.pending_recovery().cloned().collect(),
+            revision: session.store().revision(),
+            session: Some(session),
+            pending: VecDeque::new(),
+            executor,
+            hosts: BTreeMap::new(),
+            error: None,
+            scheduled: false,
+            refresh_again: false,
+            loading: false,
+            load_failed: false,
             closed: false,
         }
     }
 
+    fn install(&mut self, session: TeamSession) {
+        self.room = session.store().room().clone();
+        self.recovery = session.pending_recovery().cloned().collect();
+        self.revision = session.store().revision();
+        self.session = Some(session);
+    }
+
+    pub fn id(&self) -> RoomId {
+        self.id
+    }
+
     pub fn room(&self) -> &Room {
-        self.session.store().room()
+        &self.room
     }
 
     pub fn error(&self) -> Option<&str> {
         self.error.as_deref()
+    }
+
+    pub fn loading(&self) -> bool {
+        self.loading
+    }
+
+    fn pending_recovery(&self) -> impl Iterator<Item = &Attempt> {
+        self.recovery.iter()
+    }
+
+    fn enqueue(&mut self, operation: Operation, cx: &mut Context<Self>) {
+        self.pending.push_back(operation);
+        self.start_next(cx);
+    }
+
+    fn start_next(&mut self, cx: &mut Context<Self>) {
+        if self.session.is_some()
+            && let Some(operation) = self.pending.pop_front()
+        {
+            operation(self, cx);
+        }
+    }
+
+    fn run<R: Send + 'static>(
+        &mut self,
+        work: impl FnOnce(&mut TeamSession) -> Result<R, TeamError> + Send + 'static,
+        apply: impl FnOnce(&mut Self, &Result<R, TeamError>, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<R, TeamError>> {
+        if self.load_failed {
+            return Task::ready(Err(TeamError::Unavailable));
+        }
+
+        let (sender, receiver) = oneshot::channel();
+
+        self.enqueue(
+            Box::new(move |this, cx| this.start(work, apply, sender, cx)),
+            cx,
+        );
+
+        cx.spawn(async move |_, _| receiver.await.unwrap_or(Err(TeamError::Unavailable)))
+    }
+
+    fn run_now<R: Send + 'static>(
+        &mut self,
+        work: impl FnOnce(&mut TeamSession) -> Result<R, TeamError> + Send + 'static,
+        apply: impl FnOnce(&mut Self, &Result<R, TeamError>, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<R, TeamError>> {
+        let (sender, receiver) = oneshot::channel();
+
+        self.start(work, apply, sender, cx);
+
+        cx.spawn(async move |_, _| receiver.await.unwrap_or(Err(TeamError::Unavailable)))
+    }
+
+    fn start<R: Send + 'static>(
+        &mut self,
+        work: impl FnOnce(&mut TeamSession) -> Result<R, TeamError> + Send + 'static,
+        apply: impl FnOnce(&mut Self, &Result<R, TeamError>, &mut Context<Self>) + 'static,
+        sender: oneshot::Sender<Result<R, TeamError>>,
+        cx: &mut Context<Self>,
+    ) {
+        let mut session = self.session.take().expect("one Team operation at a time");
+
+        let task = cx.background_executor().spawn(async move {
+            let result = work(&mut session);
+
+            (session, result)
+        });
+
+        let executor = self.executor.clone();
+        let keep_alive = cx.entity();
+
+        cx.spawn(async move |this, cx| {
+            let (session, result) = task.await;
+
+            let mut finished = Some(session);
+
+            let _ = this.update(cx, |this, cx| {
+                this.install(finished.take().unwrap());
+
+                apply(this, &result, cx);
+
+                let _ = sender.send(result);
+
+                this.start_next(cx);
+
+                cx.notify();
+            });
+
+            if let Some(mut session) = finished {
+                executor
+                    .spawn(async move {
+                        let _ = session.close();
+                    })
+                    .detach();
+            }
+
+            drop(keep_alive);
+        })
+        .detach();
     }
 
     pub fn add_member(
@@ -109,18 +351,29 @@ impl TeamRuntime {
         profile: AgentProfile,
         config: MemberConfig,
         cx: &mut Context<Self>,
-    ) -> Result<MemberId, TeamError> {
-        if config.profile.kind != profile.kind || config.profile.name != profile.name {
-            return Err(TeamError::Unavailable);
-        }
+    ) -> Task<Result<MemberId, TeamError>> {
+        let valid = config.profile.kind == profile.kind
+            && config.profile.name == profile.name
+            && !self.closed;
 
-        let id = self.session.add_member(config)?;
+        self.run(
+            move |session| {
+                if !valid {
+                    return Err(TeamError::Unavailable);
+                }
 
-        self.attach_member(id, profile, cx);
-
-        self.schedule(cx);
-
-        Ok(id)
+                session.add_member(config)
+            },
+            move |this, result, cx| {
+                if let Ok(id) = result
+                    && !this.closed
+                {
+                    this.attach_member(*id, profile, cx);
+                    this.schedule(cx);
+                }
+            },
+            cx,
+        )
     }
 
     fn attach_member(&mut self, id: MemberId, profile: AgentProfile, cx: &mut Context<Self>) {
@@ -172,428 +425,250 @@ impl TeamRuntime {
     fn schedule(&mut self, cx: &mut Context<Self>) {
         cx.notify();
 
-        if self.scheduled || self.closed {
+        if self.closed {
+            return;
+        }
+
+        if self.scheduled {
+            self.refresh_again = true;
+
             return;
         }
 
         self.scheduled = true;
 
-        cx.spawn(async move |this, cx| {
-            let _ = this.update(cx, |this, cx| {
+        self.enqueue(Box::new(|this, cx| this.pump(cx)), cx);
+    }
+
+    fn pump(&mut self, cx: &mut Context<Self>) {
+        if self.closed {
+            self.scheduled = false;
+
+            self.start_next(cx);
+
+            return;
+        }
+
+        let mut members: Vec<_> = self
+            .hosts
+            .iter()
+            .map(|(id, host)| MemberSnapshot::capture(*id, host, cx))
+            .collect();
+
+        self.run_now(
+            move |session| {
+                let pending = operations::refresh(session, &mut members)?;
+
+                Ok((members, pending))
+            },
+            |this, result, cx| {
                 this.scheduled = false;
 
-                if let Err(error) = this.pump(cx) {
+                if this.closed {
+                    return;
+                }
+
+                if let Err(error) = result {
                     this.error = Some(error.to_string());
                 }
 
-                cx.notify();
-            });
-        })
+                if let Ok((members, pending)) = result {
+                    for member in members {
+                        if let Some(message) = &member.start_failure {
+                            this.error = Some(message.clone());
+                        }
+
+                        if let Some(host) = this.hosts.get_mut(&member.id) {
+                            host.active = member.active;
+                            host.interaction = member.interaction;
+                            host.ready_epoch = member.ready_epoch;
+                        }
+                    }
+
+                    for id in pending {
+                        this.dispatch(*id, cx);
+                    }
+                }
+
+                if this.refresh_again {
+                    this.refresh_again = false;
+
+                    this.schedule(cx);
+                }
+            },
+            cx,
+        )
         .detach();
     }
 
-    pub fn close(&mut self, cx: &mut Context<Self>) -> Result<(), TeamError> {
+    pub fn close(&mut self, cx: &mut Context<Self>) -> Task<Result<(), TeamError>> {
         self.closed = true;
 
-        self.session.close()?;
+        self.run(
+            |session| session.close(),
+            |this, result, cx| {
+                if let Err(error) = result {
+                    tracing::warn!("could not save closed Team: {error}");
+                    this.error = Some(error.to_string());
+                }
 
-        for host in self.hosts.values() {
-            host.interrupt(cx);
-
-            host.owner.close();
-        }
-
-        Ok(())
+                for host in this.hosts.values() {
+                    host.interrupt(cx);
+                    host.owner.close();
+                }
+            },
+            cx,
+        )
     }
 
     pub fn command(
         &mut self,
         command: TeamCommand,
         cx: &mut Context<Self>,
-    ) -> Result<(), TeamError> {
-        let busy = self.hosts.values().any(|host| host.is_busy(cx));
+    ) -> Task<Result<(), TeamError>> {
+        if self.load_failed {
+            return Task::ready(Err(TeamError::Unavailable));
+        }
 
-        match command {
-            TeamCommand::Continue(_) | TeamCommand::Exclude(_) if busy => {
-                return Err(TeamError::Busy);
-            }
-            TeamCommand::Skip { .. } if busy => return Err(TeamError::Unresolved),
-            TeamCommand::ChangeMode { discussion, .. } if busy => {
-                self.session
-                    .pause_discussion(discussion, PauseReason::ModeChange)?;
+        let closed = self.closed;
+        let (sender, receiver) = oneshot::channel();
 
-                return Err(TeamError::Busy);
-            }
-            TeamCommand::Finish(discussion) if busy => {
-                self.session
-                    .pause_discussion(discussion, PauseReason::User)?;
-
-                return Err(TeamError::Unresolved);
-            }
-            TeamCommand::AbandonRestored(id) => {
-                let attempt = self
-                    .session
-                    .pending_recovery()
-                    .find(|attempt| attempt.id == id)
-                    .ok_or(TeamError::Unresolved)?;
-
-                if self
+        self.enqueue(
+            Box::new(move |this, cx| {
+                let busy: Vec<_> = this
                     .hosts
-                    .get(&attempt.intent.recipient)
-                    .is_some_and(|host| host.is_busy(cx))
-                {
-                    return Err(TeamError::Busy);
-                }
-
-                self.session.abandon_restored_attempt(id)?;
-            }
-            TeamCommand::Direct { input, recipients } => {
-                self.session
-                    .direct_request(input, recipients, &CONTEXT_LIMITS)?;
-            }
-            TeamCommand::Start {
-                input,
-                participants,
-                mode,
-            } => {
-                self.session.start_discussion(input, participants, mode)?;
-            }
-            TeamCommand::Correction(input) => {
-                self.session.record_user_input(input)?;
-            }
-            TeamCommand::Pause(id) => {
-                self.session.pause_discussion(id, PauseReason::User)?;
-            }
-            TeamCommand::Continue(id) => self.session.continue_discussion(id)?,
-            TeamCommand::AddTurns { discussion, count } => {
-                self.session.add_turns(discussion, count)?
-            }
-            TeamCommand::Finish(id) => self.session.finish_with_report(id)?,
-            TeamCommand::Skip {
-                discussion,
-                operation,
-            } => self.session.skip_arrangement(discussion, operation)?,
-            TeamCommand::ChangeMode { discussion, mode } => {
-                self.session.change_mode(discussion, mode)?
-            }
-            TeamCommand::AutomaticSummaries(enabled) => {
-                self.session.set_automatic_summaries(enabled)?
-            }
-            TeamCommand::MemberSettings { member, settings } => {
-                self.session.set_member_settings(member, settings)?;
-
-                let settings = self
-                    .room()
-                    .member(member)
-                    .ok_or(TeamError::Unavailable)?
-                    .settings()
-                    .clone();
-
-                self.hosts
-                    .get(&member)
-                    .ok_or(TeamError::Unavailable)?
-                    .apply_settings(settings, cx);
-            }
-            TeamCommand::Exclude(member) => self.session.exclude_member(member)?,
-            TeamCommand::Stop(member) => {
-                let discussions: Vec<_> = self
-                    .room()
-                    .discussions()
                     .iter()
-                    .map(|discussion| discussion.id())
+                    .filter(|(_, host)| host.is_busy(cx))
+                    .map(|(id, _)| *id)
                     .collect();
 
-                for discussion in discussions {
-                    self.session
-                        .pause_discussion(discussion, PauseReason::User)?;
-                }
+                let settings_member = match &command {
+                    TeamCommand::MemberSettings { member, .. } => Some(*member),
+                    _ => None,
+                };
 
-                self.hosts
-                    .get(&member)
-                    .ok_or(TeamError::Unavailable)?
-                    .interrupt(cx);
-            }
-        }
+                let stopped = match &command {
+                    TeamCommand::Stop(member) => Some(*member),
+                    _ => None,
+                };
 
-        self.error = None;
+                this.start(
+                    move |session| {
+                        if closed {
+                            return Err(TeamError::Unavailable);
+                        }
 
-        self.schedule(cx);
+                        operations::command(session, command, &busy)
+                    },
+                    move |this, result, cx| {
+                        if result.is_ok() && !this.closed {
+                            this.error = None;
 
-        Ok(())
+                            if let Some(id) = settings_member
+                                && let Some(member) = this.room.member(id)
+                                && let Some(host) = this.hosts.get(&id)
+                            {
+                                host.apply_settings(member.settings().clone(), cx);
+                            }
+
+                            if let Some(id) = stopped
+                                && let Some(host) = this.hosts.get(&id)
+                            {
+                                host.interrupt(cx);
+                            }
+
+                            this.schedule(cx);
+                        }
+                    },
+                    sender,
+                    cx,
+                );
+            }),
+            cx,
+        );
+
+        cx.spawn(async move |_, _| receiver.await.unwrap_or(Err(TeamError::Unavailable)))
     }
 
-    fn pump(&mut self, cx: &mut Context<Self>) -> Result<(), TeamError> {
-        if self.closed {
-            return Ok(());
-        }
-
-        self.sync_work(cx)?;
-
-        self.recover_completed_replies(cx)?;
-
-        if self.session.pending_recovery().next().is_some() {
-            return Ok(());
-        }
-
-        self.sync_ready_members(cx)?;
-
-        let discussion = self
-            .room()
-            .discussions()
-            .iter()
-            .find(|discussion| {
-                matches!(
-                    discussion.state(),
-                    DiscussionState::Running | DiscussionState::Finishing
-                )
-            })
-            .map(|discussion| discussion.id());
-
-        if let Some(id) = discussion
-            && !self.hosts.values().any(|host| host.is_busy(cx))
-        {
-            self.session.advance_discussion(id, &CONTEXT_LIMITS)?;
-        }
-
-        let pending: Vec<_> = self
-            .room()
-            .attempts()
-            .iter()
-            .filter(|attempt| attempt.state == AttemptState::Reserved)
-            .map(|attempt| attempt.id)
-            .collect();
-
-        for id in pending {
-            match self.dispatch(id, cx) {
-                Ok(()) | Err(TeamError::Busy | TeamError::Paused | TeamError::Unavailable) => {}
-                Err(error) => return Err(error),
-            }
-        }
-
-        Ok(())
-    }
-
-    fn sync_work(&mut self, cx: &App) -> Result<(), TeamError> {
-        for (id, host) in &mut self.hosts {
-            let session = host.owner.session().read(cx);
-            let work = work_status(session);
-
-            if let Some(attempt_id) = host.active {
-                let attempt = self
-                    .session
-                    .store()
-                    .room()
+    fn dispatch(&mut self, id: AttemptId, cx: &mut Context<Self>) {
+        self.enqueue(
+            Box::new(move |this, cx| {
+                let eligible = this
+                    .room
                     .attempts()
                     .iter()
-                    .find(|attempt| attempt.id == attempt_id)
-                    .ok_or(TeamError::Unavailable)?;
+                    .find(|attempt| attempt.id == id)
+                    .filter(|attempt| {
+                        matches!(attempt.intent.invocation, Invocation::MemberConversation)
+                    })
+                    .and_then(|attempt| this.hosts.get(&attempt.intent.recipient))
+                    .is_some_and(|host| !host.is_busy(cx));
 
-                let unresolved = matches!(
-                    attempt.state,
-                    AttemptState::Sending | AttemptState::Accepted | AttemptState::Uncertain
-                );
+                if !eligible || this.closed {
+                    this.start_next(cx);
 
-                if !unresolved && work == WorkStatus::default() {
-                    host.active = None;
-                }
-            }
-
-            let discussion_ids: Vec<_> = self
-                .session
-                .store()
-                .room()
-                .discussions()
-                .iter()
-                .filter(|discussion| discussion.state() != DiscussionState::Completed)
-                .map(|discussion| discussion.id())
-                .collect();
-
-            if work.interaction && host.interaction.is_none() {
-                let interaction = InteractionId::new();
-
-                for discussion in &discussion_ids {
-                    self.session
-                        .pause_discussion(*discussion, PauseReason::Interaction(interaction))?;
+                    return;
                 }
 
-                host.interaction = Some(interaction);
-            } else if !work.interaction
-                && let Some(interaction) = host.interaction.take()
-            {
-                for discussion in &discussion_ids {
-                    self.session
-                        .resolve_pause(*discussion, &PauseReason::Interaction(interaction))?;
-                }
-            }
+                this.run_now(
+                    move |session| match session.prepare_dispatch(id) {
+                        Ok(intent) => Ok(Some(intent)),
+                        Err(TeamError::Busy | TeamError::Paused | TeamError::Unavailable) => {
+                            Ok(None)
+                        }
+                        Err(error) => Err(error),
+                    },
+                    move |this, result, cx| {
+                        if let Err(error) = result {
+                            this.error = Some(error.to_string());
+                        }
 
-            let state = session.controller.borrow();
+                        let Ok(Some(intent)) = result else { return };
 
-            if let Some(backend) = state.runtime().backend()
-                && let Some(provider) = backend.recovery_identity()
-            {
-                let member = self
-                    .session
-                    .store()
-                    .room()
-                    .member(*id)
-                    .ok_or(TeamError::Unavailable)?;
+                        let recipient = intent.recipient;
 
-                let registered = member.moderator_registered()
-                    || backend
-                        .team_capabilities(session.kind, state.runtime().epoch())
-                        .check(state.runtime().epoch())
-                        .is_ok();
+                        let outcome = if this.closed {
+                            SendOutcome::NotReady
+                        } else {
+                            match (
+                                this.hosts.get_mut(&intent.recipient),
+                                this.room.member(intent.recipient),
+                            ) {
+                                (Some(host), Some(member)) => {
+                                    host.active = Some(id);
 
-                self.session
-                    .record_provider_identity(*id, &provider.id, registered)?;
-            }
+                                    host.submit(intent, member.settings(), cx)
+                                }
+                                _ => SendOutcome::NotReady,
+                            }
+                        };
 
-            if state.runtime().update_suspension().is_some() {
-                for discussion in &discussion_ids {
-                    self.session
-                        .pause_discussion(*discussion, PauseReason::Maintenance(id.to_string()))?;
-                }
+                        this.run_now(
+                            move |session| session.finish_dispatch(id, &outcome),
+                            move |this, result, cx| {
+                                if let Err(error) = result {
+                                    this.error = Some(error.to_string());
+                                }
 
-                host.ready_epoch = None;
-            }
+                                if this.room.attempts().iter().any(|attempt| {
+                                    attempt.id == id && attempt.state == AttemptState::Rejected
+                                }) && let Some(host) = this.hosts.get_mut(&recipient)
+                                {
+                                    host.active = None;
+                                }
 
-            match state.runtime().status() {
-                Status::Idle if state.runtime().update_suspension().is_none() => {
-                    for discussion in &discussion_ids {
-                        self.session.resolve_pause(
-                            *discussion,
-                            &PauseReason::Maintenance(id.to_string()),
-                        )?;
-                    }
-                }
-                Status::Exited => {
-                    if let Some(attempt_id) = host.active
-                        && let Some(attempt) = self
-                            .session
-                            .store()
-                            .room()
-                            .attempts()
-                            .iter()
-                            .find(|attempt| attempt.id == attempt_id)
-                        && matches!(
-                            attempt.state,
-                            AttemptState::Sending | AttemptState::Accepted
-                        )
-                    {
-                        self.session.fail_attempt(
-                            AttemptEventKey {
-                                attempt: attempt_id,
-                                member: *id,
-                                backend_generation: attempt.intent.backend_generation,
+                                this.schedule(cx);
                             },
-                            true,
-                        )?;
-                    }
-
-                    self.session.member_unavailable(*id)?;
-
-                    host.ready_epoch = None;
-
-                    if let Some(message) = state.runtime().start_failure() {
-                        self.error = Some(message.to_owned());
-                    }
-                }
-                Status::Starting | Status::Running | Status::Idle => {}
-            }
-        }
-
-        Ok(())
-    }
-
-    fn sync_ready_members(&mut self, cx: &App) -> Result<(), TeamError> {
-        for (id, host) in &mut self.hosts {
-            let session = host.owner.session().read(cx);
-            let state = session.controller.borrow();
-
-            if state.runtime().status() != Status::Idle
-                || state.runtime().update_suspension().is_some()
-            {
-                continue;
-            }
-
-            let member = self
-                .session
-                .store()
-                .room()
-                .member(*id)
-                .ok_or(TeamError::Unavailable)?;
-
-            if state.controls.settings != *member.settings() {
-                self.session
-                    .set_member_settings(*id, state.controls.settings.clone())?;
-            }
-
-            let epoch = state.runtime().epoch();
-
-            if host.ready_epoch == Some(epoch) {
-                continue;
-            }
-
-            let capabilities = state
-                .runtime()
-                .backend()
-                .map(|backend| backend.team_capabilities(session.kind, epoch))
-                .unwrap_or_else(|| ModeratorAdmission::unverified(session.kind));
-
-            self.session.member_ready(*id, epoch, capabilities)?;
-
-            host.ready_epoch = Some(epoch);
-        }
-
-        Ok(())
-    }
-
-    fn dispatch(&mut self, id: AttemptId, cx: &mut Context<Self>) -> Result<(), TeamError> {
-        let attempt = self
-            .room()
-            .attempts()
-            .iter()
-            .find(|attempt| attempt.id == id)
-            .ok_or(TeamError::Unavailable)?
-            .clone();
-
-        if !matches!(attempt.intent.invocation, Invocation::MemberConversation) {
-            return Err(TeamError::Unavailable);
-        }
-
-        let host = self
-            .hosts
-            .get(&attempt.intent.recipient)
-            .ok_or(TeamError::Unavailable)?;
-
-        if host.is_busy(cx) {
-            return Err(TeamError::Busy);
-        }
-
-        let settings = self
-            .room()
-            .member(attempt.intent.recipient)
-            .map(|member| member.settings().clone())
-            .ok_or(TeamError::Unavailable)?;
-
-        let outcome = self
-            .session
-            .dispatch(id, |intent| host.submit(intent, &settings, cx));
-
-        if self.room().attempts().iter().any(|attempt| {
-            attempt.id == id
-                && matches!(
-                    attempt.state,
-                    AttemptState::Sending | AttemptState::Uncertain
+                            cx,
+                        )
+                        .detach();
+                    },
+                    cx,
                 )
-        }) && let Some(host) = self.hosts.get_mut(&attempt.intent.recipient)
-        {
-            host.active = Some(id);
-        }
-
-        outcome?;
-
-        Ok(())
+                .detach();
+            }),
+            cx,
+        );
     }
 
     fn on_execution(&mut self, member: MemberId, signal: &ExecutionSignal, cx: &mut Context<Self>) {
@@ -601,33 +676,8 @@ impl TeamRuntime {
             return;
         }
 
-        if let Err(error) = self.apply_execution(member, signal, cx) {
-            self.error = Some(error.to_string());
-        }
-
-        self.schedule(cx);
-    }
-
-    fn apply_execution(
-        &mut self,
-        member: MemberId,
-        signal: &ExecutionSignal,
-        cx: &mut Context<Self>,
-    ) -> Result<(), TeamError> {
-        let Some(host) = self.hosts.get(&member) else {
-            return Ok(());
-        };
-
-        let Some(id) = host.active else { return Ok(()) };
-
-        let Some(attempt) = self
-            .room()
-            .attempts()
-            .iter()
-            .find(|attempt| attempt.id == id)
-            .cloned()
-        else {
-            return Ok(());
+        let Some(attempt) = self.hosts.get(&member).and_then(|host| host.active) else {
+            return;
         };
 
         let epoch = match signal {
@@ -636,134 +686,49 @@ impl TeamRuntime {
             | ExecutionSignal::Decision { epoch, .. } => *epoch,
         };
 
-        let key = AttemptEventKey {
-            attempt: id,
-            member,
-            backend_generation: epoch,
+        let decision = match signal {
+            ExecutionSignal::Decision { request, .. } => Some(request.clone()),
+            _ => None,
         };
 
-        if epoch != attempt.intent.backend_generation {
-            return Ok(());
-        }
+        let failure = match signal {
+            ExecutionSignal::Finished { error, .. } => error.clone(),
+            _ => None,
+        };
 
-        match signal {
-            ExecutionSignal::Accepted { id, .. } => {
-                self.session.accept_attempt(key, id)?;
-            }
-            ExecutionSignal::Finished {
-                id, error, text, ..
-            } => {
-                if attempt.provider_turn.as_deref() != Some(id.as_str()) {
-                    return Ok(());
+        let signal = signal.clone();
+
+        self.run(
+            move |session| {
+                operations::execution(
+                    session,
+                    AttemptEventKey {
+                        attempt,
+                        member,
+                        backend_generation: epoch,
+                    },
+                    signal,
+                )
+            },
+            move |this, result, cx| {
+                if let Err(error) = result {
+                    this.error = Some(error.to_string());
                 }
 
-                if let Some(error) = error {
-                    self.session.fail_attempt(key, false)?;
-
-                    self.error = Some(error.clone());
-                } else {
-                    self.session.complete_reply(key, id, text.clone())?;
-                }
-            }
-            ExecutionSignal::Decision { request, .. } => {
-                let mut accepted = false;
-                let mut failure = None;
-
-                if attempt.provider_turn.as_deref() == Some(request.provider_turn.as_str()) {
-                    if let Some((stage, operation, action)) =
-                        serde_json::from_value::<DecisionArguments>(request.arguments.clone())
-                            .ok()
-                            .and_then(DecisionArguments::moderator_action)
-                    {
-                        match self
-                            .session
-                            .moderator_decision(key, stage, operation, action)
-                        {
-                            Ok(result) => accepted = result,
-                            Err(error) => failure = Some(error),
-                        }
-                    }
-
-                    if !accepted
-                        && let BudgetScope::Discussion(discussion) = attempt.intent.budget
-                        && let Err(error) = self.session.pause_discussion(
-                            discussion,
-                            PauseReason::InvalidModeration(attempt.intent.operation),
-                        )
-                    {
-                        failure = Some(error);
-                    }
+                if let Some(request) = decision
+                    && let Some(host) = this.hosts.get(&member)
+                {
+                    host.respond_decision(&request, matches!(result, Ok(true)), cx);
                 }
 
-                host.respond_decision(request, accepted, cx);
-
-                if let Some(error) = failure {
-                    return Err(error);
+                if let Some(failure) = failure {
+                    this.error = Some(failure);
                 }
-            }
-        }
 
-        Ok(())
-    }
-
-    fn recover_completed_replies(&mut self, cx: &App) -> Result<(), TeamError> {
-        let pending: Vec<_> = self.session.pending_recovery().cloned().collect();
-
-        for attempt in pending {
-            let Some(host) = self.hosts.get(&attempt.intent.recipient) else {
-                continue;
-            };
-
-            let session = host.owner.session().read(cx);
-
-            if work_status(session) != Default::default() {
-                continue;
-            }
-
-            let state = session.controller.borrow();
-
-            if state.runtime().status() != Status::Idle {
-                continue;
-            }
-
-            let Some(backend) = state.runtime().backend() else {
-                continue;
-            };
-
-            let Some(identity) = backend.recovery_identity() else {
-                continue;
-            };
-
-            let Some(member) = self.room().member(attempt.intent.recipient) else {
-                continue;
-            };
-
-            if member.profile().kind != identity.kind
-                || member.provider_id() != Some(identity.id.as_str())
-            {
-                continue;
-            }
-
-            let Some(turn) = backend
-                .team_recovered_turns()
-                .iter()
-                .find(|turn| attempt.provider_turn.as_deref() == Some(turn.id.as_str()))
-            else {
-                continue;
-            };
-
-            let key = AttemptEventKey {
-                attempt: attempt.id,
-                member: attempt.intent.recipient,
-                backend_generation: attempt.intent.backend_generation,
-            };
-
-            self.session.accept_attempt(key, &turn.id)?;
-
-            self.session
-                .complete_reply(key, &turn.id, turn.text.clone())?;
-        }
-
-        Ok(())
+                this.schedule(cx);
+            },
+            cx,
+        )
+        .detach();
     }
 }

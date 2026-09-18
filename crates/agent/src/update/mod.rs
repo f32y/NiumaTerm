@@ -22,6 +22,7 @@ use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use thiserror::Error;
+use tokio::task::JoinHandle;
 use tracing::warn;
 
 use crate::json::collapse;
@@ -524,41 +525,51 @@ impl UpdateCoordinator {
 
         let result = maintenance.probe(&launcher).await;
 
-        let mut inner = self.inner.lock();
+        let write = {
+            let mut inner = self.inner.lock();
 
-        let record = inner.records.get_mut(key).expect("registered installation");
+            let record = inner.records.get_mut(key).expect("registered installation");
 
-        record.busy = false;
+            record.busy = false;
 
-        match &result {
-            Ok(status) => {
-                let now = (self.now)();
+            match &result {
+                Ok(status) => {
+                    let now = (self.now)();
 
-                record.last_checked = Some(now);
-                record.state = status.clone().into();
+                    record.last_checked = Some(now);
+                    record.state = status.clone().into();
 
-                if manual {
-                    record.dismissed_target = None;
+                    if manual {
+                        record.dismissed_target = None;
+                    }
+
+                    if matches!(status.support, DiscoverySupport::Supported) {
+                        let entry = CacheEntry {
+                            status: cacheable_status(status),
+                            checked_at: now,
+                            dismissed_target: record.dismissed_target.clone(),
+                        };
+
+                        inner.cache.installations.insert(key.to_string(), entry);
+
+                        drop(inner);
+
+                        Some(self.persist_cache())
+                    } else {
+                        None
+                    }
                 }
+                Err(error) => {
+                    record.state.phase = UpdatePhase::Failed;
+                    record.state.error = Some(error.clone());
 
-                if matches!(status.support, DiscoverySupport::Supported) {
-                    let entry = CacheEntry {
-                        status: cacheable_status(status),
-                        checked_at: now,
-                        dismissed_target: record.dismissed_target.clone(),
-                    };
-
-                    inner.cache.installations.insert(key.to_string(), entry);
-
-                    drop(inner);
-
-                    self.persist_cache();
+                    None
                 }
             }
-            Err(error) => {
-                record.state.phase = UpdatePhase::Failed;
-                record.state.error = Some(error.clone());
-            }
+        };
+
+        if let Some(write) = write {
+            let _ = write.await;
         }
 
         result
@@ -752,15 +763,19 @@ impl UpdateCoordinator {
         self.persist_cache();
     }
 
-    fn persist_cache(&self) {
-        // Serialize disk replacement before taking the latest snapshot, so an
-        // older caller cannot overwrite newer state after waiting for a writer.
-        let _write = self.cache_write.lock();
-        let cache = self.inner.lock().cache.clone();
+    fn persist_cache(&self) -> JoinHandle<()> {
+        let coordinator = self.clone();
 
-        if let Err(error) = write_cache(&self.cache_path, &cache) {
-            warn!("failed to save agent update state: {error}");
-        }
+        nmt_runtime::handle().spawn_blocking(move || {
+            // Read the latest snapshot after acquiring the writer lock, so
+            // workers scheduled out of order cannot restore an older value.
+            let _write = coordinator.cache_write.lock();
+            let cache = coordinator.inner.lock().cache.clone();
+
+            if let Err(error) = write_cache(&coordinator.cache_path, &cache) {
+                warn!("failed to save agent update state: {error}");
+            }
+        })
     }
 
     pub fn hide_notification(&self, key: &InstallationKey) {

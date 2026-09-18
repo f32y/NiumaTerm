@@ -5,7 +5,7 @@ use std::time::Duration;
 use app::design::{CARD_RADIUS, CONTROL_RADIUS};
 use futures::StreamExt as _;
 use futures::channel::mpsc::unbounded;
-use gpui::{App, BorrowAppContext as _, Entity, Task};
+use gpui::{App, AsyncApp, BorrowAppContext as _, Entity, Task, WeakEntity};
 use gpui_component::{
     Theme as ComponentTheme, ThemeConfig as ComponentThemeConfig,
     ThemeRegistry as ComponentThemeRegistry, ThemeToken as ComponentThemeToken,
@@ -98,13 +98,7 @@ fn apply_ui_constants(theme: &mut ComponentTheme) {
     theme.colors.sidebar_border = theme.colors.sidebar_border.opacity(UI_BORDER_OPACITY);
 }
 
-pub(super) fn select_theme(name: String, cx: &mut App) -> bool {
-    let theme = if name.is_empty() {
-        Ok(Theme::default())
-    } else {
-        Config::load_named_theme(&name)
-    };
-
+pub(super) fn select_theme(name: String, theme: Result<Theme, String>, cx: &mut App) -> bool {
     match theme {
         Ok(theme) => {
             if let Some(ui) = theme.ui_theme()
@@ -133,73 +127,102 @@ pub(super) fn select_theme(name: String, cx: &mut App) -> bool {
     }
 }
 
-fn reload_themes(editing: &Entity<SettingsEditing>, cx: &mut App) {
-    let selected = cx.global::<AppSettings>().config().theme.clone();
-    let applied = select_theme(selected.clone(), cx);
+async fn reload_themes(editing: &WeakEntity<SettingsEditing>, cx: &mut AsyncApp) {
+    let selected = cx.update(|cx| cx.global::<AppSettings>().config().theme.clone());
+    let name = selected.clone();
 
-    let mut themes = Config::load_themes();
+    let (theme, mut themes) = cx
+        .background_executor()
+        .spawn(async move {
+            let theme = if name.is_empty() {
+                Ok(Theme::default())
+            } else {
+                Config::load_named_theme(&name)
+            };
 
-    editing.update(cx, |editing, cx| {
-        // A partial file save must not remove the active card or replace the
-        // currently displayed palette with a fallback.
-        if !applied {
-            themes.retain(|(id, _)| id != &selected);
+            (theme, Config::load_themes())
+        })
+        .await;
 
-            if let Some(previous) = editing
-                .theme_families
-                .iter()
-                .flat_map(|family| &family.variants)
-                .find(|choice| choice.id == selected)
-            {
-                themes.push((previous.id.clone(), previous.theme.clone()));
-            }
+    cx.update(|cx| {
+        let Some(editing) = editing.upgrade() else {
+            return;
+        };
+
+        if cx.global::<AppSettings>().config().theme != selected {
+            return;
         }
 
-        editing.theme_families = Rc::new(theme_families(themes));
-        editing.theme_load_failed = !applied;
+        let applied = select_theme(selected.clone(), theme, cx);
 
-        cx.notify();
+        editing.update(cx, |editing, cx| {
+            // A partial file save must not remove the active card or replace the
+            // currently displayed palette with a fallback.
+            if !applied {
+                themes.retain(|(id, _)| id != &selected);
+
+                if let Some(previous) = editing
+                    .theme_families
+                    .iter()
+                    .flat_map(|family| &family.variants)
+                    .find(|choice| choice.id == selected)
+                {
+                    themes.push((previous.id.clone(), previous.theme.clone()));
+                }
+            }
+
+            editing.theme_families = Rc::new(theme_families(themes));
+            editing.theme_load_failed = !applied;
+
+            cx.notify();
+        });
     });
 }
 
 pub(super) fn watch_themes(editing: &Entity<SettingsEditing>, cx: &mut App) -> Option<Task<()>> {
-    reload_themes(editing, cx);
-
     let themes_dir = config_dir_path().join("themes");
-
-    if let Err(err) = fs::create_dir_all(&themes_dir) {
-        warn!("failed to create themes directory: {err}");
-
-        return None;
-    }
 
     let (tx, mut rx) = unbounded();
 
-    let mut watcher = match recommended_watcher(move |event: NotifyResult<NotifyEvent>| {
-        if let Ok(event) = event
-            && (event.kind.is_create() || event.kind.is_modify() || event.kind.is_remove())
-        {
-            let _ = tx.unbounded_send(());
+    let watcher = cx.background_executor().spawn(async move {
+        if let Err(err) = fs::create_dir_all(&themes_dir) {
+            warn!("failed to create themes directory: {err}");
+
+            return None;
         }
-    }) {
-        Ok(watcher) => watcher,
-        Err(err) => {
+
+        let mut watcher = match recommended_watcher(move |event: NotifyResult<NotifyEvent>| {
+            if let Ok(event) = event
+                && (event.kind.is_create() || event.kind.is_modify() || event.kind.is_remove())
+            {
+                let _ = tx.unbounded_send(());
+            }
+        }) {
+            Ok(watcher) => watcher,
+            Err(err) => {
+                warn!("failed to watch themes directory: {err}");
+
+                return None;
+            }
+        };
+
+        if let Err(err) = watcher.watch(&themes_dir, RecursiveMode::NonRecursive) {
             warn!("failed to watch themes directory: {err}");
 
             return None;
         }
-    };
 
-    if let Err(err) = watcher.watch(&themes_dir, RecursiveMode::NonRecursive) {
-        warn!("failed to watch themes directory: {err}");
-
-        return None;
-    }
+        Some(watcher)
+    });
 
     let editing = editing.downgrade();
 
     Some(cx.spawn(async move |cx| {
-        let _watcher = watcher;
+        let watcher = watcher.await;
+
+        reload_themes(&editing, cx).await;
+
+        let Some(_watcher) = watcher else { return };
 
         while rx.next().await.is_some() {
             cx.background_executor()
@@ -208,11 +231,11 @@ pub(super) fn watch_themes(editing: &Entity<SettingsEditing>, cx: &mut App) -> O
 
             while rx.try_recv().is_ok() {}
 
-            let Some(editing) = editing.upgrade() else {
+            if editing.upgrade().is_none() {
                 break;
-            };
+            }
 
-            cx.update(|cx| reload_themes(&editing, cx));
+            reload_themes(&editing, cx).await;
         }
     }))
 }

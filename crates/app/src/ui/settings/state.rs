@@ -30,6 +30,7 @@ use rust_i18n::t;
 
 /// Persistent settings are shared with the configuration reader and writer.
 /// Picker state lives separately and never enters a pane snapshot.
+#[derive(Clone)]
 pub struct AppSettings {
     config: Config,
     discard_on_exit: bool,

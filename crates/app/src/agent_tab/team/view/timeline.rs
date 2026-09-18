@@ -60,7 +60,7 @@ impl TimelineMirror {
             }
         }
 
-        let revision = runtime.session.store().revision();
+        let revision = runtime.revision;
 
         if self.revision == Some(revision) {
             for (id, text) in live {
