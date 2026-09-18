@@ -1,15 +1,17 @@
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 use std::sync::Arc;
+use std::task::{Context, Poll as TaskPoll};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use futures::task::AtomicWaker;
 use gpui::{FontFallbacks, px};
 use nmt_config::CursorShape;
 use nmt_config::appearance::InputStyle;
 use nmt_config::colors::Colors;
 use nmt_config::system::NewlineShortcut;
-use nmt_platform::{EventedPty, Interest, Poll, ProcessReadWrite, Token, Waker, WinsizeBuilder};
+use nmt_platform::{AsyncPty, WinsizeBuilder, poll_nonblocking};
 use nmt_terminal::session::TerminalSession;
 use nmt_terminal::termio::SessionOptions;
 use parking_lot::Mutex;
@@ -24,24 +26,19 @@ use crate::terminal_tab::wake::wake_channel;
 struct TestPty {
     output: Arc<TestOutput>,
     input: Arc<Mutex<Vec<u8>>>,
-    read_token: Token,
-    write_token: Token,
-    child_token: Token,
 }
 
 #[derive(Default)]
 pub(crate) struct TestOutput {
     bytes: Mutex<VecDeque<u8>>,
-    waker: Mutex<Option<Arc<Waker>>>,
+    task_waker: AtomicWaker,
 }
 
 impl TestOutput {
     pub(crate) fn push(&self, bytes: &[u8]) {
         self.bytes.lock().extend(bytes);
 
-        if let Some(waker) = &*self.waker.lock() {
-            waker.wake().unwrap();
-        }
+        self.task_waker.wake();
     }
 }
 
@@ -93,76 +90,26 @@ impl Write for TestPty {
     }
 }
 
-impl ProcessReadWrite for TestPty {
-    type Reader = Self;
+impl AsyncPty for TestPty {
+    fn poll_read(&mut self, cx: &mut Context<'_>, buf: &mut [u8]) -> TaskPoll<io::Result<usize>> {
+        self.output.task_waker.register(cx.waker());
 
-    type Writer = Self;
-
-    fn reader(&mut self) -> &mut Self {
-        self
-    }
-
-    fn writer(&mut self) -> &mut Self {
-        self
-    }
-
-    fn read_token(&self) -> Token {
-        self.read_token
-    }
-
-    fn write_token(&self) -> Token {
-        self.write_token
-    }
-
-    fn set_winsize(&mut self, _: WinsizeBuilder) -> io::Result<()> {
-        Ok(())
-    }
-
-    fn register(
-        &mut self,
-        _: &Poll,
-        tokens: &mut dyn Iterator<Item = Token>,
-        _: Interest,
-        waker: &Arc<Waker>,
-    ) -> io::Result<()> {
-        self.read_token = tokens.next().unwrap();
-        self.write_token = tokens.next().unwrap();
-        self.child_token = tokens.next().unwrap();
-        *self.output.waker.lock() = Some(waker.clone());
-
-        Ok(())
-    }
-
-    fn reregister(&mut self, _: &Poll, _: Interest) -> io::Result<()> {
-        Ok(())
-    }
-
-    fn deregister(&mut self, _: &Poll) -> io::Result<()> {
-        Ok(())
-    }
-
-    fn drain_ready(&self) -> Vec<Token> {
-        let mut tokens = vec![self.write_token];
-
-        if !self.output.bytes.lock().is_empty() {
-            tokens.push(self.read_token);
+        match self.read(buf) {
+            Ok(0) => TaskPoll::Pending,
+            result => poll_nonblocking(cx, result),
         }
-
-        tokens
     }
 
-    fn has_ready(&self) -> bool {
-        !self.output.bytes.lock().is_empty()
-    }
-}
-
-impl EventedPty for TestPty {
-    fn child_event_token(&self) -> Token {
-        self.child_token
+    fn poll_write(&mut self, cx: &mut Context<'_>, buf: &[u8]) -> TaskPoll<io::Result<usize>> {
+        poll_nonblocking(cx, self.write(buf))
     }
 
-    fn child_exited(&mut self) -> bool {
-        false
+    fn poll_exit(&mut self, _: &mut Context<'_>) -> TaskPoll<()> {
+        TaskPoll::Pending
+    }
+
+    fn poll_resize(&mut self, _: &mut Context<'_>, _: WinsizeBuilder) -> TaskPoll<io::Result<()>> {
+        TaskPoll::Ready(Ok(()))
     }
 }
 
@@ -185,9 +132,6 @@ pub(crate) fn streaming_controller(
     let pty = TestPty {
         output: output.clone(),
         input: input.clone(),
-        read_token: Token(0),
-        write_token: Token(0),
-        child_token: Token(0),
     };
 
     let source = TerminalFrameSource::attach(wake_channel().0, 1, |observer| {

@@ -6,15 +6,16 @@
 #[path = "host_tests.rs"]
 mod host_tests;
 
-use std::io::{BufRead as _, BufReader};
-use std::process::{Child, ExitStatus, Stdio};
-use std::sync::mpsc::{RecvTimeoutError, channel};
+use std::process::ExitStatus;
 use std::sync::{Arc, Weak};
-use std::thread;
 use std::time::Duration;
 
-use nmt_platform::process::{KillOnCloseJob, decode_child_output};
+use nmt_platform::process::{KillOnCloseJob, PipedChild, decode_child_output, spawn_piped};
 use parking_lot::Mutex;
+use tokio::io::{AsyncBufReadExt as _, BufReader};
+use tokio::process::Child;
+use tokio::sync::{Mutex as StartupLock, oneshot};
+use tokio::time::timeout;
 
 use crate::dsh::api::ApiClient;
 use crate::launcher::AgentCli;
@@ -109,7 +110,9 @@ impl LaunchKey {
 /// tab closed.
 static SHARED: Mutex<Vec<(LaunchKey, HostSlot)>> = Mutex::new(Vec::new());
 
-type HostSlot = Arc<Mutex<Weak<Host>>>;
+/// Held across startup, so tabs sharing a launch wait for one start instead of
+/// launching a second host.
+type HostSlot = Arc<StartupLock<Weak<Host>>>;
 
 fn host_slot(launch: &crate::LaunchConfig) -> HostSlot {
     let key = LaunchKey::of(launch);
@@ -118,13 +121,15 @@ fn host_slot(launch: &crate::LaunchConfig) -> HostSlot {
 
     // An acquired slot may be starting a process. Only inspect unused slots
     // while holding the registry lock, so another launch never waits on startup.
-    hosts.retain(|(_, slot)| Arc::strong_count(slot) > 1 || slot.lock().strong_count() > 0);
+    hosts.retain(|(_, slot)| {
+        Arc::strong_count(slot) > 1 || slot.try_lock().map_or(true, |host| host.strong_count() > 0)
+    });
 
     if let Some((_, slot)) = hosts.iter().find(|(candidate, _)| *candidate == key) {
         return Arc::clone(slot);
     }
 
-    let slot = Arc::new(Mutex::new(Weak::new()));
+    let slot = Arc::new(StartupLock::new(Weak::new()));
 
     hosts.push((key, Arc::clone(&slot)));
 
@@ -138,10 +143,10 @@ fn host_slot(launch: &crate::LaunchConfig) -> HostSlot {
 /// across sessions: a second process would pay the Node start cost again and
 /// deliver the same frames twice. Tabs whose launches differ cannot share one,
 /// because the launch is what decides where the host routes.
-pub fn shared(launch: &crate::LaunchConfig) -> Result<Arc<Host>, HostError> {
+pub async fn shared(launch: &crate::LaunchConfig) -> Result<Arc<Host>, HostError> {
     let slot = host_slot(launch);
 
-    let mut current = slot.lock();
+    let mut current = slot.lock().await;
 
     if let Some(running) = current.upgrade()
         && running.is_running()
@@ -149,7 +154,7 @@ pub fn shared(launch: &crate::LaunchConfig) -> Result<Arc<Host>, HostError> {
         return Ok(running);
     }
 
-    let host = Arc::new(Host::start(launch)?);
+    let host = Arc::new(Host::start(launch).await?);
 
     *current = Arc::downgrade(&host);
 
@@ -163,20 +168,23 @@ impl Host {
     /// Binding an ephemeral port avoids racing other local software for a fixed
     /// one; the cost is that the address can only be learned from the host, so
     /// the wait below is also the start-failure detector.
-    pub fn start(launch: &crate::LaunchConfig) -> Result<Self, HostError> {
-        match Self::start_with(launch, &["web", "--port", "0", NO_BROWSER_FLAG]) {
+    pub async fn start(launch: &crate::LaunchConfig) -> Result<Self, HostError> {
+        match Self::start_with(launch, &["web", "--port", "0", NO_BROWSER_FLAG]).await {
             // Releases before 0.1.1 neither open a browser nor know the flag,
             // and commander refuses an unknown option by exiting before it
             // binds. Naming the flag in the refusal is what tells this apart
             // from a real start failure, which must keep its own message.
             Err(HostError::FailedToStart(detail)) if detail.contains(NO_BROWSER_FLAG) => {
-                Self::start_with(launch, &["web", "--port", "0"])
+                Self::start_with(launch, &["web", "--port", "0"]).await
             }
             outcome => outcome,
         }
     }
 
-    fn start_with(launch: &crate::LaunchConfig, arguments: &[&str]) -> Result<Self, HostError> {
+    async fn start_with(
+        launch: &crate::LaunchConfig,
+        arguments: &[&str],
+    ) -> Result<Self, HostError> {
         let start_timeout = start_timeout(launch);
         let cli = AgentCli::from_launch(launch, DEFAULT_EXECUTABLE);
 
@@ -187,35 +195,29 @@ impl Host {
             return Err(HostError::NotInstalled(cli.executable().to_string()));
         }
 
-        let mut command = cli.command(arguments);
-
-        command
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-
-        let mut child = command
-            .spawn()
+        let PipedChild {
+            mut child,
+            stdin,
+            stdout,
+            stderr,
+        } = spawn_piped(cli.command(arguments))
             .map_err(|error| HostError::FailedToStart(error.to_string()))?;
 
-        let job = KillOnCloseJob::attach_or_kill(&mut child)
+        // The host takes no input; a package launcher's prompt sees EOF and
+        // fails instead of waiting for an answer.
+        drop(stdin);
+
+        let job = KillOnCloseJob::attach_spawned_or_kill(&mut child)
             .map_err(|error| HostError::FailedToStart(error.to_string()))?;
-
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| HostError::FailedToStart("the host produced no output".to_string()))?;
-
-        let stderr = child
-            .stderr
-            .take()
-            .ok_or_else(|| HostError::FailedToStart("the host produced no output".to_string()))?;
 
         let retained = Arc::new(Mutex::new(Vec::new()));
         let sink = Arc::clone(&retained);
+        let runtime = nmt_runtime::handle();
 
-        thread::spawn(move || {
-            for line in BufReader::new(stderr).split(b'\n').map_while(Result::ok) {
+        runtime.spawn(async move {
+            let mut lines = BufReader::new(stderr).split(b'\n');
+
+            while let Ok(Some(line)) = lines.next_segment().await {
                 let line = decode_child_output(line.strip_suffix(b"\r").unwrap_or(&line));
 
                 let mut lines = sink.lock();
@@ -229,35 +231,41 @@ impl Host {
         });
 
         // The address arrives on one line and the rest of stdout is of no
-        // further use, so the reader thread reports that line and then drains
-        // the pipe to keep the host from blocking on a full buffer.
-        let (address_tx, address_rx) = channel();
+        // further use, so the reader reports that line and then drains the
+        // pipe to keep the host from blocking on a full buffer.
+        let (address_tx, address_rx) = oneshot::channel();
 
-        thread::spawn(move || {
-            let mut announced = false;
+        runtime.spawn(async move {
+            let mut address_tx = Some(address_tx);
+            let mut lines = BufReader::new(stdout).lines();
 
-            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-                if announced {
-                    continue;
-                }
-
-                if let Some(address) = address_in(&line) {
-                    announced = address_tx.send(address).is_ok();
+            while let Ok(Some(line)) = lines.next_line().await {
+                if let Some(address) = address_in(&line)
+                    && let Some(sender) = address_tx.take()
+                {
+                    let _ = sender.send(address);
                 }
             }
         });
 
-        let base = match address_rx.recv_timeout(start_timeout) {
-            Ok(address) => address,
-            Err(reason) => {
-                let _ = child.kill();
-                let _ = child.wait();
+        let base = match timeout(start_timeout, address_rx).await {
+            Ok(Ok(address)) => address,
+            waited => {
+                let _ = child.kill().await;
 
-                return Err(HostError::FailedToStart(start_failure(reason, &retained)));
+                let failure = if waited.is_err() {
+                    StartFailure::TimedOut
+                } else {
+                    StartFailure::Exited
+                };
+
+                return Err(HostError::FailedToStart(start_failure(failure, &retained)));
             }
         };
 
-        let client = ApiClient::new(base.clone()).map_err(HostError::FailedToStart)?;
+        let client = ApiClient::new(base.clone())
+            .await
+            .map_err(HostError::FailedToStart)?;
 
         Ok(Self {
             client,
@@ -338,14 +346,20 @@ fn address_in(line: &str) -> Option<String> {
     (!address.is_empty()).then(|| address.to_string())
 }
 
-fn start_failure(reason: RecvTimeoutError, stderr: &Mutex<Vec<String>>) -> String {
+/// Why no address arrived.
+enum StartFailure {
+    /// The reader ended without one, which happens when stdout closes: the
+    /// host exited before it bound a port.
+    Exited,
+    TimedOut,
+}
+
+fn start_failure(reason: StartFailure, stderr: &Mutex<Vec<String>>) -> String {
     let detail = stderr.lock().join("\n");
 
     let cause = match reason {
-        // The sender is dropped when the reader thread ends, which happens when
-        // stdout closes: the host exited before it bound a port.
-        RecvTimeoutError::Disconnected => "the harness host exited before it started serving",
-        RecvTimeoutError::Timeout => "the harness host did not report an address in time",
+        StartFailure::Exited => "the harness host exited before it started serving",
+        StartFailure::TimedOut => "the harness host did not report an address in time",
     };
 
     if detail.trim().is_empty() {

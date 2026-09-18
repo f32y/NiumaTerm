@@ -8,6 +8,7 @@ mod tests;
 use std::path::Path;
 
 use app::design::REVIEW_FOOTER_HEIGHT;
+use app::utils::on_runtime;
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, ClipboardItem, Context, Entity, FocusHandle, KeyDownEvent, Point, Render,
@@ -220,8 +221,14 @@ impl GitSidebar {
 
         self.loading = self.diff.is_empty();
 
+        // Git runs on the shared runtime; preparing the diff is CPU work that
+        // stays on the background executor.
         let fetch = cx.background_executor().spawn(async move {
-            let lines = fetch_file_diff(&root, &path, untracked);
+            let diff_path = path.clone();
+
+            let lines =
+                on_runtime(async move { fetch_file_diff(&root, &diff_path, untracked).await })
+                    .await;
 
             DiffView::prepare(lines, &path)
         });

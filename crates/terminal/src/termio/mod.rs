@@ -16,14 +16,20 @@ mod write_queue;
 mod ghostty_mirror_tests;
 
 use std::collections::VecDeque;
-use std::io::{self, ErrorKind, Read, Write};
+use std::future::poll_fn;
+use std::io::{self, ErrorKind};
+use std::pin::pin;
 use std::sync::atomic::AtomicU32;
-use std::sync::{self, Arc, mpsc};
+use std::sync::{self, Arc};
+use std::task::{Context, Poll as TaskPoll};
 use std::{cell, error, path, time};
 
-use nmt_platform::{EventedPty, Events, Interest, Poll, Token, Waker, WinsizeBuilder};
+use nmt_platform::{AsyncPty, WinsizeBuilder};
 #[cfg(enable_profiling)]
 use nmt_profiling::pty::{BatchEnd, PtyProfiler, Stage};
+use tokio::sync::mpsc::{self, UnboundedReceiver};
+use tokio::task::yield_now;
+use tokio::time::{Instant as TimerInstant, sleep_until};
 use tracing::{error, warn};
 
 use crate::event::{self, Checkpoint, EventListener, Msg, MsgSender, RequestError, TerminalEvent};
@@ -35,10 +41,7 @@ use crate::termio::prompt_sniffer::PromptSniffer;
 use crate::termio::requests::answer_query;
 use crate::vt_modes;
 
-/// Reserved `Poll` token for the loop's `Waker`. PTY source tokens start above it.
-const WAKER_TOKEN: Token = Token(0);
-
-const READ_BUFFER_SIZE: usize = 0x10_0000;
+const READ_BUFFER_SIZE: usize = 64 * 1024;
 
 /// Yield to queued commands after each bounded PTY read batch.
 const MAX_READ_BATCH: usize = u16::MAX as usize;
@@ -61,26 +64,23 @@ enum FlushReason {
     Exit,
 }
 
-/// The PTY thread's state and the engine's single owner. It reads PTY output
+/// The PTY task's state and the engine's single owner. It reads PTY output
 /// into the engine, forwards input and resizes to the PTY, tracks the shell
 /// lifecycle marks, publishes captured frames on a bounded cadence, and
 /// answers the session's asynchronous reads. Named after Ghostty's `Termio`,
 /// which holds the same role.
-pub struct Termio<T: EventedPty, U: EventListener> {
+pub struct Termio<T: AsyncPty, U: EventListener> {
     sender: MsgSender,
-    receiver: mpsc::Receiver<Msg>,
+    receiver: UnboundedReceiver<Msg>,
 
     /// Inputs carry a fixed wait limit measured at receipt; other commands carry None.
     pending_commands: VecDeque<(Msg, Option<time::Instant>)>,
 
+    pending_resize: Option<(WinsizeBuilder, bool)>,
+
     powershell_compatibility: PowerShellCompatibility,
     pty: T,
-    poll: Poll,
-
-    /// The loop's `Waker`. On Windows the ConPTY worker threads and the child-exit
-    /// callback signal readiness through it; the `MsgSender` wakes it after each send
-    /// (mio 1.2 has no pollable channel / user-space readiness).
-    waker: Arc<Waker>,
+    child_exited: bool,
 
     /// The event loop exclusively owns the parser and all mutable engine state.
     /// Other threads submit commands and retain published data independently.
@@ -92,7 +92,7 @@ pub struct Termio<T: EventedPty, U: EventListener> {
     /// engine. Readers release the short publication lock before extraction.
     render_buffer: Arc<FrameStore>,
 
-    /// PTY-thread-private target for direct Ghostty capture. A completed frame
+    /// PTY-task-private target for direct Ghostty capture. A completed frame
     /// swaps with `render_buffer`, so the shared lock covers only publication.
     back_buffer: RenderBuffer,
 
@@ -108,7 +108,7 @@ pub struct Termio<T: EventedPty, U: EventListener> {
     content_version: u64,
 
     /// Optional observer for the exact VT stream accepted by the engine. It runs
-    /// on the owner thread before another command or byte batch can run,
+    /// in the owner task before another command or byte batch can run,
     /// preserving checkpoint ordering. Observers must return promptly.
     output_sink: Option<OutputSink>,
 
@@ -116,13 +116,13 @@ pub struct Termio<T: EventedPty, U: EventListener> {
     event_proxy: U,
     route_id: usize,
 
-    /// OSC 133 region state; only touched on the PTY thread.
+    /// OSC 133 region state; only touched on the PTY task.
     sniffer: PromptSniffer,
 
     /// Launch cwd of the currently-running command, latched at its `;C`: the cwd MUST
     /// NOT be read at `;D`, by which point the ps1 has already reported the NEXT
     /// prompt's OSC 7 directory (which would mislabel every `cd`). Attached to the
-    /// CommandFinished event. PTY-thread-private.
+    /// CommandFinished event. PTY-task-private.
     launch_cwd: Option<Option<path::PathBuf>>,
 
     /// Engine-blocks mode is the default: at
@@ -246,7 +246,7 @@ fn scrollback_bytes(lines: usize, cols: u16) -> usize {
 
 impl<T, U> Termio<T, U>
 where
-    T: EventedPty + Send + 'static,
+    T: AsyncPty + Send + 'static,
     U: EventListener + Send + 'static,
 {
     pub(crate) fn new(
@@ -256,13 +256,8 @@ where
         event_proxy: U,
         options: &SessionOptions,
     ) -> Result<Termio<T, U>, Box<dyn error::Error>> {
-        let poll = Poll::new()?;
-
-        // The `Waker` is registered on a reserved token; the worker threads (Windows)
-        // and the `MsgSender` wake the loop through it.
-        let waker = Arc::new(Waker::new(poll.registry(), WAKER_TOKEN)?);
-        let (tx, rx) = mpsc::channel();
-        let sender = MsgSender::new(tx, waker.clone());
+        let (tx, rx) = mpsc::unbounded_channel();
+        let sender = MsgSender::new(tx);
 
         // Start the engine at the render buffer's viewport dimensions so the first
         // resize cannot diverge from a zero-sized construction.
@@ -296,10 +291,10 @@ where
             sender,
             receiver: rx,
             pending_commands: VecDeque::new(),
+            pending_resize: None,
             powershell_compatibility: PowerShellCompatibility::default(),
-            poll,
-            waker,
             pty,
+            child_exited: false,
             ghostty,
             theme_revision: 0,
             render_buffer,
@@ -352,7 +347,12 @@ where
     }
 
     #[inline]
-    fn pty_read(&mut self, state: &mut PtyState, buf: &mut [u8]) -> io::Result<()> {
+    fn pty_read(
+        &mut self,
+        state: &mut PtyState,
+        buf: &mut [u8],
+        cx: &mut Context<'_>,
+    ) -> io::Result<usize> {
         let mut unprocessed = 0;
         let mut processed = 0;
 
@@ -365,7 +365,10 @@ where
             #[cfg(enable_profiling)]
             let read_started = self.profile.start();
 
-            let read = self.pty.reader().read(&mut buf[unprocessed..]);
+            let read = match self.pty.poll_read(cx, &mut buf[unprocessed..]) {
+                TaskPoll::Ready(result) => result,
+                TaskPoll::Pending => Ok(0),
+            };
 
             #[cfg(enable_profiling)]
             self.profile
@@ -381,7 +384,11 @@ where
                 Ok(got) => unprocessed += got,
                 Err(err) => match err.kind() {
                     ErrorKind::Interrupted | ErrorKind::WouldBlock => {
-                        // Go back to mio if we're caught up on parsing and the PTY would block.
+                        if err.kind() == ErrorKind::Interrupted {
+                            cx.waker().wake_by_ref();
+                        }
+
+                        // Suspend only after all bytes already read have been parsed.
                         if unprocessed == 0 {
                             caught_up = true;
 
@@ -393,6 +400,9 @@ where
             }
 
             self.on_pty_chunk(&buf[..unprocessed]);
+
+            // Preserve the last parsed bytes even if the next read reports EOF.
+            self.snapshot_pending = true;
 
             // Content changed, so invalidate the cached deep-search corpus.
             self.content_version = self.content_version.wrapping_add(1);
@@ -413,7 +423,7 @@ where
         }
 
         if processed == 0 && !self.snapshot_pending {
-            return Ok(());
+            return Ok(0);
         }
 
         #[cfg(enable_profiling)]
@@ -439,7 +449,7 @@ where
         #[cfg(enable_profiling)]
         self.profile.record(Stage::Flush, flush_started);
 
-        result
+        result.map(|()| processed)
     }
 
     #[inline]
@@ -632,7 +642,7 @@ where
             self.event_proxy.send_event(TerminalEvent::Title(title));
         }
 
-        // Publish VT modes lock-free; this PTY thread is the sole writer.
+        // Publish VT modes lock-free; this PTY task is the sole writer.
         self.vt_modes
             .store(vt_modes.bits(), sync::atomic::Ordering::Relaxed);
 
@@ -695,16 +705,16 @@ where
         self.event_proxy.send_event(TerminalEvent::Render);
     }
 
-    fn pending_snapshot_timeout(&self) -> Option<time::Duration> {
+    fn pending_snapshot_deadline(&self) -> Option<time::Instant> {
         if !self.snapshot_pending {
             return None;
         }
 
         Some(match self.sync_output_started_at {
-            Some(started) => SYNC_OUTPUT_TIMEOUT.saturating_sub(started.elapsed()),
-            None => self.last_snapshot_at.map_or(time::Duration::ZERO, |at| {
-                SNAPSHOT_MIN_INTERVAL.saturating_sub(at.elapsed())
-            }),
+            Some(started) => started + SYNC_OUTPUT_TIMEOUT,
+            None => self
+                .last_snapshot_at
+                .map_or_else(time::Instant::now, |at| at + SNAPSHOT_MIN_INTERVAL),
         })
     }
 
@@ -726,17 +736,17 @@ where
 
     /// Collect a bounded batch and execute commands in submission order.
     ///
-    /// Returns `false` on shutdown or a fatal input write failure.
-    fn drain_recv_channel(&mut self, state: &mut PtyState) -> bool {
-        for _ in 0..64 {
-            let Ok(msg) = self.receiver.try_recv() else {
-                return self.process_pending_commands(state);
+    /// Returns the received count, or `None` on shutdown or input write failure.
+    fn drain_recv_channel(&mut self, state: &mut PtyState, cx: &mut Context<'_>) -> Option<usize> {
+        for received in 0..64 {
+            let TaskPoll::Ready(Some(msg)) = self.receiver.poll_recv(cx) else {
+                return self.process_pending_commands(state, cx).then_some(received);
             };
 
             // Only unexecuted, adjacent size changes are interchangeable.
             // An input or query between them observes the earlier geometry.
             match msg {
-                Msg::Shutdown => return false,
+                Msg::Shutdown => return None,
                 Msg::PowerShellCompatibility(enabled) => {
                     self.powershell_compatibility.set_enabled(enabled);
                 }
@@ -756,16 +766,30 @@ where
             }
         }
 
-        let _ = self.waker.wake();
+        cx.waker().wake_by_ref();
 
-        self.process_pending_commands(state)
+        self.process_pending_commands(state, cx).then_some(64)
     }
 
-    fn process_pending_commands(&mut self, state: &mut PtyState) -> bool {
+    fn process_pending_commands(&mut self, state: &mut PtyState, cx: &mut Context<'_>) -> bool {
         for _ in 0..64 {
+            if let Some((size, grid_changed)) = self.pending_resize.clone() {
+                match self.pty.poll_resize(cx, size) {
+                    TaskPoll::Pending => return true,
+                    TaskPoll::Ready(Err(error)) => warn!("PTY resize failed: {error}"),
+                    TaskPoll::Ready(Ok(())) => {}
+                }
+
+                self.pending_resize = None;
+
+                if grid_changed && !self.ghostty.mode(mode::ALT_SCREEN) {
+                    self.powershell_compatibility.resized(time::Instant::now());
+                }
+            }
+
             if self
-                .pending_input_timeout()
-                .is_some_and(|delay| !delay.is_zero())
+                .pending_input_deadline()
+                .is_some_and(|deadline| deadline > time::Instant::now())
             {
                 return true;
             }
@@ -775,15 +799,10 @@ where
                     return true;
                 }
 
-                match self.pty.writer().flush() {
-                    Ok(()) => {}
-                    Err(error) if error.kind() == ErrorKind::WouldBlock => return true,
-                    Err(error) if error.kind() == ErrorKind::Interrupted => {
-                        let _ = self.waker.wake();
-
-                        return true;
-                    }
-                    Err(error) => {
+                match self.pty.poll_flush(cx) {
+                    TaskPoll::Ready(Ok(())) => {}
+                    TaskPoll::Pending => return true,
+                    TaskPoll::Ready(Err(error)) => {
                         error!("failed to finish PTY input before resize: {error}");
 
                         return false;
@@ -800,7 +819,9 @@ where
                     state.write_list.push_back(input);
                 }
                 Msg::Resize(window_size) => {
-                    self.on_resize(window_size);
+                    let grid_changed = self.on_resize(window_size.clone());
+
+                    self.pending_resize = Some((window_size, grid_changed));
                 }
                 Msg::Shutdown => return false,
                 request => self.on_request(request),
@@ -808,12 +829,18 @@ where
         }
 
         // A bounded drain must re-arm its wake even when no new sender arrives.
-        let _ = self.waker.wake();
+        cx.waker().wake_by_ref();
 
         true
     }
 
-    fn pending_input_timeout(&self) -> Option<time::Duration> {
+    fn pending_input_deadline(&self) -> Option<time::Instant> {
+        // Only completion can release a running native resize. An expired
+        // input deadline must not keep waking a task still waiting for it.
+        if self.pending_resize.is_some() {
+            return None;
+        }
+
         let (Msg::Input(bytes), limit) = self.pending_commands.front()? else {
             return None;
         };
@@ -822,14 +849,12 @@ where
             return None;
         }
 
-        let delay = self
-            .powershell_compatibility
-            .timeout(*limit, time::Instant::now())?;
+        let deadline = self.powershell_compatibility.deadline(*limit)?;
 
-        (!self.ghostty.mode(mode::ALT_SCREEN)).then_some(delay)
+        (!self.ghostty.mode(mode::ALT_SCREEN)).then_some(deadline)
     }
 
-    fn on_resize(&mut self, window_size: WinsizeBuilder) {
+    fn on_resize(&mut self, window_size: WinsizeBuilder) -> bool {
         // Keep the Ghostty engine sized to match the PTY/Crosswords.
         let cols = window_size.cols.max(1);
         let rows = window_size.rows.max(1);
@@ -913,214 +938,164 @@ where
         // valid from the last PTY read.
         self.publish_capture(snapshot);
 
-        if let Err(err) = self.pty.set_winsize(window_size) {
-            warn!("pty set_winsize failed: {err}");
-        }
-
+        // The input pause starts when the native resize completes; an alternate
+        // screen application owns its redraw, so no pause applies there.
         if self.ghostty.mode(mode::ALT_SCREEN) {
             self.powershell_compatibility.clear_resize();
-        } else if grid_changed {
-            self.powershell_compatibility.resized(time::Instant::now());
         }
+
+        grid_changed
     }
 
     #[inline]
-    fn pty_write(&mut self, state: &mut PtyState) -> io::Result<()> {
-        state.write_to(self.pty.writer())
+    fn pty_write(&mut self, state: &mut PtyState, cx: &mut Context<'_>) -> io::Result<usize> {
+        state.write_to(&mut self.pty, cx)
     }
 
     pub(crate) fn channel(&self) -> MsgSender {
         self.sender.clone()
     }
 
-    fn run_event_loop(mut self) -> (Self, PtyState) {
+    async fn run_event_loop(mut self) -> (Self, PtyState) {
         let mut state = PtyState::default();
-        let mut buf = [0u8; READ_BUFFER_SIZE];
+        let mut buf = vec![0u8; READ_BUFFER_SIZE];
+        let mut io_failed = false;
 
-        // Token 0 is the reserved `Waker`; PTY source tokens start at 1.
-        let mut tokens = (1_usize..).map(Token);
-
-        // Register the PTY sources, handing them the loop `Waker` (Windows soft-ready;
-        // ignored on Unix). mio 1.2 is edge-triggered; the loop re-registers interest
-        // each pass to pick up write readiness.
-        //
-        // A registration failure is fatal for this session but must not panic
-        // the reader thread (which would leave a frozen tab with no feedback);
-        // report the terminal as closed instead, like the child-exit path.
-        if let Err(err) =
-            self.pty
-                .register(&self.poll, &mut tokens, Interest::READABLE, &self.waker)
-        {
-            error!("Failed to register PTY event sources: {err}");
+        if let Err(error) = self.pty.start_async() {
+            error!("failed to register async PTY: {error}");
 
             self.announce_closed();
 
             return (self, state);
         }
 
-        let mut events = Events::with_capacity(1024);
+        // Sustained output keeps a capture deadline pending on every batch.
+        // Reusing one registered timer and moving it only when the deadline
+        // changes avoids a timer-wheel insert and removal per batch.
+        let mut timer = pin!(sleep_until(TimerInstant::now()));
 
-        'event_loop: loop {
+        loop {
             #[cfg(enable_profiling)]
             self.profile.report_due();
 
-            // Windows soft-ready is level-like but lives outside the OS poll set,
-            // and its worker only wakes on the clear→set edge. A `pty_read` capped
-            // by MAX_READ_BATCH can return with data still in the ring (flag left
-            // set), so blocking with `None` would sleep forever on already-signalled
-            // data. When a source is still ready, poll with a zero timeout to spin
-            // back to `drain_ready` instead of sleeping. Unix returns `false` here
-            // and keeps blocking (real OS readiness, re-armed by EPOLL_CTL_MOD).
-            events.clear();
+            let deadline = self
+                .pending_snapshot_deadline()
+                .into_iter()
+                .chain(self.pending_input_deadline())
+                .min()
+                .map(TimerInstant::from_std);
 
-            let timeout = if self.pty.has_ready() {
-                Some(time::Duration::ZERO)
-            } else {
-                self.pending_snapshot_timeout()
-                    .into_iter()
-                    .chain(self.pending_input_timeout())
-                    .min()
+            if let Some(deadline) = deadline
+                && timer.deadline() != deadline
+            {
+                timer.as_mut().reset(deadline);
+            }
+
+            let result = tokio::select! {
+                result = poll_fn(|cx| self.poll_io(&mut state, &mut buf, cx)) => result,
+                () = &mut timer, if deadline.is_some() => {
+                    if self.snapshot_pending {
+                        self.flush_engine_state(FlushReason::Drained).map(|()| true)
+                    } else {
+                        Ok(true)
+                    }
+                }
             };
 
-            #[cfg(enable_profiling)]
-            let poll_started = self.profile.start();
-
-            let polled = self.poll.poll(&mut events, timeout);
-
-            #[cfg(enable_profiling)]
-            self.profile.record(Stage::Poll, poll_started);
-
-            if let Err(err) = polled {
-                match err.kind() {
-                    ErrorKind::Interrupted => continue,
-                    _ => {
-                        error!("Event loop polling error: {err}");
-
-                        break 'event_loop;
-                    }
-                }
-            }
-
-            // Drain the `Msg` channel (resize/input/shutdown). It is a plain
-            // `std::sync::mpsc` woken via the `Waker` (mio 1.2 has no pollable
-            // channel), so it is drained on every wakeup rather than via a token.
-            if !self.drain_recv_channel(&mut state) {
-                break;
-            }
-
-            // Collect readiness from both sources: the Windows soft-ready set
-            // (`drain_ready`) and real `Poll` events (Unix fds; on Windows `poll`
-            // only ever yields the waker token). Both feed the same handling below.
-            let mut do_read = false;
-            let mut do_write = false;
-            let mut child_exited = false;
-
-            let mut hup = false;
-
-            for token in self.pty.drain_ready() {
-                if token == self.pty.read_token() {
-                    do_read = true;
-                } else if token == self.pty.write_token() {
-                    do_write = true;
-                } else if token == self.pty.child_event_token() {
-                    child_exited = true;
-                }
-            }
-
-            for event in events.iter() {
-                let token = event.token();
-
-                if token == self.pty.child_event_token() {
-                    child_exited = true;
-                } else if token == self.pty.read_token() || token == self.pty.write_token() {
-                    if self.pty.read_closed(event) {
-                        hup = true;
+            match result {
+                Ok(true) => {}
+                Ok(false) => break,
+                Err(error) => {
+                    if error.kind() != ErrorKind::BrokenPipe && !self.pty.is_hangup_error(&error) {
+                        error!("PTY I/O failed: {error}");
                     }
 
-                    if event.is_readable() {
-                        do_read = true;
-                    }
+                    io_failed = true;
 
-                    if event.is_writable() {
-                        do_write = true;
-                    }
-                }
-                // The waker token (and any stray token) needs no handling.
-            }
-
-            if child_exited && self.pty.child_exited() {
-                self.flush_pending_on_exit();
-
-                self.announce_closed();
-
-                break 'event_loop;
-            }
-
-            if !hup {
-                // Readiness drains new input; a capture deadline also reaches
-                // this path with an empty pipe to publish the final pending frame.
-                if (do_read || self.snapshot_pending)
-                    && let Err(err) = self.pty_read(&mut state, &mut buf)
-                {
-                    if self.pty.is_hangup_error(&err) {
-                        continue;
-                    }
-
-                    error!("Error reading from PTY in event loop: {}", err);
-
-                    break 'event_loop;
-                }
-
-                if do_write && let Err(err) = self.pty_write(&mut state) {
-                    error!("Error writing to PTY in event loop: {}", err);
-
-                    break 'event_loop;
-                }
-
-                // Native writes can finish without another UI message. Resume
-                // the ordered commands here while keeping PTY reads and replies
-                // active whenever a write or its completion is still pending.
-                let had_pending_write = state.needs_write();
-
-                if !self.process_pending_commands(&mut state) {
-                    break 'event_loop;
-                }
-
-                if !had_pending_write && state.needs_write() {
-                    // Resuming a resize can release input after this iteration's
-                    // write pass. Windows writability alone does not wake poll.
-                    let _ = self.waker.wake();
+                    break;
                 }
             }
 
-            // Re-register interest if a write is pending (real effect on Unix; the
-            // Windows soft-ready path is a no-op).
-            let mut interest = Interest::READABLE;
-
-            if state.needs_write() {
-                interest |= Interest::WRITABLE;
-            }
-
-            // Same as the registration above: fail the session visibly rather
-            // than panicking the reader thread.
-            if let Err(err) = self.pty.reregister(&self.poll, interest) {
-                error!("Failed to reregister PTY event sources: {err}");
-
-                self.announce_closed();
-
-                break 'event_loop;
-            }
+            // Ready pipes can stay ready indefinitely. Bound each parse/write
+            // batch and yield so other terminals and network tasks can run.
+            yield_now().await;
         }
 
+        // Publish the final state before console teardown, which can wait for
+        // the shell tree, so a closed session is reported without that delay.
         self.flush_pending_on_exit();
 
-        // The PTY sources are not dropped here, so deregister them explicitly.
-        let _ = self.pty.deregister(&self.poll);
+        if self.child_exited || io_failed {
+            self.announce_closed();
+        }
+
+        // A native resize owns the console while it runs, and the console
+        // close needs the host to finish its writes. Keep draining output so a
+        // full pipe cannot stall either one.
+        if let Err(error) = poll_fn(|cx| {
+            let completion = self.pty.poll_shutdown(cx);
+
+            if completion.is_pending()
+                && self
+                    .pty_read(&mut state, &mut buf, cx)
+                    .is_ok_and(|read| read != 0)
+            {
+                cx.waker().wake_by_ref();
+            }
+
+            completion
+        })
+        .await
+        {
+            warn!("failed to finish PTY control work: {error}");
+        }
 
         #[cfg(enable_profiling)]
         self.profile.flush();
 
         (self, state)
+    }
+
+    fn poll_io(
+        &mut self,
+        state: &mut PtyState,
+        buf: &mut [u8],
+        cx: &mut Context<'_>,
+    ) -> TaskPoll<io::Result<bool>> {
+        let pending_before = self.pending_commands.len();
+        let resizing_before = self.pending_resize.is_some();
+
+        let Some(received) = self.drain_recv_channel(state, cx) else {
+            return TaskPoll::Ready(Ok(false));
+        };
+
+        let read = self.pty_read(state, buf, cx)?;
+        let written = self.pty_write(state, cx)?;
+
+        if !self.process_pending_commands(state, cx) {
+            return TaskPoll::Ready(Ok(false));
+        }
+
+        if !self.child_exited {
+            self.child_exited = self.pty.poll_exit(cx).is_ready();
+        }
+
+        // A child can exit with several parse batches still buffered. Keep
+        // yielding between them before publishing the final closed state.
+        if self.child_exited && read < MAX_READ_BATCH {
+            return TaskPoll::Ready(Ok(false));
+        }
+
+        if received != 0
+            || read != 0
+            || written != 0
+            || self.pending_commands.len() != pending_before
+            || self.pending_resize.is_some() != resizing_before
+        {
+            TaskPoll::Ready(Ok(true))
+        } else {
+            TaskPoll::Pending
+        }
     }
 
     fn on_request(&mut self, request: Msg) {

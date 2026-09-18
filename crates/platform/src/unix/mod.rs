@@ -26,33 +26,30 @@ mod macos;
 mod notifier;
 mod process_exit;
 mod shell_integration;
-mod signals;
 
 use std::ffi::{CStr, CString, OsStr};
 use std::fs::File;
-use std::io::Error;
+use std::io::{Error, Read, Write};
 use std::mem::MaybeUninit;
 use std::ops::Deref;
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+use std::os::fd::{AsFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child as ChildProcess, Command, Stdio};
 use std::sync::Arc;
+use std::task::{Context, Poll as TaskPoll, ready};
 use std::{env, error, io, ptr, str};
 
 use dirs::home_dir;
-use mio::event::Event;
-use mio::unix::SourceFd;
-use mio::{Interest, Poll, Token, Waker};
-use signal_hook::consts as sigconsts;
+use tokio::io::unix::AsyncFd;
+use tokio::signal::unix::{Signal, SignalKind, signal};
 use tracing::info;
 
 use crate::unix::hook_command::single_quoted;
 #[cfg(target_os = "macos")]
 use crate::unix::macos::*;
 use crate::unix::process::{KillOnCloseJob, ProcessTree};
-use crate::unix::signals::Signals;
-use crate::{APP_ID, EventedPty, ProcessReadWrite, PtyOptions, Winsize, WinsizeBuilder};
+use crate::{APP_ID, AsyncPty, PtyOptions, Winsize, WinsizeBuilder};
 
 #[cfg(all(target_os = "linux", not(target_env = "musl")))]
 const TIOCSWINSZ: libc::c_ulong = 0x5414;
@@ -113,9 +110,10 @@ fn default_shell_command(shell: &str) {
 pub struct Pty {
     pub child: Child,
     file: File,
-    token: Token,
-    signals_token: Token,
-    signals: Signals,
+    async_file: Option<AsyncFd<OwnedFd>>,
+
+    /// Process-wide SIGCHLD deliveries, observed from `start_async` onward.
+    child_signals: Option<Signal>,
 
     /// Present only for a managed PTY. Dropping it signals the shell's
     /// process group, which ends the descendants a bare `SIGHUP` to the shell
@@ -128,6 +126,11 @@ impl Pty {
     /// manage its child's descendants.
     pub fn process_tree(&self) -> Option<ProcessTree> {
         self.job.as_ref().map(KillOnCloseJob::process_tree)
+    }
+
+    /// Reports whether a child exit has been observed without waiting.
+    pub fn child_exited(&mut self) -> bool {
+        matches!(self.child.waitpid(), Ok(Some(..)))
     }
 }
 
@@ -170,87 +173,6 @@ impl io::Read for Pty {
             n if n >= 0 => Ok(n as usize),
             _ => Err(io::Error::last_os_error()),
         }
-    }
-}
-
-impl ProcessReadWrite for Pty {
-    fn read_closed(&self, event: &Event) -> bool {
-        event.is_read_closed()
-    }
-
-    #[cfg(target_os = "linux")]
-    fn is_hangup_error(&self, error: &io::Error) -> bool {
-        error.raw_os_error() == Some(libc::EIO)
-    }
-
-    type Reader = File;
-
-    type Writer = File;
-
-    #[inline]
-    fn reader(&mut self) -> &mut File {
-        &mut self.file
-    }
-
-    #[inline]
-    fn read_token(&self) -> Token {
-        self.token
-    }
-
-    #[inline]
-    fn writer(&mut self) -> &mut File {
-        &mut self.file
-    }
-
-    #[inline]
-    fn write_token(&self) -> Token {
-        self.token
-    }
-
-    #[inline]
-    fn set_winsize(&mut self, winsize: WinsizeBuilder) -> Result<(), io::Error> {
-        self.child.set_winsize(winsize)
-    }
-
-    #[inline]
-    fn register(
-        &mut self,
-        poll: &Poll,
-        token: &mut dyn Iterator<Item = Token>,
-        interest: Interest,
-        _waker: &Arc<Waker>,
-    ) -> io::Result<()> {
-        // The pty fd is a real OS readiness source; no `Waker` needed on Unix.
-        self.token = token.next().unwrap();
-
-        poll.registry()
-            .register(&mut SourceFd(&self.file.as_raw_fd()), self.token, interest)?;
-
-        self.signals_token = token.next().unwrap();
-
-        poll.registry()
-            .register(&mut self.signals, self.signals_token, Interest::READABLE)
-    }
-
-    fn reregister(&mut self, poll: &Poll, interest: Interest) -> io::Result<()> {
-        poll.registry()
-            .reregister(&mut SourceFd(&self.file.as_raw_fd()), self.token, interest)?;
-
-        poll.registry()
-            .reregister(&mut self.signals, self.signals_token, Interest::READABLE)
-    }
-
-    fn deregister(&mut self, poll: &Poll) -> io::Result<()> {
-        poll.registry()
-            .deregister(&mut SourceFd(&self.file.as_raw_fd()))?;
-
-        poll.registry().deregister(&mut self.signals)
-    }
-
-    #[inline]
-    fn drain_ready(&self) -> Vec<Token> {
-        // Unix has real OS readiness; the soft-ready set is Windows-only.
-        Vec::new()
     }
 }
 
@@ -731,9 +653,6 @@ pub fn create_pty_with_env(options: PtyOptions<'_>) -> Result<Pty, Error> {
         builder.current_dir(dir);
     }
 
-    // Prepare signal handling before spawning child.
-    let signals = Signals::new([sigconsts::SIGCHLD]).expect("error preparing signal handling");
-
     match builder.spawn() {
         Ok(child_process) => {
             unsafe {
@@ -752,10 +671,9 @@ pub fn create_pty_with_env(options: PtyOptions<'_>) -> Result<Pty, Error> {
             Ok(Pty {
                 child: child_unix,
                 file: unsafe { File::from_raw_fd(main) },
-                token: Token(0),
-                signals,
-                signals_token: Token(0),
                 job: None,
+                async_file: None,
+                child_signals: None,
             })
         }
         Err(err) => Err(Error::new(
@@ -884,18 +802,14 @@ fn create_pty_with_fork(
                 set_nonblocking(main);
             }
 
-            let signals =
-                Signals::new([sigconsts::SIGCHLD]).expect("error preparing signal handling");
-
             Ok(Pty {
                 child,
-                signals,
                 file: unsafe { File::from_raw_fd(main) },
-                token: Token(0),
-                signals_token: Token(0),
                 // `forkpty` leaves no `std::process::Child` to attach to, so
                 // this path never manages the descendant tree.
                 job: None,
+                async_file: None,
+                child_signals: None,
             })
         }
         _ => Err(Error::other(format!(
@@ -1028,28 +942,70 @@ fn command_per_pid(pid: libc::pid_t) -> String {
         .to_string()
 }
 
-impl EventedPty for Pty {
-    #[inline]
-    fn child_exited(&mut self) -> bool {
-        self.signals.pending().next().is_some_and(|signal| {
-            if signal != sigconsts::SIGCHLD {
-                return false;
-            }
+impl AsyncPty for Pty {
+    fn start_async(&mut self) -> io::Result<()> {
+        self.async_file = Some(AsyncFd::new(self.file.as_fd().try_clone_to_owned()?)?);
 
-            match self.child.waitpid() {
-                Err(_e) => {
-                    // std::process::exit(1);
-                    false
-                }
-                Ok(None) => false,
-                Ok(Some(..)) => true,
-            }
-        })
+        self.child_signals = Some(signal(SignalKind::child())?);
+
+        Ok(())
     }
 
-    #[inline]
-    fn child_event_token(&self) -> Token {
-        self.signals_token
+    fn poll_read(&mut self, cx: &mut Context<'_>, buf: &mut [u8]) -> TaskPoll<io::Result<usize>> {
+        let file = self.async_file.as_mut().expect("async PTY initialized");
+
+        loop {
+            let mut ready = ready!(file.poll_read_ready_mut(cx))?;
+
+            match ready.try_io(|_| self.file.read(buf)) {
+                Ok(Ok(0)) => return TaskPoll::Ready(Err(io::ErrorKind::BrokenPipe.into())),
+                Ok(result) => return TaskPoll::Ready(result),
+                Err(_) => continue,
+            }
+        }
+    }
+
+    fn poll_write(&mut self, cx: &mut Context<'_>, buf: &[u8]) -> TaskPoll<io::Result<usize>> {
+        let file = self.async_file.as_mut().expect("async PTY initialized");
+
+        loop {
+            let mut ready = ready!(file.poll_write_ready_mut(cx))?;
+
+            match ready.try_io(|_| self.file.write(buf)) {
+                Ok(result) => return TaskPoll::Ready(result),
+                Err(_) => continue,
+            }
+        }
+    }
+
+    fn poll_exit(&mut self, cx: &mut Context<'_>) -> TaskPoll<()> {
+        loop {
+            // The signal stream exists before this check, so an exit that
+            // precedes it is found by waitpid and a later one is delivered.
+            // SIGCHLD also reports other children, so each delivery rechecks.
+            if self.child_exited() {
+                return TaskPoll::Ready(());
+            }
+
+            let signals = self.child_signals.as_mut().expect("async PTY initialized");
+
+            if ready!(signals.poll_recv(cx)).is_none() {
+                return TaskPoll::Ready(());
+            }
+        }
+    }
+
+    fn poll_resize(
+        &mut self,
+        _cx: &mut Context<'_>,
+        size: WinsizeBuilder,
+    ) -> TaskPoll<io::Result<()>> {
+        TaskPoll::Ready(self.child.set_winsize(size))
+    }
+
+    #[cfg(target_os = "linux")]
+    fn is_hangup_error(&self, error: &io::Error) -> bool {
+        error.raw_os_error() == Some(libc::EIO)
     }
 }
 

@@ -1,11 +1,16 @@
+pub use crate::child_output::output;
+
 use std::ffi::{OsStr, OsString};
 #[cfg(not(target_os = "macos"))]
 use std::fs;
 use std::os::unix::process::{CommandExt as _, ExitStatusExt as _};
-use std::process::{Child, Command, ExitStatus};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{Arc, Weak};
 use std::{env, io};
 
+use tokio::process::{
+    Child as AsyncChild, ChildStderr, ChildStdin, ChildStdout, Command as AsyncCommand,
+};
 use tracing::warn;
 
 use crate::process_lifetime::cleanup_failed_attachment;
@@ -13,6 +18,42 @@ use crate::process_lifetime::cleanup_failed_attachment;
 use crate::unix::macos::login_shell;
 #[cfg(target_os = "macos")]
 use crate::unix::macos::process_group_count as group_process_count;
+
+/// A child whose standard streams are asynchronous pipes owned by this process.
+pub struct PipedChild {
+    pub child: AsyncChild,
+    pub stdin: ChildStdin,
+    pub stdout: ChildStdout,
+    pub stderr: ChildStderr,
+}
+
+/// Spawn `command` with all three standard streams piped to the shared runtime.
+/// Unix pipes are nonblocking descriptors, so the reactor drives them directly.
+pub fn spawn_piped(command: Command) -> io::Result<PipedChild> {
+    let _runtime = nmt_runtime::handle().enter();
+
+    let mut command = AsyncCommand::from(command);
+
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = command.spawn()?;
+
+    let (Some(stdin), Some(stdout), Some(stderr)) =
+        (child.stdin.take(), child.stdout.take(), child.stderr.take())
+    else {
+        return Err(io::Error::other("child stdio unavailable"));
+    };
+
+    Ok(PipedChild {
+        child,
+        stdin,
+        stdout,
+        stderr,
+    })
+}
 
 /// A command that leads its own process group.
 ///
@@ -115,9 +156,24 @@ impl KillOnCloseJob {
         Self::attach(child).inspect_err(|_| cleanup_failed_attachment(child))
     }
 
-    pub fn attach(child: &Child) -> io::Result<Self> {
-        let pid = child.id() as libc::pid_t;
+    /// Contain a child spawned for asynchronous waiting. A failure terminates
+    /// the child; the runtime reaps it once its handle is dropped.
+    pub fn attach_spawned_or_kill(child: &mut AsyncChild) -> io::Result<Self> {
+        let attached = match child.id() {
+            Some(pid) => Self::attach_pid(pid as libc::pid_t),
+            None => Err(io::Error::other("child exited before containment")),
+        };
 
+        attached.inspect_err(|_| {
+            let _ = child.start_kill();
+        })
+    }
+
+    pub fn attach(child: &Child) -> io::Result<Self> {
+        Self::attach_pid(child.id() as libc::pid_t)
+    }
+
+    fn attach_pid(pid: libc::pid_t) -> io::Result<Self> {
         // Idempotent when the command already asked for its own group; the
         // call is what covers a `Command` built without `process_group`. The
         // kernel refuses it once the child has exec'd (`EACCES`) or made

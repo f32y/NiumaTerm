@@ -38,28 +38,32 @@ mod shell_integration;
 mod tests;
 
 use std::ffi::OsStr;
+use std::future::Future;
+use std::io;
 use std::iter::{self, once};
 use std::os::windows::ffi::OsStrExt;
-use std::sync::mpsc::TryRecvError;
-use std::{io, sync};
+use std::pin::Pin;
+use std::task::{Context, Poll as TaskPoll, ready};
+
+use tokio::task::{JoinHandle, spawn_blocking};
 
 use crate::windows::child::ChildExitWatcher;
 use crate::windows::conpty::Conpty as Backend;
 use crate::windows::pipes::{ConinPipe as WritePipe, ConoutPipe as ReadPipe};
 use crate::windows::process::{KillOnCloseJob, ProcessTree};
-use crate::{
-    EventedPty, Interest, Poll, ProcessReadWrite, PtyOptions, Token, Waker, Winsize, WinsizeBuilder,
-};
+use crate::{AsyncPty, PtyOptions, WinsizeBuilder};
 
 pub struct Pty {
-    // Backend is required to be the first field, to ensure correct drop order. Dropping
-    // `conout` before `backend` will cause a deadlock (with Conpty).
-    backend: Backend,
+    // Declared first so an unawaited drop starts the console close before the
+    // output pipe closes; the host's final writes then fail instead of waiting.
+    backend: Option<Backend>,
+    resize_task: Option<JoinHandle<Backend>>,
+
+    /// The console close started by `poll_shutdown`, driven by its owner task.
+    closing: Option<Pin<Box<dyn Future<Output = ()> + Send>>>,
+
     conout: ReadPipe,
     conin: WritePipe,
-    read_token: Token,
-    write_token: Token,
-    child_event_token: Token,
     child_watcher: ChildExitWatcher,
 }
 
@@ -81,133 +85,106 @@ impl Pty {
         child_watcher: ChildExitWatcher,
     ) -> Self {
         Self {
-            backend: backend.into(),
+            backend: Some(backend.into()),
+            resize_task: None,
+            closing: None,
             conout: conout.into(),
             conin: conin.into(),
-            read_token: Token(0),
-            write_token: Token(0),
-            child_event_token: Token(0),
             child_watcher,
         }
     }
 
     pub fn process_tree(&self) -> Option<ProcessTree> {
-        self.backend.process_tree()
+        self.backend.as_ref()?.process_tree()
+    }
+
+    /// Reports whether a child exit has been observed without waiting.
+    pub fn child_exited(&self) -> bool {
+        self.child_watcher.exited()
+    }
+
+    fn poll_resize_completion(&mut self, cx: &mut Context<'_>) -> TaskPoll<io::Result<()>> {
+        let Some(task) = &mut self.resize_task else {
+            return TaskPoll::Ready(Ok(()));
+        };
+
+        let result = match Pin::new(task).poll(cx) {
+            TaskPoll::Pending => return TaskPoll::Pending,
+            TaskPoll::Ready(result) => result,
+        };
+
+        self.resize_task = None;
+
+        match result {
+            Ok(backend) => {
+                self.backend = Some(backend);
+
+                TaskPoll::Ready(Ok(()))
+            }
+            Err(error) => TaskPoll::Ready(Err(io::Error::other(error))),
+        }
     }
 }
 
-impl ProcessReadWrite for Pty {
-    type Reader = ReadPipe;
+impl AsyncPty for Pty {
+    fn start_async(&mut self) -> io::Result<()> {
+        self.conout.start_async()
+    }
 
-    type Writer = WritePipe;
+    fn poll_read(&mut self, cx: &mut Context<'_>, buf: &mut [u8]) -> TaskPoll<io::Result<usize>> {
+        self.conout.poll_read(cx, buf)
+    }
 
-    #[inline]
-    fn register(
+    fn poll_write(&mut self, cx: &mut Context<'_>, buf: &[u8]) -> TaskPoll<io::Result<usize>> {
+        self.conin.poll_write(cx, buf)
+    }
+
+    fn poll_flush(&mut self, cx: &mut Context<'_>) -> TaskPoll<io::Result<()>> {
+        self.conin.poll_flush(cx)
+    }
+
+    fn poll_exit(&mut self, cx: &mut Context<'_>) -> TaskPoll<()> {
+        self.child_watcher.poll_exit(cx)
+    }
+
+    fn poll_resize(
         &mut self,
-        poll: &Poll,
-        token: &mut dyn Iterator<Item = Token>,
-        _interest: Interest,
-        waker: &sync::Arc<Waker>,
-    ) -> io::Result<()> {
-        self.read_token = token.next().unwrap();
-        self.write_token = token.next().unwrap();
-        self.child_event_token = token.next().unwrap();
+        cx: &mut Context<'_>,
+        size: WinsizeBuilder,
+    ) -> TaskPoll<io::Result<()>> {
+        if self.resize_task.is_none() {
+            let Some(mut backend) = self.backend.take() else {
+                return TaskPoll::Ready(Err(io::Error::other("console backend is unavailable")));
+            };
 
-        self.conout.register(poll, self.read_token)?;
+            // The native control call can wait for the console host. Transfer
+            // ownership while it runs so output reads keep draining and no
+            // borrowed console handle can outlive its owner on cancellation.
+            self.resize_task = Some(spawn_blocking(move || {
+                backend.set_winsize((&size).into());
 
-        // Input completion and child exit use callbacks outside the poll set.
-        self.conin.soft().set_waker(waker.clone());
-
-        self.child_watcher.set_waker(waker.clone());
-
-        Ok(())
-    }
-
-    #[inline]
-    fn reregister(&mut self, _poll: &Poll, _interest: Interest) -> io::Result<()> {
-        // Mio starts the next read when its buffer is consumed. Registering it
-        // again would also post unused writable events on this input-only
-        // handle, keeping an idle loop awake. Buffered output remains ready
-        // locally until drained; input completion keeps its soft-ready flag.
-        Ok(())
-    }
-
-    #[inline]
-    fn deregister(&mut self, poll: &Poll) -> io::Result<()> {
-        self.conout.deregister(poll)
-    }
-
-    #[inline]
-    fn reader(&mut self) -> &mut Self::Reader {
-        &mut self.conout
-    }
-
-    #[inline]
-    fn read_token(&self) -> Token {
-        self.read_token
-    }
-
-    #[inline]
-    fn writer(&mut self) -> &mut Self::Writer {
-        &mut self.conin
-    }
-
-    #[inline]
-    fn write_token(&self) -> Token {
-        self.write_token
-    }
-
-    #[inline]
-    fn drain_ready(&self) -> Vec<Token> {
-        let mut ready = Vec::with_capacity(3);
-
-        if self.conout.is_ready() {
-            ready.push(self.read_token);
+                backend
+            }));
         }
 
-        if self.conin.soft().is_ready() {
-            ready.push(self.write_token);
+        self.poll_resize_completion(cx)
+    }
+
+    fn poll_shutdown(&mut self, cx: &mut Context<'_>) -> TaskPoll<io::Result<()>> {
+        // A running resize owns the console; the close needs it back first.
+        ready!(self.poll_resize_completion(cx))?;
+
+        if let Some(backend) = self.backend.take() {
+            self.closing = Some(Box::pin(backend.close()));
         }
 
-        if self.child_watcher.soft().is_ready() {
-            ready.push(self.child_event_token);
+        if let Some(closing) = &mut self.closing {
+            ready!(closing.as_mut().poll(cx));
+
+            self.closing = None;
         }
 
-        ready
-    }
-
-    #[inline]
-    fn has_ready(&self) -> bool {
-        // Only sources with *unconsumed work* may force a zero-timeout spin: buffered
-        // read data (conout) and a pending child-exit. Writability (conin) is excluded
-        // on purpose — its flag is level-set to "no native write is running", which is
-        // true in steady state, so including it would keep `has_ready()` permanently
-        // true and make the event loop never block (100% CPU busy-spin). The write
-        // side is re-armed by the completion's clear->set edge waker, so it does not
-        // need this spin path.
-        self.conout.is_ready() || self.child_watcher.soft().is_ready()
-    }
-
-    #[inline]
-    fn set_winsize(&mut self, winsize_builder: WinsizeBuilder) -> Result<(), io::Error> {
-        let winsize: Winsize = (&winsize_builder).into();
-
-        self.backend.set_winsize(winsize);
-
-        Ok(())
-    }
-}
-
-impl EventedPty for Pty {
-    fn child_event_token(&self) -> Token {
-        self.child_event_token
-    }
-
-    fn child_exited(&mut self) -> bool {
-        match self.child_watcher.event_rx().try_recv() {
-            Ok(()) | Err(TryRecvError::Disconnected) => true,
-            Err(TryRecvError::Empty) => false,
-        }
+        TaskPoll::Ready(Ok(()))
     }
 }
 

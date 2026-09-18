@@ -5,13 +5,16 @@ mod tests;
 
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::future::Future;
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, LazyLock, Weak, mpsc};
+use std::sync::{Arc, LazyLock, Weak};
 use std::time::Duration;
 
-use parking_lot::{Condvar, Mutex};
+use parking_lot::Mutex;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use tokio::sync::{Notify, oneshot};
+use tokio::time::timeout;
 
 use crate::LaunchConfig;
 use crate::codex::app_server::host::router::Router;
@@ -38,7 +41,9 @@ struct SharedHostState {
 
 struct SharedHostSlot {
     state: Mutex<SharedHostState>,
-    ready: Condvar,
+
+    /// Wakes every waiter created before a startup attempt settles.
+    ready: Notify,
 }
 
 impl SharedHostSlot {
@@ -50,7 +55,7 @@ impl SharedHostSlot {
                 attempt: 0,
                 failed_attempts: VecDeque::new(),
             }),
-            ready: Condvar::new(),
+            ready: Notify::new(),
         }
     }
 }
@@ -81,34 +86,45 @@ impl CodexHost {
         self.router.retain_requests(owner, ids);
     }
 
-    pub(super) fn acquire(
+    pub(super) async fn acquire(
         launch: &LaunchConfig,
         catalog: &[LaunchConfig],
         on_stderr: impl Fn(String) + Send + 'static,
     ) -> Result<Arc<Self>, String> {
         let bootstrap = HostBootstrap::from_launches(launch, catalog)?;
 
-        let mut on_stderr = Some(on_stderr);
-
         loop {
-            let mut shared = SHARED_HOST.state.lock();
+            // Created before the state is read, so a startup that settles in
+            // between still wakes this waiter.
+            let settled = SHARED_HOST.ready.notified();
 
-            if let Some(host) = shared.host.upgrade()
-                && host.router.alive.load(Ordering::Acquire)
-            {
-                host.ensure_compatible(launch, &bootstrap)?;
+            let waiting_for = {
+                let mut shared = SHARED_HOST.state.lock();
 
-                return Ok(host);
-            }
+                if let Some(host) = shared.host.upgrade()
+                    && host.router.alive.load(Ordering::Acquire)
+                {
+                    host.ensure_compatible(launch, &bootstrap)?;
 
-            if shared.starting {
-                let attempt = shared.attempt;
-
-                while shared.starting && shared.attempt == attempt {
-                    SHARED_HOST.ready.wait(&mut shared);
+                    return Ok(host);
                 }
 
-                if let Some((_, error)) = shared
+                if shared.starting {
+                    Some(shared.attempt)
+                } else {
+                    shared.starting = true;
+                    shared.attempt = shared.attempt.wrapping_add(1).max(1);
+
+                    None
+                }
+            };
+
+            if let Some(attempt) = waiting_for {
+                settled.await;
+
+                if let Some((_, error)) = SHARED_HOST
+                    .state
+                    .lock()
                     .failed_attempts
                     .iter()
                     .find(|(failed_attempt, _)| *failed_attempt == attempt)
@@ -119,43 +135,17 @@ impl CodexHost {
                 continue;
             }
 
-            shared.starting = true;
-            shared.attempt = shared.attempt.wrapping_add(1).max(1);
+            let mut attempt = StartAttempt::claim();
 
-            let attempt = shared.attempt;
+            let started = Self::start(bootstrap, on_stderr).await.map(Arc::new);
 
-            drop(shared);
-
-            let started = Self::start(
-                bootstrap,
-                on_stderr
-                    .take()
-                    .expect("host startup callback is consumed by one attempt"),
-            )
-            .map(Arc::new);
-
-            let mut shared = SHARED_HOST.state.lock();
-
-            shared.starting = false;
-
-            match &started {
-                Ok(host) => shared.host = Arc::downgrade(host),
-                Err(error) => {
-                    shared.failed_attempts.push_back((attempt, error.clone()));
-
-                    while shared.failed_attempts.len() > 8 {
-                        shared.failed_attempts.pop_front();
-                    }
-                }
-            }
-
-            SHARED_HOST.ready.notify_all();
+            attempt.settle(&started);
 
             return started;
         }
     }
 
-    fn start(
+    async fn start(
         bootstrap: HostBootstrap,
         on_stderr: impl Fn(String) + Send + 'static,
     ) -> Result<Self, String> {
@@ -166,7 +156,7 @@ impl CodexHost {
         // Goal scheduling must be available to the tab's native goal controls.
         // This enables it only in the child process, without changing user files.
         let command = launcher.command(["-c", "features.goals=true", "app-server"]);
-        let (startup_tx, startup_rx) = mpsc::sync_channel(1);
+        let (startup_tx, startup_rx) = oneshot::channel();
         let router = Arc::new(Router::new(startup_tx));
 
         let process = JsonLineProcess::spawn_with_stdout_closed(
@@ -193,16 +183,18 @@ impl CodexHost {
             process: Mutex::new(process),
         };
 
-        host.router.start_timer()?;
+        host.router.start_timer();
 
         host.process
             .lock()
             .write_line(initialize_request())
             .map_err(|error| error.to_string())?;
 
-        let initialized = startup_rx
-            .recv_timeout(START_TIMEOUT)
-            .map_err(|_| "Codex app-server did not initialize in time".to_string())?;
+        let initialized = timeout(START_TIMEOUT, startup_rx)
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .ok_or_else(|| "Codex app-server did not initialize in time".to_string())?;
 
         initialized.map_err(|error| redact(&error, &credential_values))?;
 
@@ -312,7 +304,11 @@ impl CodexHost {
         self.router.detach(owner)
     }
 
-    pub(super) fn shutdown(&self, timeout: Duration, force: bool) -> Result<(), String> {
+    pub(super) fn shutdown(
+        &self,
+        timeout: Duration,
+        force: bool,
+    ) -> impl Future<Output = Result<(), String>> + Send + use<> {
         self.router.expected_shutdown.store(true, Ordering::Release);
 
         self.process.lock().shutdown(timeout, force)
@@ -323,10 +319,11 @@ impl Drop for CodexHost {
     fn drop(&mut self) {
         self.router.expected_shutdown.store(true, Ordering::Release);
 
-        let _ = self
-            .process
-            .get_mut()
-            .shutdown(Duration::from_millis(250), true);
+        nmt_runtime::handle().spawn(
+            self.process
+                .get_mut()
+                .shutdown(Duration::from_millis(250), true),
+        );
     }
 }
 
@@ -510,4 +507,68 @@ fn message_thread_id(message: &Value) -> Option<&str> {
     message["params"]["threadId"]
         .as_str()
         .or_else(|| message["params"]["thread"]["id"].as_str())
+}
+
+/// The startup attempt this caller claimed. Settling records the outcome and
+/// wakes waiters; a startup dropped before it settles is recorded as failed,
+/// so waiters are released instead of waiting for an attempt that never ends.
+struct StartAttempt {
+    attempt: u64,
+    settled: bool,
+}
+
+impl StartAttempt {
+    fn claim() -> Self {
+        Self {
+            attempt: SHARED_HOST.state.lock().attempt,
+            settled: false,
+        }
+    }
+
+    fn settle(&mut self, started: &Result<Arc<CodexHost>, String>) {
+        self.settled = true;
+
+        let mut shared = SHARED_HOST.state.lock();
+
+        shared.starting = false;
+
+        match started {
+            Ok(host) => shared.host = Arc::downgrade(host),
+            Err(error) => record_failure(&mut shared, self.attempt, error.clone()),
+        }
+
+        drop(shared);
+
+        SHARED_HOST.ready.notify_waiters();
+    }
+}
+
+impl Drop for StartAttempt {
+    fn drop(&mut self) {
+        if self.settled {
+            return;
+        }
+
+        let mut shared = SHARED_HOST.state.lock();
+
+        shared.starting = false;
+
+        record_failure(
+            &mut shared,
+            self.attempt,
+            "Codex app-server startup was cancelled".to_string(),
+        );
+
+        drop(shared);
+
+        SHARED_HOST.ready.notify_waiters();
+    }
+}
+
+fn record_failure(shared: &mut SharedHostState, attempt: u64, error: String) {
+    shared.failed_attempts.push_back((attempt, error));
+
+    while shared.failed_attempts.len() > 8 {
+        shared.failed_attempts.pop_front();
+    }
 }

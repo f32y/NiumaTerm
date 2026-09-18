@@ -1,8 +1,7 @@
-use std::sync::mpsc;
-
 use futures::executor::block_on;
 use nmt_config::system::NewlineShortcut;
 use nmt_input::keyboard::ModifiersState;
+use tokio::sync::mpsc;
 
 use crate::block_store::SegmentMeta;
 use crate::event::{BlockEvent, Msg};
@@ -16,7 +15,11 @@ use crate::session::interaction::{
 use crate::session::{BlockPoint, TerminalSession};
 use crate::termio::requests::answer_query;
 
-fn frozen_session() -> (TerminalSession, GhosttyTerminal, mpsc::Receiver<Msg>) {
+fn frozen_session() -> (
+    TerminalSession,
+    GhosttyTerminal,
+    mpsc::UnboundedReceiver<Msg>,
+) {
     let mut engine = GhosttyTerminal::new(24, 4, 100).unwrap();
 
     engine.write_vt(b"hello world");
@@ -37,7 +40,7 @@ fn frozen_session() -> (TerminalSession, GhosttyTerminal, mpsc::Receiver<Msg>) {
     (session, engine, messages)
 }
 
-fn answer_pending(engine: &mut GhosttyTerminal, messages: &mpsc::Receiver<Msg>) {
+fn answer_pending(engine: &mut GhosttyTerminal, messages: &mut mpsc::UnboundedReceiver<Msg>) {
     while let Ok(Msg::Query(query)) = messages.try_recv() {
         answer_query(engine, 0, 0, query);
     }
@@ -45,7 +48,7 @@ fn answer_pending(engine: &mut GhosttyTerminal, messages: &mpsc::Receiver<Msg>) 
 
 #[test]
 fn key_dispatch_reports_writes_and_requests_paste_from_the_host() {
-    let (session, messages) = test_session();
+    let (session, mut messages) = test_session();
 
     let mut interaction = TerminalInteraction::default();
 
@@ -96,7 +99,7 @@ fn key_dispatch_reports_writes_and_requests_paste_from_the_host() {
 #[test]
 fn copying_a_frozen_range_preserves_any_newer_pointer_selection() {
     for newer_pointer in [false, true] {
-        let (session, mut engine, messages) = frozen_session();
+        let (session, mut engine, mut messages) = frozen_session();
         let mut interaction = TerminalInteraction::default();
 
         let start = BlockPoint {
@@ -118,7 +121,7 @@ fn copying_a_frozen_range_preserves_any_newer_pointer_selection() {
         let snapshot = session.snapshot();
         let copy = interaction.copy_selection(&session, &snapshot).unwrap();
 
-        answer_pending(&mut engine, &messages);
+        answer_pending(&mut engine, &mut messages);
 
         assert_eq!(block_on(copy.request).unwrap().unwrap(), "ell");
 
@@ -141,7 +144,7 @@ fn copying_a_frozen_range_preserves_any_newer_pointer_selection() {
 
 #[test]
 fn copy_during_word_expansion_reads_the_word_and_clears_only_that_gesture() {
-    let (session, mut engine, messages) = frozen_session();
+    let (session, mut engine, mut messages) = frozen_session();
     let mut interaction = TerminalInteraction::default();
 
     interaction.begin_pointer();
@@ -159,7 +162,7 @@ fn copy_during_word_expansion_reads_the_word_and_clears_only_that_gesture() {
     let snapshot = session.snapshot();
     let copy = interaction.copy_selection(&session, &snapshot).unwrap();
 
-    answer_pending(&mut engine, &messages);
+    answer_pending(&mut engine, &mut messages);
 
     assert_eq!(block_on(copy.request).unwrap().unwrap(), "world");
 

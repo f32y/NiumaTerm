@@ -6,13 +6,16 @@ mod git_status_tests;
 
 use std::collections::HashMap;
 use std::time::Duration;
-use std::{fs, io, path};
+use std::{fs, io, panic, path};
 
+use app::utils::on_runtime;
 use gpui::prelude::*;
 use gpui::{AsyncApp, Context, Entity, SharedString, WeakEntity, Window, div};
 use gpui_component::h_flex;
 use nmt_agent::git::{CheckedOut, current_branch, run_git};
 use rust_i18n::t;
+use tokio::fs::read;
+use tokio::task::spawn_blocking;
 use tracing::warn;
 
 use crate::ui::AppSettings;
@@ -65,8 +68,8 @@ pub(crate) struct DiffLine {
     pub(crate) new_line: Option<u64>,
 }
 
-pub(crate) fn resolve_repo_root(cwd: &str) -> Option<String> {
-    let out = run_git(cwd, &["rev-parse", "--show-toplevel"]).ok()?;
+pub(crate) async fn resolve_repo_root(cwd: &str) -> Option<String> {
+    let out = run_git(cwd, &["rev-parse", "--show-toplevel"]).await.ok()?;
     let root = String::from_utf8_lossy(&out).trim().to_string();
 
     (!root.is_empty()).then_some(root)
@@ -74,11 +77,15 @@ pub(crate) fn resolve_repo_root(cwd: &str) -> Option<String> {
 
 /// Full status snapshot for `root`: porcelain file list joined with summed
 /// unstaged + staged numstat counts; untracked files counted as all-added.
-pub(crate) fn fetch_snapshot(root: &str, branch_max_age: Duration) -> Result<GitSnapshot, String> {
+pub(crate) async fn fetch_snapshot(
+    root: &str,
+    branch_max_age: Duration,
+) -> Result<GitSnapshot, String> {
     let status = run_git(
         root,
         &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
-    )?;
+    )
+    .await?;
 
     let entries = parse_status_z(&status);
 
@@ -88,7 +95,7 @@ pub(crate) fn fetch_snapshot(root: &str, branch_max_age: Duration) -> Result<Git
         &["diff", "--numstat", "-z"][..],
         &["diff", "--numstat", "-z", "--cached"][..],
     ] {
-        let out = run_git(root, args)?;
+        let out = run_git(root, args).await?;
 
         for (path, added, removed) in parse_numstat_z(&out) {
             let entry = counts.entry(path).or_default();
@@ -98,12 +105,35 @@ pub(crate) fn fetch_snapshot(root: &str, branch_max_age: Duration) -> Result<Git
         }
     }
 
+    // Untracked files are read in full to count their lines. One blocking
+    // batch keeps that file I/O off the runtime's I/O workers.
+    let untracked: Vec<String> = entries
+        .iter()
+        .filter(|(status, _)| status == "??")
+        .map(|(_, path)| path.clone())
+        .collect();
+
+    let untracked_root = root.to_string();
+
+    let untracked_lines: HashMap<String, u64> = spawn_blocking(move || {
+        untracked
+            .into_iter()
+            .map(|path| {
+                let lines = count_file_lines(&untracked_root, &path);
+
+                (path, lines)
+            })
+            .collect()
+    })
+    .await
+    .unwrap_or_else(|error| panic::resume_unwind(error.into_panic()));
+
     let mut files = Vec::with_capacity(entries.len());
     let (mut total_added, mut total_removed) = (0u64, 0u64);
 
     for (status, path) in entries {
         let (added, removed) = if status == "??" {
-            (count_file_lines(root, &path), 0)
+            (untracked_lines.get(&path).copied().unwrap_or(0), 0)
         } else {
             counts.get(&path).copied().unwrap_or((0, 0))
         };
@@ -121,10 +151,12 @@ pub(crate) fn fetch_snapshot(root: &str, branch_max_age: Duration) -> Result<Git
 
     Ok(GitSnapshot {
         repo_root: root.to_string(),
-        branch: current_branch(root, branch_max_age)?.map(|checked_out| match checked_out {
-            CheckedOut::Branch(branch) => branch,
-            CheckedOut::Detached(commit) => commit,
-        }),
+        branch: current_branch(root, branch_max_age)
+            .await?
+            .map(|checked_out| match checked_out {
+                CheckedOut::Branch(branch) => branch,
+                CheckedOut::Detached(commit) => commit,
+            }),
         files,
         total_added,
         total_removed,
@@ -173,9 +205,9 @@ fn count_file_lines(root: &str, path: &str) -> u64 {
 
 /// Fetch and classify the unified diff of one file. Untracked files render
 /// their full content as added lines; binary content gets a placeholder.
-pub(crate) fn fetch_file_diff(root: &str, path: &str, untracked: bool) -> Vec<DiffLine> {
+pub(crate) async fn fetch_file_diff(root: &str, path: &str, untracked: bool) -> Vec<DiffLine> {
     if untracked {
-        let Ok(bytes) = fs::read(path::Path::new(root).join(path)) else {
+        let Ok(bytes) = read(path::Path::new(root).join(path)).await else {
             return vec![line(DiffLineKind::Notice, t!("git-status-unreadable-file"))];
         };
 
@@ -202,7 +234,9 @@ pub(crate) fn fetch_file_diff(root: &str, path: &str, untracked: bool) -> Vec<Di
             "--",
             path,
         ],
-    ) {
+    )
+    .await
+    {
         Ok(out) => {
             let text = String::from_utf8_lossy(&out);
 
@@ -552,10 +586,7 @@ impl GitStatusModel {
         branch_max_age: Duration,
         cx: &mut AsyncApp,
     ) {
-        let root = cx
-            .background_executor()
-            .spawn(async move { resolve_repo_root(&cwd) })
-            .await;
+        let root = on_runtime(async move { resolve_repo_root(&cwd).await }).await;
 
         let proceed = this
             .update(cx, |this, cx| {
@@ -602,10 +633,7 @@ impl GitStatusModel {
             return;
         };
 
-        let snapshot = cx
-            .background_executor()
-            .spawn(async move { fetch_snapshot(&root, branch_max_age) })
-            .await;
+        let snapshot = on_runtime(async move { fetch_snapshot(&root, branch_max_age).await }).await;
 
         this.update(cx, |this, cx| {
             this.refreshing = false;

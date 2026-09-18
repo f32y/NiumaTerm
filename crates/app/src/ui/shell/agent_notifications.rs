@@ -1,3 +1,8 @@
+use std::sync::OnceLock;
+
+use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
+use tokio::task::spawn_blocking;
+
 use crate::ui::shell::*;
 
 pub(super) struct AgentNotificationState {
@@ -109,18 +114,13 @@ impl AgentNotificationState {
             })
                 .into();
 
-            thread::spawn(move || {
-                match show_notification(&NativeNotification {
-                    title: notification.title,
-                    body: notification.body,
-                    activation_url,
-                    tag: notification.native_tag,
-                    group: notification.native_group,
-                }) {
-                    Ok(()) => {}
-                    Err(error) => warn!("native notification failed: {error}"),
-                }
-            });
+            submit_native(NativeRequest::Show(NativeNotification {
+                title: notification.title,
+                body: notification.body,
+                activation_url,
+                tag: notification.native_tag,
+                group: notification.native_group,
+            }));
         }
     }
 
@@ -152,8 +152,47 @@ pub(super) fn remove_native_notifications(notifications: &[AgentNotification]) {
         let tag = notification.native_tag.clone();
         let group = notification.native_group.clone();
 
-        thread::spawn(move || {
-            let _ = remove_notification(&tag, &group);
-        });
+        submit_native(NativeRequest::Remove { tag, group });
     }
+}
+
+enum NativeRequest {
+    Show(NativeNotification),
+    Remove { tag: String, group: String },
+}
+
+impl NativeRequest {
+    fn run(self) {
+        match self {
+            NativeRequest::Show(notification) => {
+                if let Err(error) = show_notification(&notification) {
+                    warn!("native notification failed: {error}");
+                }
+            }
+            NativeRequest::Remove { tag, group } => {
+                let _ = remove_notification(&tag, &group);
+            }
+        }
+    }
+}
+
+/// System notification calls block on the notification service. One runtime
+/// task runs them in submission order, each on the blocking pool, so a removal
+/// cannot overtake the show it withdraws and no call waits on the UI thread.
+fn submit_native(request: NativeRequest) {
+    static QUEUE: OnceLock<UnboundedSender<NativeRequest>> = OnceLock::new();
+
+    let queue = QUEUE.get_or_init(|| {
+        let (sender, mut requests) = unbounded_channel::<NativeRequest>();
+
+        nmt_runtime::handle().spawn(async move {
+            while let Some(request) = requests.recv().await {
+                let _ = spawn_blocking(move || request.run()).await;
+            }
+        });
+
+        sender
+    });
+
+    let _ = queue.send(request);
 }

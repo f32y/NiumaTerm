@@ -16,7 +16,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
-use std::{fs, thread};
 
 use futures::StreamExt as _;
 use futures::channel::mpsc::UnboundedReceiver;
@@ -44,6 +43,8 @@ use nmt_agent::{
 use nmt_config::profile::AgentProfile;
 use rust_i18n::t;
 use serde_json::Value;
+use tokio::fs::remove_dir_all;
+use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 use crate::agent_tab::composer::attachments::scratch_dir;
@@ -56,6 +57,7 @@ use crate::agent_tab::session::RestorationReadiness;
 use crate::agent_tab::settings::AgentSettings;
 use crate::agent_tab::thread_controls::{launch_effort, launch_model, stored_thread_settings};
 use crate::agent_tab::{AgentPaneEvent, RecoveryReadiness};
+use crate::utils::on_runtime;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SessionId(Uuid);
@@ -195,12 +197,14 @@ impl SessionOwner {
 
         let scratch = self.scratch.clone();
 
-        thread::spawn(move || {
+        // Cleanup must outlive this owner, so it runs as a detached runtime
+        // task rather than work tied to the view.
+        nmt_runtime::handle().spawn(async move {
             if let Some(mut backend) = backend {
-                let _ = backend.shutdown(Duration::from_secs(5), true);
+                let _ = backend.shutdown(Duration::from_secs(5), true).await;
             }
 
-            let _ = fs::remove_dir_all(scratch);
+            let _ = remove_dir_all(scratch).await;
         });
     }
 }
@@ -919,27 +923,29 @@ impl AgentSession {
             return Task::ready(Ok(()));
         };
 
-        let worker = cx.background_executor().spawn(async move {
-            let result = backend.shutdown(Duration::from_secs(5), force);
+        let stopping = backend.shutdown(Duration::from_secs(5), force);
 
-            (backend, result)
-        });
+        // The backend travels with its shutdown so a failure can hand it back
+        // to the controller.
+        let worker = nmt_runtime::handle().spawn(async move { (backend, stopping.await) });
 
         cx.spawn(async move |this, cx| Self::finish_suspension(this, worker, epoch, cx).await)
     }
 
     async fn finish_suspension(
         this: WeakEntity<Self>,
-        worker: Task<(Backend, Result<(), String>)>,
+        worker: JoinHandle<(Backend, Result<(), String>)>,
         epoch: u64,
         cx: &mut AsyncApp,
     ) -> Result<(), String> {
-        let (backend, result) = worker.await;
+        let (backend, result) = worker
+            .await
+            .map_err(|error| format!("backend shutdown did not finish: {error}"))?;
 
         if result.is_err() {
             let _ = this.update(cx, |this, cx| {
                 if let Err(orphan) = this.controller.borrow_mut().shutdown_failed(epoch, backend) {
-                    shutdown_in_background(orphan, Duration::from_secs(5), cx);
+                    shutdown_in_background(orphan, Duration::from_secs(5));
                 }
 
                 cx.notify();
@@ -1205,7 +1211,7 @@ impl AgentSession {
             policy
         });
 
-        let spawned = cx.background_executor().spawn(async move {
+        let spawned = cx.background_executor().spawn(on_runtime(async move {
             if let Some(policy) = team_launch {
                 return Backend::spawn_team(
                     kind,
@@ -1215,7 +1221,8 @@ impl AgentSession {
                     recovery,
                     policy,
                     move |message| sender.send(message),
-                );
+                )
+                .await;
             }
 
             Backend::spawn(
@@ -1226,7 +1233,8 @@ impl AgentSession {
                 recovery,
                 move |message| sender.send(message),
             )
-        });
+            .await
+        }));
 
         cx.spawn(async move |this, cx| {
             Self::pump_backend_messages(this, batches, spawned, epoch, name, on_result, cx).await
@@ -1390,7 +1398,7 @@ impl AgentSession {
             StartOutcome::Installed => Some(true),
             StartOutcome::Superseded(orphan) => {
                 if let Some(orphan) = orphan {
-                    shutdown_in_background(orphan, Duration::from_secs(5), cx);
+                    shutdown_in_background(orphan, Duration::from_secs(5));
                 }
 
                 None
@@ -1439,7 +1447,7 @@ impl AgentSession {
                 self.on_event(epoch, event, cx);
             }
 
-            shutdown_in_background(Box::new(backend), Duration::from_millis(250), cx);
+            shutdown_in_background(Box::new(backend), Duration::from_millis(250));
         }
 
         self.on_event(
@@ -1633,10 +1641,12 @@ impl AgentSession {
 
 /// Stop a backend nothing reads from any more, off the UI thread, forcing it
 /// down once `timeout` passes.
-fn shutdown_in_background(mut backend: Box<Backend>, timeout: Duration, cx: &App) {
-    cx.background_executor()
-        .spawn(async move {
-            let _ = backend.shutdown(timeout, true);
-        })
-        .detach();
+fn shutdown_in_background(mut backend: Box<Backend>, timeout: Duration) {
+    let stopping = backend.shutdown(timeout, true);
+
+    nmt_runtime::handle().spawn(async move {
+        let _ = stopping.await;
+
+        drop(backend);
+    });
 }

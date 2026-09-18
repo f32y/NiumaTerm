@@ -4,6 +4,7 @@ pub(super) use nmt_agent::input_history::InputHistoryScope;
 #[path = "input_history_tests.rs"]
 mod input_history_tests;
 
+use std::future::Future;
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -25,7 +26,7 @@ pub fn initialize(testing: bool, cx: &mut App) {
     )));
 }
 
-pub fn flush(cx: &App) -> io::Result<()> {
+pub fn flush(cx: &App) -> impl Future<Output = io::Result<()>> + use<> {
     cx.global::<AgentInputHistory>().0.flush()
 }
 

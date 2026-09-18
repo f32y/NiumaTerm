@@ -41,7 +41,10 @@ fn repository() -> PathBuf {
 }
 
 fn branch_of(dir: &Path, max_age: Duration) -> Option<String> {
-    match current_branch(&dir.to_string_lossy(), max_age).unwrap()? {
+    match nmt_runtime::handle()
+        .block_on(current_branch(&dir.to_string_lossy(), max_age))
+        .unwrap()?
+    {
         CheckedOut::Branch(branch) => Some(branch),
         CheckedOut::Detached(commit) => Some(commit),
     }
@@ -92,5 +95,9 @@ fn a_missing_working_directory_reports_a_read_error() {
     let directory = tempfile::tempdir().unwrap();
     let missing = directory.path().join("absent");
 
-    assert!(current_branch(&missing.to_string_lossy(), Duration::ZERO).is_err());
+    assert!(
+        nmt_runtime::handle()
+            .block_on(current_branch(&missing.to_string_lossy(), Duration::ZERO))
+            .is_err()
+    );
 }

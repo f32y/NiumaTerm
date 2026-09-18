@@ -1,120 +1,178 @@
 use std::fs::File;
+use std::future::poll_fn;
 use std::io::{self, Read, Write};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::channel;
+use std::task::{Context, Poll as TaskPoll, Waker};
 use std::thread::spawn;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use mio::{Events, Poll, Token, Waker};
+use tokio::runtime::{Builder, Runtime};
+use tokio::time::{sleep, timeout};
 
-use crate::windows::pipes::{ConinPipe, PIPE_BUFFER, conin_pair, conout_pair};
+use crate::windows::pipes::{ConinPipe, ConoutPipe, PIPE_BUFFER, conin_pair, conout_pair};
+
+#[test]
+fn async_output_parks_and_native_completion_wakes_the_reader() {
+    let (mut reader, peer) = conout_pair().unwrap();
+    let mut peer = File::from(peer);
+
+    let runtime = Builder::new_current_thread().enable_all().build().unwrap();
+    let polls = Arc::new(AtomicUsize::new(0));
+    let counter = polls.clone();
+
+    runtime.block_on(async {
+        reader.start_async().unwrap();
+
+        let task = tokio::spawn(async move {
+            let mut buf = [0; 3];
+
+            let count = poll_fn(|cx| {
+                counter.fetch_add(1, Ordering::Relaxed);
+
+                reader.poll_read(cx, &mut buf)
+            })
+            .await
+            .unwrap();
+
+            (reader, buf, count)
+        });
+
+        sleep(Duration::from_millis(20)).await;
+
+        let parked = polls.load(Ordering::Relaxed);
+
+        sleep(Duration::from_millis(60)).await;
+
+        assert_eq!(
+            polls.load(Ordering::Relaxed),
+            parked,
+            "idle IOCP read woke itself"
+        );
+
+        peer.write_all(b"abc").unwrap();
+
+        let (mut reader, buf, count) = timeout(Duration::from_secs(2), task)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(count, 3);
+        assert_eq!(&buf, b"abc");
+
+        drop(peer);
+
+        let error = timeout(
+            Duration::from_secs(2),
+            poll_fn(|cx| reader.poll_read(cx, &mut [0; 1])),
+        )
+        .await
+        .unwrap()
+        .unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
+    });
+}
+
+#[test]
+fn async_flush_waits_for_native_completion_under_backpressure() {
+    let (mut peer, mut writer) = writer_with_pending_write();
+
+    let runtime = Builder::new_current_thread().enable_all().build().unwrap();
+
+    runtime.block_on(async {
+        poll_fn(|cx| {
+            assert!(writer.poll_flush(cx).is_pending());
+            assert!(writer.poll_write(cx, b"later").is_pending());
+
+            TaskPoll::Ready(())
+        })
+        .await;
+
+        let drain = spawn(move || {
+            let mut bytes = vec![0; 2 * PIPE_BUFFER];
+
+            peer.read_exact(&mut bytes).unwrap();
+
+            (peer, bytes)
+        });
+
+        timeout(Duration::from_secs(2), poll_fn(|cx| writer.poll_flush(cx)))
+            .await
+            .unwrap()
+            .unwrap();
+
+        let (mut peer, received) = drain.join().unwrap();
+
+        assert!(received[..PIPE_BUFFER].iter().all(|byte| *byte == 0x5a));
+        assert!(received[PIPE_BUFFER..].iter().all(|byte| *byte == 0xa5));
+        assert_eq!(
+            poll_fn(|cx| writer.poll_write(cx, b"later")).await.unwrap(),
+            5
+        );
+
+        let mut tail = [0; 5];
+
+        peer.read_exact(&mut tail).unwrap();
+
+        assert_eq!(&tail, b"later");
+    });
+}
+
+/// Submit without waiting; a writer still sending reports `WouldBlock`.
+fn write_now(writer: &mut ConinPipe, buf: &[u8]) -> io::Result<usize> {
+    match writer.poll_write(&mut Context::from_waker(Waker::noop()), buf) {
+        TaskPoll::Ready(result) => result,
+        TaskPoll::Pending => Err(io::ErrorKind::WouldBlock.into()),
+    }
+}
 
 /// A writer whose second write cannot complete: the first one filled the pipe
 /// buffer and the peer has not read anything yet.
 fn writer_with_pending_write() -> (File, ConinPipe) {
     let (peer, mut writer) = conin_pair().unwrap();
 
-    assert_eq!(writer.write(&[0x5a; PIPE_BUFFER]).unwrap(), PIPE_BUFFER);
-    assert_eq!(writer.write(&[0xa5; PIPE_BUFFER]).unwrap(), PIPE_BUFFER);
+    assert_eq!(
+        write_now(&mut writer, &[0x5a; PIPE_BUFFER]).unwrap(),
+        PIPE_BUFFER
+    );
+    assert_eq!(
+        write_now(&mut writer, &[0xa5; PIPE_BUFFER]).unwrap(),
+        PIPE_BUFFER
+    );
 
     (File::from(peer), writer)
-}
-
-#[test]
-fn flush_waits_for_native_writes_and_completion_wakes_the_loop() {
-    let (mut peer, mut writer) = writer_with_pending_write();
-
-    let mut poll = Poll::new().unwrap();
-
-    writer
-        .soft()
-        .set_waker(Arc::new(Waker::new(poll.registry(), Token(0)).unwrap()));
-
-    let mut events = Events::with_capacity(4);
-
-    assert_eq!(
-        writer.flush().unwrap_err().kind(),
-        io::ErrorKind::WouldBlock
-    );
-    assert_eq!(
-        writer.write(b"later").unwrap_err().kind(),
-        io::ErrorKind::WouldBlock
-    );
-
-    let drain = spawn(move || {
-        let mut received = vec![0; 2 * PIPE_BUFFER];
-
-        peer.read_exact(&mut received).unwrap();
-
-        received
-    });
-
-    loop {
-        events.clear();
-
-        poll.poll(&mut events, Some(Duration::from_secs(2)))
-            .unwrap();
-
-        assert!(
-            !events.is_empty(),
-            "native completion did not wake the parked loop"
-        );
-
-        match writer.flush() {
-            Ok(()) => break,
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
-            Err(error) => panic!("native write failed: {error}"),
-        }
-    }
-
-    let received = drain.join().unwrap();
-
-    assert!(received[..PIPE_BUFFER].iter().all(|byte| *byte == 0x5a));
-    assert!(received[PIPE_BUFFER..].iter().all(|byte| *byte == 0xa5));
 }
 
 #[test]
 fn native_write_failure_wakes_a_pending_flush() {
     let (peer, mut writer) = writer_with_pending_write();
 
-    let mut poll = Poll::new().unwrap();
+    runtime().block_on(async {
+        poll_fn(|cx| {
+            assert!(writer.poll_flush(cx).is_pending());
 
-    writer
-        .soft()
-        .set_waker(Arc::new(Waker::new(poll.registry(), Token(0)).unwrap()));
+            TaskPoll::Ready(())
+        })
+        .await;
 
-    let mut events = Events::with_capacity(4);
-
-    assert_eq!(
-        writer.flush().unwrap_err().kind(),
-        io::ErrorKind::WouldBlock
-    );
-
-    drop(peer);
-
-    loop {
-        events.clear();
-
-        poll.poll(&mut events, Some(Duration::from_secs(2)))
-            .unwrap();
-
-        assert!(
-            !events.is_empty(),
-            "native failure did not wake the parked loop"
-        );
+        drop(peer);
 
         // The kernel may report the abandoned write either as failed or as
-        // finished; what the loop needs is that the wait ends either way.
-        match writer.flush() {
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
-            Err(error) if error.kind() == io::ErrorKind::BrokenPipe => break,
+        // finished; what the task needs is that the wait ends either way.
+        match timeout(Duration::from_secs(2), poll_fn(|cx| writer.poll_flush(cx)))
+            .await
+            .expect("native failure did not wake the waiting task")
+        {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::BrokenPipe => {}
             Err(error) => panic!("unexpected native write error: {error}"),
-            Ok(()) => break,
         }
-    }
+    });
 
     assert_eq!(
-        writer.write(b"after").unwrap_err().kind(),
+        write_now(&mut writer, b"after").unwrap_err().kind(),
         io::ErrorKind::BrokenPipe
     );
 }
@@ -147,9 +205,8 @@ fn an_empty_write_never_reaches_the_pipe() {
     let (peer, mut writer) = conin_pair().unwrap();
     let mut peer = File::from(peer);
 
-    assert_eq!(writer.write(&[]).unwrap(), 0);
-
-    writer.write_all(b"x").unwrap();
+    assert_eq!(write_now(&mut writer, &[]).unwrap(), 0);
+    assert_eq!(write_now(&mut writer, b"x").unwrap(), 1);
 
     // A zero-length native write would complete this read with no bytes.
     let mut received = [0; 1];
@@ -158,159 +215,139 @@ fn an_empty_write_never_reaches_the_pipe() {
     assert_eq!(&received, b"x");
 }
 
-fn poll_readable(poll: &mut Poll, token: Token) {
-    let deadline = Instant::now() + Duration::from_secs(2);
-
-    let mut events = Events::with_capacity(8);
-
-    loop {
-        let remaining = deadline.saturating_duration_since(Instant::now());
-
-        assert!(!remaining.is_zero(), "pipe did not become readable");
-
-        poll.poll(&mut events, Some(remaining)).unwrap();
-
-        if events
-            .iter()
-            .any(|event| event.token() == token && event.is_readable())
-        {
-            return;
-        }
-    }
+fn runtime() -> Runtime {
+    Builder::new_current_thread().enable_all().build().unwrap()
 }
 
-/// Partial reads must retain local readiness because buffered bytes do not
-/// produce another IOCP completion until the next native read starts.
+/// A reader associated with `runtime`'s IOCP, as the PTY task does on start.
+fn started_reader(runtime: &Runtime) -> (ConoutPipe, File) {
+    let (mut reader, peer) = conout_pair().unwrap();
+
+    runtime.block_on(async { reader.start_async().unwrap() });
+
+    (reader, File::from(peer))
+}
+
+async fn read(reader: &mut ConoutPipe, buf: &mut [u8]) -> io::Result<usize> {
+    timeout(
+        Duration::from_secs(2),
+        poll_fn(|cx| reader.poll_read(cx, buf)),
+    )
+    .await
+    .expect("pipe did not become readable")
+}
+
+/// Whether a read would park the task now, without waiting for readiness.
+fn would_park(reader: &mut ConoutPipe) -> bool {
+    reader
+        .poll_read(&mut Context::from_waker(Waker::noop()), &mut [0; 64])
+        .is_pending()
+}
+
+/// Partial reads must keep readiness because buffered bytes do not produce
+/// another IOCP completion until the next native read starts.
 #[test]
-fn readiness_stays_set_until_output_is_fully_drained() {
-    let (mut reader, pty_side) = conout_pair().unwrap();
-    let mut pty_side = File::from(pty_side);
-    let mut poll = Poll::new().unwrap();
+fn partial_reads_drain_buffered_output_before_parking() {
+    let runtime = runtime();
 
-    reader.register(&poll, Token(1)).unwrap();
+    let (mut reader, mut peer) = started_reader(&runtime);
 
-    // Push more than a single small read will drain.
-    pty_side.write_all(&[0xABu8; 4096]).expect("write");
+    runtime.block_on(async {
+        // Push more than a single small read will drain.
+        peer.write_all(&[0xAB; 4096]).unwrap();
 
-    poll_readable(&mut poll, Token(1));
+        let mut small = [0; 16];
 
-    // Read only a slice — data remains buffered.
-    let mut small = [0u8; 16];
+        let mut drained = read(&mut reader, &mut small).await.unwrap();
 
-    let got = reader.read(&mut small).expect("partial read");
+        assert!(drained > 0 && drained <= 16);
 
-    assert!(got > 0 && got <= 16);
-    assert!(
-        reader.is_ready(),
-        "flag must stay set while output is still buffered"
-    );
+        let mut sink = [0; 4096];
 
-    let mut drained = got;
-    let mut sink = [0u8; 4096];
-
-    while drained < 4096 {
-        match reader.read(&mut sink) {
-            Ok(0) => poll_readable(&mut poll, Token(1)),
-            Ok(n) => drained += n,
-            Err(e) => panic!("drain read failed: {e}"),
+        while drained < 4096 {
+            drained += read(&mut reader, &mut sink).await.unwrap();
         }
-    }
 
-    assert_eq!(drained, 4096, "should read back every byte written");
-
-    assert_eq!(reader.read(&mut sink).unwrap(), 0);
-    assert!(!reader.is_ready(), "an empty pipe must let the loop park");
-
-    let mut events = Events::with_capacity(8);
-
-    poll.poll(&mut events, Some(Duration::from_millis(20)))
-        .unwrap();
-
-    assert!(events.is_empty(), "drained output kept the loop awake");
+        assert_eq!(drained, 4096, "should read back every byte written");
+        assert!(
+            would_park(&mut reader),
+            "an empty pipe must let the task park"
+        );
+    });
 }
 
 #[test]
 fn output_written_before_the_first_read_is_not_lost() {
-    let (mut reader, pty_side) = conout_pair().unwrap();
-    let mut pty_side = File::from(pty_side);
+    let (mut reader, peer) = conout_pair().unwrap();
+    let mut peer = File::from(peer);
 
-    pty_side.write_all(b"early").unwrap();
+    peer.write_all(b"early").unwrap();
 
-    let mut poll = Poll::new().unwrap();
+    runtime().block_on(async {
+        reader.start_async().unwrap();
 
-    reader.register(&poll, Token(1)).unwrap();
+        let mut sink = [0; 64];
 
-    poll_readable(&mut poll, Token(1));
+        let got = read(&mut reader, &mut sink).await.unwrap();
 
-    let mut sink = [0u8; 64];
-
-    let got = reader.read(&mut sink).unwrap();
-
-    assert_eq!(&sink[..got], b"early");
+        assert_eq!(&sink[..got], b"early");
+    });
 }
 
 #[test]
 fn a_closed_peer_is_reported_as_a_broken_pipe() {
-    let (mut reader, pty_side) = conout_pair().unwrap();
-    let mut poll = Poll::new().unwrap();
+    let runtime = runtime();
 
-    reader.register(&poll, Token(1)).unwrap();
+    let (mut reader, peer) = started_reader(&runtime);
 
-    drop(pty_side);
-    poll_readable(&mut poll, Token(1));
+    drop(peer);
 
-    let mut sink = [0u8; 64];
-
-    assert_eq!(
-        reader.read(&mut sink).unwrap_err().kind(),
-        io::ErrorKind::BrokenPipe
-    );
+    runtime.block_on(async {
+        assert_eq!(
+            read(&mut reader, &mut [0; 64]).await.unwrap_err().kind(),
+            io::ErrorKind::BrokenPipe
+        );
+    });
 }
 
 #[test]
-fn read_completions_use_the_pipe_token_without_a_waker() {
-    let (mut reader, peer) = conout_pair().unwrap();
-    let mut peer = File::from(peer);
-    let mut poll = Poll::new().unwrap();
+fn each_payload_wakes_a_parked_read() {
+    let runtime = runtime();
 
-    reader.register(&poll, Token(7)).unwrap();
+    let (mut reader, mut peer) = started_reader(&runtime);
 
-    let mut sink = [0; 64];
+    runtime.block_on(async {
+        let mut sink = [0; 64];
 
-    for payload in [b"first".as_slice(), b"second".as_slice()] {
-        assert_eq!(reader.read(&mut sink).unwrap(), 0);
-        assert!(!reader.is_ready());
+        for payload in [b"first".as_slice(), b"second".as_slice()] {
+            assert!(would_park(&mut reader));
 
-        peer.write_all(payload).unwrap();
+            peer.write_all(payload).unwrap();
 
-        poll_readable(&mut poll, Token(7));
+            let got = read(&mut reader, &mut sink).await.unwrap();
 
-        let got = reader.read(&mut sink).unwrap();
-
-        assert_eq!(&sink[..got], payload);
-    }
+            assert_eq!(&sink[..got], payload);
+        }
+    });
 }
 
 #[test]
 fn an_empty_read_keeps_buffered_output_ready() {
-    let (mut reader, peer) = conout_pair().unwrap();
-    let mut peer = File::from(peer);
-    let mut poll = Poll::new().unwrap();
+    let runtime = runtime();
 
-    reader.register(&poll, Token(1)).unwrap();
+    let (mut reader, mut peer) = started_reader(&runtime);
 
-    peer.write_all(b"xy").unwrap();
+    runtime.block_on(async {
+        peer.write_all(b"xy").unwrap();
 
-    poll_readable(&mut poll, Token(1));
+        let mut byte = [0; 1];
 
-    let mut byte = [0; 1];
-
-    assert_eq!(reader.read(&mut byte).unwrap(), 1);
-    assert_eq!(&byte, b"x");
-    assert_eq!(reader.read(&mut []).unwrap(), 0);
-    assert!(reader.is_ready());
-    assert_eq!(reader.read(&mut byte).unwrap(), 1);
-    assert_eq!(&byte, b"y");
+        assert_eq!(read(&mut reader, &mut byte).await.unwrap(), 1);
+        assert_eq!(&byte, b"x");
+        assert_eq!(read(&mut reader, &mut []).await.unwrap(), 0);
+        assert_eq!(read(&mut reader, &mut byte).await.unwrap(), 1);
+        assert_eq!(&byte, b"y");
+    });
 }
 
 #[test]
@@ -320,98 +357,53 @@ fn a_zero_length_peer_write_does_not_close_output() {
 
     use windows_sys::Win32::Storage::FileSystem::WriteFile;
 
-    let (mut reader, peer) = conout_pair().unwrap();
-    let mut peer = File::from(peer);
-    let mut poll = Poll::new().unwrap();
+    let runtime = runtime();
 
-    reader.register(&poll, Token(1)).unwrap();
+    let (mut reader, mut peer) = started_reader(&runtime);
 
-    let mut written = 0;
+    runtime.block_on(async {
+        assert!(would_park(&mut reader));
 
-    // SAFETY: The peer owns a synchronous pipe handle, the empty buffer is
-    // valid for zero bytes, and the byte-count output lives through the call.
-    assert_ne!(
-        unsafe {
-            WriteFile(
-                peer.as_raw_handle(),
-                b"".as_ptr(),
-                0,
-                &mut written,
-                ptr::null_mut(),
-            )
-        },
-        0
-    );
+        let mut written = 0;
 
-    let mut events = Events::with_capacity(8);
+        // SAFETY: The peer owns a synchronous pipe handle, the empty buffer is
+        // valid for zero bytes, and the byte-count output lives through the call.
+        assert_ne!(
+            unsafe {
+                WriteFile(
+                    peer.as_raw_handle(),
+                    b"".as_ptr(),
+                    0,
+                    &mut written,
+                    ptr::null_mut(),
+                )
+            },
+            0
+        );
 
-    poll.poll(&mut events, Some(Duration::from_millis(20)))
-        .unwrap();
+        // Let the zero-byte completion reach the runtime before sampling.
+        sleep(Duration::from_millis(20)).await;
 
-    let mut sink = [0; 64];
+        assert!(would_park(&mut reader));
 
-    assert_eq!(reader.read(&mut sink).unwrap(), 0);
-    assert!(!reader.is_ready());
+        peer.write_all(b"still open").unwrap();
 
-    peer.write_all(b"still open").unwrap();
+        let mut sink = [0; 64];
 
-    poll_readable(&mut poll, Token(1));
+        let got = read(&mut reader, &mut sink).await.unwrap();
 
-    let got = reader.read(&mut sink).unwrap();
-
-    assert_eq!(&sink[..got], b"still open");
-}
-
-#[test]
-fn deregistration_retains_completed_output_for_the_next_registration() {
-    let (mut reader, peer) = conout_pair().unwrap();
-    let mut peer = File::from(peer);
-    let mut poll = Poll::new().unwrap();
-
-    reader.register(&poll, Token(1)).unwrap();
-    reader.deregister(&poll).unwrap();
-
-    assert!(!reader.is_ready());
-
-    peer.write_all(b"retained").unwrap();
-
-    let mut events = Events::with_capacity(8);
-
-    poll.poll(&mut events, Some(Duration::from_millis(20)))
-        .unwrap();
-
-    assert!(
-        events.is_empty(),
-        "deregistered output still emitted readiness"
-    );
-
-    reader.register(&poll, Token(2)).unwrap();
-
-    assert!(reader.is_ready());
-
-    let mut sink = [0; 64];
-
-    let got = reader.read(&mut sink).unwrap();
-
-    assert_eq!(&sink[..got], b"retained");
-
-    assert_eq!(reader.read(&mut sink).unwrap(), 0);
-
-    peer.write_all(b"next").unwrap();
-
-    poll_readable(&mut poll, Token(2));
-
-    let got = reader.read(&mut sink).unwrap();
-
-    assert_eq!(&sink[..got], b"next");
+        assert_eq!(&sink[..got], b"still open");
+    });
 }
 
 #[test]
 fn dropping_reader_cancels_a_pending_native_read() {
-    let (mut reader, peer) = conout_pair().unwrap();
-    let mut poll = Poll::new().unwrap();
+    let runtime = runtime();
 
-    reader.register(&poll, Token(1)).unwrap();
+    let (mut reader, peer) = started_reader(&runtime);
+
+    // Start the native read that dropping must cancel.
+    runtime.block_on(async { assert!(would_park(&mut reader)) });
 
     let (closed_tx, closed_rx) = channel();
 
@@ -430,202 +422,6 @@ fn dropping_reader_cancels_a_pending_native_read() {
 
     assert!(closed, "reader teardown waited for native output");
 
-    // Process the cancellation while its overlapped storage is still owned by mio.
-    let mut events = Events::with_capacity(8);
-
-    poll.poll(&mut events, Some(Duration::from_millis(20)))
-        .unwrap();
-}
-
-#[test]
-#[ignore = "temporary latency probe"]
-fn zz_probe_wake_latency() {
-    use std::os::windows::io::{FromRawHandle as _, IntoRawHandle as _};
-    use std::time::Instant;
-
-    use mio::Interest;
-    use mio::windows::NamedPipe;
-    use windows_sys::Win32::Foundation::GENERIC_WRITE;
-    use windows_sys::Win32::Storage::FileSystem::PIPE_ACCESS_INBOUND;
-
-    use crate::windows::pipes::pipe_pair;
-
-    const ROUNDS: usize = 2000;
-
-    fn report(name: &str, mut samples: Vec<u128>) {
-        samples.sort_unstable();
-
-        eprintln!(
-            "{name}: p50={}us p90={}us p99={}us",
-            samples[samples.len() / 2] / 1000,
-            samples[samples.len() * 9 / 10] / 1000,
-            samples[samples.len() * 99 / 100] / 1000,
-        );
-    }
-
-    // ConPTY wrapper: completion packet directly to the polled port.
-    {
-        let (mut reader, peer) = conout_pair().unwrap();
-        let mut peer = File::from(peer);
-        let mut poll = Poll::new().unwrap();
-
-        reader.register(&poll, Token(1)).unwrap();
-
-        let mut events = Events::with_capacity(8);
-        let mut sink = [0u8; 4096];
-        let mut samples = Vec::new();
-
-        while reader.read(&mut sink).unwrap() > 0 {}
-
-        for _ in 0..ROUNDS {
-            let started = Instant::now();
-
-            peer.write_all(b"x").unwrap();
-
-            loop {
-                if reader.read(&mut sink).unwrap() > 0 {
-                    break;
-                }
-
-                events.clear();
-
-                poll.poll(&mut events, Some(Duration::from_secs(1)))
-                    .unwrap();
-            }
-
-            samples.push(started.elapsed().as_nanos());
-
-            while reader.read(&mut sink).unwrap() > 0 {}
-
-            events.clear();
-
-            poll.poll(&mut events, Some(Duration::ZERO)).unwrap();
-        }
-
-        report("ConoutPipe IOCP", samples);
-    }
-
-    // mio NamedPipe: completion packet straight to the polled port.
-    {
-        let (ours, peer) = pipe_pair(PIPE_ACCESS_INBOUND, GENERIC_WRITE).unwrap();
-
-        let mut peer = File::from(peer);
-
-        let mut pipe = unsafe { NamedPipe::from_raw_handle(ours.into_raw_handle()) };
-
-        let mut poll = Poll::new().unwrap();
-
-        poll.registry()
-            .register(&mut pipe, Token(1), Interest::READABLE)
-            .unwrap();
-
-        let mut events = Events::with_capacity(8);
-        let mut sink = [0u8; 4096];
-        let mut samples = Vec::new();
-
-        for _ in 0..ROUNDS {
-            let started = Instant::now();
-
-            peer.write_all(b"x").unwrap();
-
-            loop {
-                match pipe.read(&mut sink) {
-                    Ok(n) if n > 0 => break,
-                    _ => {}
-                }
-
-                events.clear();
-
-                poll.poll(&mut events, Some(Duration::from_secs(1)))
-                    .unwrap();
-            }
-
-            samples.push(started.elapsed().as_nanos());
-        }
-
-        report("mio NamedPipe", samples);
-    }
-
-    // Flood: 64 MiB written by a thread, time to drain.
-    for mode in ["ours", "mio"] {
-        const TOTAL: usize = 64 * 1024 * 1024;
-
-        let started;
-
-        let mut polls = 0u64;
-        let mut got = 0usize;
-        let mut sink = vec![0u8; 1 << 20];
-        let mut events = Events::with_capacity(8);
-        let mut poll = Poll::new().unwrap();
-
-        let writer = |mut peer: File| {
-            spawn(move || {
-                let chunk = [0u8; 4096];
-
-                for _ in 0..TOTAL / 4096 {
-                    peer.write_all(&chunk).unwrap();
-                }
-            })
-        };
-
-        if mode == "ours" {
-            let (mut reader, peer) = conout_pair().unwrap();
-
-            reader.register(&poll, Token(1)).unwrap();
-
-            started = Instant::now();
-
-            let thread = writer(File::from(peer));
-
-            while got < TOTAL {
-                let n = reader.read(&mut sink).unwrap();
-
-                if n == 0 {
-                    events.clear();
-
-                    polls += 1;
-
-                    poll.poll(&mut events, Some(Duration::from_secs(1)))
-                        .unwrap();
-                }
-
-                got += n;
-            }
-
-            thread.join().unwrap();
-        } else {
-            let (ours, peer) = pipe_pair(PIPE_ACCESS_INBOUND, GENERIC_WRITE).unwrap();
-
-            let mut pipe = unsafe { NamedPipe::from_raw_handle(ours.into_raw_handle()) };
-
-            poll.registry()
-                .register(&mut pipe, Token(1), Interest::READABLE)
-                .unwrap();
-
-            started = Instant::now();
-
-            let thread = writer(File::from(peer));
-
-            while got < TOTAL {
-                match pipe.read(&mut sink) {
-                    Ok(n) => got += n,
-                    Err(_) => {
-                        events.clear();
-
-                        polls += 1;
-
-                        poll.poll(&mut events, Some(Duration::from_secs(1)))
-                            .unwrap();
-                    }
-                }
-            }
-
-            thread.join().unwrap();
-        }
-
-        eprintln!(
-            "flood {mode}: {:?} for 64 MiB, {polls} polls",
-            started.elapsed()
-        );
-    }
+    // Process the cancellation while the runtime still owns the overlapped storage.
+    runtime.block_on(async { sleep(Duration::from_millis(20)).await });
 }

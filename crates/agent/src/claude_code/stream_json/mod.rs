@@ -18,6 +18,7 @@ mod transcript;
 #[cfg(test)]
 mod tests;
 
+use std::future::Future;
 use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -210,16 +211,14 @@ impl Session {
         let deliver = Arc::new(deliver);
 
         let progress_monitor =
-            ProgressMonitor::new(workspace.primary().map(str::to_owned), deliver.clone())
-                .map_err(|error| format!("could not start Claude progress reader: {error}"))?;
+            ProgressMonitor::new(workspace.primary().map(str::to_owned), deliver.clone());
 
         let stop_progress = progress_monitor.stop_on_exit();
         let timer_delivery = Arc::clone(&deliver);
 
         let timer = DeadlineTimer::new(move || {
             timer_delivery(json!({"method": TIMEOUT_METHOD}));
-        })
-        .map_err(|error| format!("could not start Claude deadline timer: {error}"))?;
+        });
 
         let stop = timer.handle();
 
@@ -286,10 +285,14 @@ impl Session {
         !self.turn.is_idle() || self.control.has_active_request() || self.compacting
     }
 
-    /// Request EOF shutdown and wait for the launcher plus every contained
-    /// descendant. Forced termination is used only after an explicit user
-    /// choice to interrupt active work.
-    pub fn shutdown(&mut self, timeout: Duration, force: bool) -> Result<(), String> {
+    /// Request EOF shutdown; the returned future waits for the launcher plus
+    /// every contained descendant. Forced termination is used only after an
+    /// explicit user choice to interrupt active work.
+    pub fn shutdown(
+        &mut self,
+        timeout: Duration,
+        force: bool,
+    ) -> impl Future<Output = Result<(), String>> + Send + use<> {
         if force {
             // Forced closure retires requests before EOF can drain queued
             // side effects. Graceful shutdown still drains accepted input.

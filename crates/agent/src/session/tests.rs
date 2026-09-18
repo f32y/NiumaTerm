@@ -64,17 +64,18 @@ fn cli_session_starts_sends_images_and_rejects_cross_provider_recovery_without_a
 
     let epoch = runtime.begin_start();
 
-    let backend = Backend::spawn(
-        AgentKind::Claude,
-        &launch,
-        &[],
-        &AgentWorkspace::default(),
-        Some(RecoveryIdentity::new(AgentKind::Codex, "unrelated-thread")),
-        move |message| {
-            let _ = sender.send(message);
-        },
-    )
-    .unwrap();
+    let backend = nmt_runtime::handle()
+        .block_on(Backend::spawn(
+            AgentKind::Claude,
+            &launch,
+            &[],
+            &AgentWorkspace::default(),
+            Some(RecoveryIdentity::new(AgentKind::Codex, "unrelated-thread")),
+            move |message| {
+                let _ = sender.send(message);
+            },
+        ))
+        .unwrap();
 
     assert!(backend.recovery_identity().is_none());
     assert!(matches!(
@@ -148,7 +149,9 @@ fn cli_session_starts_sends_images_and_rejects_cross_provider_recovery_without_a
 
     let mut backend = runtime.retire().unwrap();
 
-    backend.shutdown(Duration::from_secs(2), true).unwrap();
+    nmt_runtime::handle()
+        .block_on(backend.shutdown(Duration::from_secs(2), true))
+        .unwrap();
 
     assert!(runtime.process_exit(epoch).is_none());
 }

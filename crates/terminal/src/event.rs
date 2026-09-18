@@ -1,12 +1,13 @@
 use std::borrow::Cow;
 use std::fmt::{self, Debug, Formatter};
-use std::sync::{self, Arc};
 use std::{path, time};
 
 use futures::channel::oneshot;
 use nmt_config::CursorShape;
 use nmt_config::colors::Colors;
-use nmt_platform::{Waker, WinsizeBuilder};
+use nmt_platform::WinsizeBuilder;
+use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::error::SendError;
 
 use crate::block_store::SegmentMeta;
 use crate::clipboard::ClipboardType;
@@ -99,27 +100,19 @@ pub enum Msg {
     PowerShellCompatibility(bool),
 }
 
-/// A `Msg` sender that wakes the PTY event loop's mio `Poll` after each send, so the
-/// loop re-polls and drains the receiver. mio 1.2 has no pollable channel, so the
-/// `std::sync::mpsc` channel is paired with the loop's `Waker`.
+/// Sends ordered commands and wakes the owning async terminal task.
 #[derive(Clone)]
 pub struct MsgSender {
-    tx: sync::mpsc::Sender<Msg>,
-    waker: Arc<Waker>,
+    tx: UnboundedSender<Msg>,
 }
 
 impl MsgSender {
-    pub fn new(tx: sync::mpsc::Sender<Msg>, waker: Arc<Waker>) -> Self {
-        Self { tx, waker }
+    pub fn new(tx: UnboundedSender<Msg>) -> Self {
+        Self { tx }
     }
 
-    pub fn send(&self, msg: Msg) -> Result<(), sync::mpsc::SendError<Msg>> {
-        self.tx.send(msg)?;
-
-        // Wake the loop so it drains the receiver. A failed wake means the loop is gone.
-        let _ = self.waker.wake();
-
-        Ok(())
+    pub fn send(&self, msg: Msg) -> Result<(), SendError<Msg>> {
+        self.tx.send(msg)
     }
 }
 

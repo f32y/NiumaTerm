@@ -1,16 +1,18 @@
 //! Request bookkeeping shared by the stdio-driven adapters: how long each
 //! class of request may take, the in-flight table a reply is matched
-//! against, and the timer thread that expires whatever is still waiting.
+//! against, and the timer task that expires whatever is still waiting.
 //! Claude's stream-json control channel and the Codex app-server router are
 //! the only callers, and they need all three together.
 
 use std::collections::HashMap;
 use std::hash::Hash;
+use std::mem;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use std::{io, mem, thread};
 
-use parking_lot::{Condvar, Mutex};
+use parking_lot::Mutex;
+use tokio::sync::Notify;
+use tokio::time::{Instant as TimerInstant, sleep_until};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RequestClass {
@@ -46,28 +48,33 @@ struct State {
     stopped: bool,
 }
 
+#[derive(Default)]
+struct Shared {
+    state: Mutex<State>,
+
+    /// Stores one permit when nobody waits, so a change made between the
+    /// task reading the state and suspending still ends that wait.
+    changed: Notify,
+}
+
 #[derive(Clone)]
-pub(crate) struct TimerHandle(Arc<(Mutex<State>, Condvar)>);
+pub(crate) struct TimerHandle(Arc<Shared>);
 
 impl TimerHandle {
     pub(crate) fn set(&self, next: Option<Instant>) {
-        let (state, wake) = &*self.0;
-
-        let mut state = state.lock();
+        let mut state = self.0.state.lock();
 
         if !state.stopped && state.next != next {
             state.next = next;
 
-            wake.notify_one();
+            self.0.changed.notify_one();
         }
     }
 
     pub(crate) fn stop(&self) {
-        let (state, wake) = &*self.0;
+        self.0.state.lock().stopped = true;
 
-        state.lock().stopped = true;
-
-        wake.notify_one();
+        self.0.changed.notify_one();
     }
 }
 
@@ -76,15 +83,12 @@ pub(crate) struct DeadlineTimer {
 }
 
 impl DeadlineTimer {
-    pub(crate) fn new(callback: impl Fn() + Send + 'static) -> io::Result<Self> {
-        let handle = TimerHandle(Arc::new((Mutex::new(State::default()), Condvar::new())));
-        let worker = handle.clone();
+    pub(crate) fn new(callback: impl Fn() + Send + 'static) -> Self {
+        let handle = TimerHandle(Arc::default());
 
-        thread::Builder::new()
-            .name("agent-deadlines".into())
-            .spawn(move || run_deadlines(worker, callback))?;
+        nmt_runtime::handle().spawn(run_deadlines(handle.clone(), callback));
 
-        Ok(Self { handle })
+        Self { handle }
     }
 
     pub(crate) fn handle(&self) -> TimerHandle {
@@ -92,30 +96,36 @@ impl DeadlineTimer {
     }
 }
 
-fn run_deadlines(worker: TimerHandle, callback: impl Fn()) {
-    let (state, wake) = &*worker.0;
-
-    let mut state = state.lock();
-
+async fn run_deadlines(worker: TimerHandle, callback: impl Fn()) {
     loop {
-        if state.stopped {
-            break;
-        }
+        let next = {
+            let mut state = worker.0.state.lock();
 
-        match state.next {
-            None => wake.wait(&mut state),
-            Some(next) if next > Instant::now() => {
-                wake.wait_until(&mut state, next);
+            if state.stopped {
+                break;
             }
-            Some(_) => {
-                state.next = None;
 
-                // The callback can re-arm the timer while resolving requests.
-                drop(state);
+            match state.next {
+                Some(next) if next <= Instant::now() => {
+                    state.next = None;
 
-                callback();
+                    None
+                }
+                next => Some(next),
+            }
+        };
 
-                state = worker.0.0.lock();
+        match next {
+            // Expired: the callback can re-arm the timer while resolving
+            // requests, so it runs without the state lock.
+            None => callback(),
+            Some(None) => worker.0.changed.notified().await,
+            Some(Some(next)) => {
+                tokio::select! {
+                    () = worker.0.changed.notified() => {}
+
+                    () = sleep_until(TimerInstant::from_std(next)) => {}
+                }
             }
         }
     }

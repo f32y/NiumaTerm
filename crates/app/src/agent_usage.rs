@@ -6,6 +6,7 @@ use std::borrow::Cow;
 use std::time::Duration;
 
 use app::agent_tab::profile::{ClaudeIcon, CodexIcon};
+use app::utils::on_runtime;
 use gpui::prelude::*;
 use gpui::{AnyElement, App, Context, FontWeight, Hsla, Window, div, px, relative};
 use gpui_component::button::{Button, ButtonVariants as _};
@@ -113,7 +114,7 @@ impl AgentUsageView {
 
         cx.notify();
 
-        let worker = cx.background_executor().spawn(async move { fetch.run() });
+        let worker = cx.background_executor().spawn(on_runtime(fetch.run()));
 
         cx.spawn(async move |view, cx| {
             let fetched = worker.await;

@@ -54,7 +54,9 @@ fn version_fallback_uses_the_same_configured_launcher() {
     let (root, executable) = fake_launcher("version fallback", script);
     let launcher = AgentCli::new(executable.display().to_string(), []);
 
-    let status = CodexMaintenance.probe(&launcher).unwrap();
+    let status = nmt_runtime::handle()
+        .block_on(CodexMaintenance.probe(&launcher))
+        .unwrap();
 
     assert_eq!(status.current, Some(Version::new(9, 8, 7)));
     assert!(matches!(

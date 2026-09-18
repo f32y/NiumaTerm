@@ -7,12 +7,13 @@ use std::fs::File;
 use std::io::{self, BufRead, BufReader, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::mpsc::{self, RecvTimeoutError, Sender};
-use std::thread;
 use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
+use tokio::task::spawn_blocking;
+use tokio::time::{MissedTickBehavior, interval};
 
 use crate::claude_code::sessions::session_path;
 use crate::json::block_text;
@@ -20,66 +21,83 @@ use crate::progress::{GoalStatus, Task, TaskList, TaskStatus};
 
 pub(crate) const PROGRESS_METHOD: &str = "nmt/claudeProgress";
 
-/// The CLI omits goal attachments from SDK output. Read its append-only log on
-/// a worker so goal evaluations and restored checklists never block rendering.
+/// The CLI omits goal attachments from SDK output. Read its append-only log off
+/// the UI thread so goal evaluations and restored checklists never block
+/// rendering. Waiting is a runtime task; each read-and-parse pass is one
+/// blocking batch, so log I/O never occupies an I/O worker.
 pub(crate) struct ProgressMonitor {
-    sender: Sender<Option<(String, PathBuf)>>,
+    sender: UnboundedSender<Option<(String, PathBuf)>>,
     session_id: Option<String>,
     cwd: Option<String>,
 }
 
 impl ProgressMonitor {
-    pub(crate) fn new(
-        cwd: Option<String>,
-        deliver: Arc<dyn Fn(Value) + Send + Sync>,
-    ) -> io::Result<Self> {
-        let (sender, receiver) = mpsc::channel();
+    pub(crate) fn new(cwd: Option<String>, deliver: Arc<dyn Fn(Value) + Send + Sync>) -> Self {
+        let (sender, mut receiver) = unbounded_channel();
 
-        thread::Builder::new()
-            .name("claude-progress".into())
-            .spawn(move || {
-                let mut target: Option<(String, PathBuf)> = None;
-                let mut reader = ProgressReader::default();
-                let mut reported = None;
+        nmt_runtime::handle().spawn(async move {
+            let mut target: Option<(String, PathBuf)> = None;
+            let mut reader = ProgressReader::default();
+            let mut reported = None;
 
-                loop {
-                    match receiver.recv_timeout(Duration::from_millis(750)) {
-                        Ok(Some(next)) => {
+            let mut refresh = interval(Duration::from_millis(750));
+
+            refresh.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+            loop {
+                tokio::select! {
+                    next = receiver.recv() => match next {
+                        Some(Some(next)) => {
                             target = Some(next);
                             reader = ProgressReader::default();
                             reported = None;
                         }
-                        Ok(None) | Err(RecvTimeoutError::Disconnected) => break,
-                        Err(RecvTimeoutError::Timeout) => {}
-                    }
-
-                    let Some((session_id, path)) = &target else {
-                        continue;
-                    };
-
-                    let Ok(snapshot) = reader.read(path) else {
-                        continue;
-                    };
-
-                    if reported.as_ref() != Some(snapshot) {
-                        let update = json!({
-                            "method": PROGRESS_METHOD,
-                            "session_id": session_id,
-                            "progress": snapshot,
-                        });
-
-                        deliver(update);
-
-                        reported = Some(snapshot.clone());
-                    }
+                        Some(None) | None => break,
+                    },
+                    _ = refresh.tick() => {}
                 }
-            })?;
 
-        Ok(Self {
+                let Some((session_id, path)) = &target else {
+                    continue;
+                };
+
+                let path = path.clone();
+
+                let Ok((returned, snapshot)) = spawn_blocking(move || {
+                    let snapshot = reader.read(&path).ok().cloned();
+
+                    (reader, snapshot)
+                })
+                .await
+                else {
+                    break;
+                };
+
+                reader = returned;
+
+                let Some(snapshot) = snapshot else {
+                    continue;
+                };
+
+                if reported.as_ref() != Some(&snapshot) {
+                    let update = json!({
+                        "method": PROGRESS_METHOD,
+                        "session_id": session_id,
+                        "progress": snapshot,
+                    });
+
+                    deliver(update);
+
+                    reported = Some(snapshot);
+                }
+            }
+        });
+
+        Self {
             sender,
             session_id: None,
             cwd,
-        })
+        }
     }
 
     pub(crate) fn watch(&mut self, session_id: &str) {

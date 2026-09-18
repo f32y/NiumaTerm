@@ -3,30 +3,35 @@
 mod usage_refresh_tests;
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+
+use futures::future::BoxFuture;
+use nmt_agent::usage::FetchCancellation;
 
 pub(crate) enum FetchError {
     Cancelled,
     Failed(String),
 }
 
-pub(crate) type UsageSource<T> = Arc<dyn Fn(&AtomicBool) -> Result<T, FetchError> + Send + Sync>;
+/// A fetch waits on processes and the network, so it runs on the shared
+/// runtime and observes its cancellation there.
+pub(crate) type UsageSource<T> =
+    Arc<dyn Fn(Arc<FetchCancellation>) -> BoxFuture<'static, Result<T, FetchError>> + Send + Sync>;
 
 pub(crate) struct Refresh<T> {
     pub(crate) value: T,
     pub(crate) failed: bool,
     enabled: bool,
-    pending: Option<Arc<AtomicBool>>,
+    pending: Option<Arc<FetchCancellation>>,
     source: UsageSource<T>,
 }
 
 pub(crate) struct Fetch<T> {
-    cancelled: Arc<AtomicBool>,
+    cancelled: Arc<FetchCancellation>,
     source: UsageSource<T>,
 }
 
 pub(crate) struct Fetched<T> {
-    cancelled: Arc<AtomicBool>,
+    cancelled: Arc<FetchCancellation>,
     result: Result<T, FetchError>,
 }
 
@@ -38,11 +43,11 @@ pub(crate) enum Completion {
 }
 
 impl<T> Fetch<T> {
-    pub(crate) fn run(self) -> Fetched<T> {
-        let result = if self.cancelled.load(Ordering::Relaxed) {
+    pub(crate) async fn run(self) -> Fetched<T> {
+        let result = if self.cancelled.is_cancelled() {
             Err(FetchError::Cancelled)
         } else {
-            (self.source)(&self.cancelled)
+            (self.source)(Arc::clone(&self.cancelled)).await
         };
 
         Fetched {
@@ -67,7 +72,7 @@ impl<T> Refresh<T> {
         self.enabled = enabled;
 
         if !enabled && let Some(cancelled) = &self.pending {
-            cancelled.store(true, Ordering::Relaxed);
+            cancelled.cancel();
         }
     }
 
@@ -80,7 +85,7 @@ impl<T> Refresh<T> {
             return None;
         }
 
-        let cancelled = Arc::new(AtomicBool::new(false));
+        let cancelled = Arc::new(FetchCancellation::default());
 
         self.pending = Some(cancelled.clone());
 
@@ -101,7 +106,7 @@ impl<T> Refresh<T> {
 
         self.pending = None;
 
-        if fetched.cancelled.load(Ordering::Relaxed) {
+        if fetched.cancelled.is_cancelled() {
             return if self.enabled {
                 Completion::Retry
             } else {
@@ -135,7 +140,7 @@ impl<T> Refresh<T> {
 impl<T> Drop for Refresh<T> {
     fn drop(&mut self) {
         if let Some(cancelled) = &self.pending {
-            cancelled.store(true, Ordering::Relaxed);
+            cancelled.cancel();
         }
     }
 }

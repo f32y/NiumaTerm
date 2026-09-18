@@ -3,12 +3,15 @@ mod store;
 #[cfg(test)]
 mod tests;
 
+use std::future::Future;
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, mpsc};
-use std::{env, fs, io, thread};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::{env, fs, io};
 
 use nmt_platform::filesystem::history_path_spelling;
 use parking_lot::Mutex;
+use tokio::sync::{Notify, oneshot};
 use tracing::warn;
 
 use crate::AgentWorkspace;
@@ -87,7 +90,7 @@ fn normalize_path_components(path: &Path) -> PathBuf {
 pub struct AgentInputHistory {
     store: HistoryStore,
     path: PathBuf,
-    writer: Option<HistoryWriter>,
+    writer: HistoryWriter,
 }
 
 impl AgentInputHistory {
@@ -100,25 +103,35 @@ impl AgentInputHistory {
             return false;
         }
 
-        if let Some(writer) = self.writer.as_ref()
-            && writer.save((&self.store).into()).is_err()
-        {
+        if self.writer.save((&self.store).into()).is_err() {
             warn!("failed to queue Agent input history save");
         }
 
         true
     }
 
-    pub fn flush(&self) -> io::Result<()> {
+    /// Complete once the current history has reached storage. The returned
+    /// future owns what it needs, so an exit hook can await it after the
+    /// caller's borrow ends.
+    pub fn flush(&self) -> impl Future<Output = io::Result<()>> + Send + use<> {
         let snapshot: StoredHistory = (&self.store).into();
+        let written = self.writer.flush(snapshot.clone());
+        let path = self.path.clone();
 
-        if let Some(writer) = self.writer.as_ref()
-            && writer.flush(snapshot.clone()).is_ok()
-        {
-            return Ok(());
+        async move {
+            if let Ok(written) = written
+                && matches!(written.await, Ok(Ok(())))
+            {
+                return Ok(());
+            }
+
+            // The writer could not confirm the save, so this one writes it
+            // directly and reports that outcome instead.
+            nmt_runtime::handle()
+                .spawn_blocking(move || save_to_path(&path, &snapshot))
+                .await
+                .unwrap_or_else(|error| Err(io::Error::other(error)))
         }
-
-        save_to_path(&self.path, &snapshot)
     }
 
     pub fn open(path: PathBuf) -> Self {
@@ -128,14 +141,7 @@ impl AgentInputHistory {
             HistoryStore::default()
         });
 
-        let writer = match HistoryWriter::spawn(path.clone()) {
-            Ok(writer) => Some(writer),
-            Err(error) => {
-                warn!("failed to start Agent input history writer: {error}");
-
-                None
-            }
-        };
+        let writer = HistoryWriter::spawn(path.clone());
 
         Self {
             store,
@@ -145,55 +151,75 @@ impl AgentInputHistory {
     }
 }
 
+/// Serialized history saves on the shared runtime. Only the newest snapshot
+/// waits, so a slow disk cannot accumulate a queue of obsolete copies; each
+/// save is one blocking batch that keeps merge, write, and replace together.
 struct HistoryWriter {
-    sender: mpsc::SyncSender<()>,
-    pending: Arc<Mutex<Option<PendingWrite>>>,
+    shared: Arc<WriterState>,
+}
+
+struct WriterState {
+    pending: Mutex<Option<PendingWrite>>,
+
+    /// Stores one permit while the writer is busy, so every queued snapshot
+    /// is seen without a wake per save.
+    wake: Notify,
+
+    closed: AtomicBool,
+
+    /// Set when the writer task ends, including by a panicking save.
+    stopped: AtomicBool,
 }
 
 struct PendingWrite {
     snapshot: StoredHistory,
-    waiters: Vec<mpsc::SyncSender<io::Result<()>>>,
+    waiters: Vec<oneshot::Sender<io::Result<()>>>,
 }
 
 impl HistoryWriter {
-    fn spawn(path: PathBuf) -> io::Result<Self> {
+    fn spawn(path: PathBuf) -> Self {
         Self::start(move |snapshot| save_to_path(&path, snapshot))
     }
 
-    fn start(
-        save: impl FnMut(&StoredHistory) -> io::Result<()> + Send + 'static,
-    ) -> io::Result<Self> {
-        let (sender, receiver) = mpsc::sync_channel(1);
-        let pending = Arc::new(Mutex::new(None));
-        let worker_pending = Arc::clone(&pending);
+    fn start(save: impl FnMut(&StoredHistory) -> io::Result<()> + Send + 'static) -> Self {
+        let shared = Arc::new(WriterState {
+            pending: Mutex::new(None),
+            wake: Notify::new(),
+            closed: AtomicBool::new(false),
+            stopped: AtomicBool::new(false),
+        });
 
-        thread::Builder::new()
-            .name("agent-input-history".to_string())
-            .spawn(move || run_writer(receiver, worker_pending, save))?;
+        nmt_runtime::handle().spawn(run_writer(Arc::clone(&shared), save));
 
-        Ok(Self { sender, pending })
+        Self { shared }
     }
 
     fn save(&self, snapshot: StoredHistory) -> io::Result<()> {
         self.queue(snapshot, None)
     }
 
-    fn flush(&self, snapshot: StoredHistory) -> io::Result<()> {
-        let (sender, receiver) = mpsc::sync_channel(0);
+    /// Queue `snapshot`, answering once it or a newer one reached storage.
+    fn flush(&self, snapshot: StoredHistory) -> io::Result<oneshot::Receiver<io::Result<()>>> {
+        let (sender, receiver) = oneshot::channel();
 
         self.queue(snapshot, Some(sender))?;
 
-        receiver
-            .recv()
-            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "history writer stopped"))?
+        Ok(receiver)
     }
 
     fn queue(
         &self,
         snapshot: StoredHistory,
-        waiter: Option<mpsc::SyncSender<io::Result<()>>>,
+        waiter: Option<oneshot::Sender<io::Result<()>>>,
     ) -> io::Result<()> {
-        let mut pending = self.pending.lock();
+        if self.shared.stopped.load(Ordering::Acquire) {
+            return Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "history writer stopped",
+            ));
+        }
+
+        let mut pending = self.shared.pending.lock();
 
         let mut waiters = pending
             .take()
@@ -203,33 +229,62 @@ impl HistoryWriter {
 
         *pending = Some(PendingWrite { snapshot, waiters });
 
-        // Only the newest snapshot matters. The wake token carries no history,
-        // so a slow disk cannot accumulate a queue of obsolete copies.
-        match self.sender.try_send(()) {
-            Ok(()) | Err(mpsc::TrySendError::Full(())) => Ok(()),
-            Err(mpsc::TrySendError::Disconnected(())) => {
-                pending.take();
+        drop(pending);
 
-                Err(io::Error::new(
-                    io::ErrorKind::BrokenPipe,
-                    "history writer stopped",
-                ))
-            }
-        }
+        self.shared.wake.notify_one();
+
+        Ok(())
     }
 }
 
-fn run_writer(
-    receiver: mpsc::Receiver<()>,
-    pending: Arc<Mutex<Option<PendingWrite>>>,
-    mut save: impl FnMut(&StoredHistory) -> io::Result<()>,
+impl Drop for HistoryWriter {
+    fn drop(&mut self) {
+        // A write still pending is finished before the task ends.
+        self.shared.closed.store(true, Ordering::Release);
+
+        self.shared.wake.notify_one();
+    }
+}
+
+async fn run_writer(
+    shared: Arc<WriterState>,
+    mut save: impl FnMut(&StoredHistory) -> io::Result<()> + Send + 'static,
 ) {
-    while receiver.recv().is_ok() {
-        let request = pending.lock().take();
+    struct Stopped(Arc<WriterState>);
 
-        let Some(request) = request else { continue };
+    impl Drop for Stopped {
+        fn drop(&mut self) {
+            self.0.stopped.store(true, Ordering::Release);
+        }
+    }
 
-        let result = save(&request.snapshot);
+    let _stopped = Stopped(Arc::clone(&shared));
+
+    loop {
+        shared.wake.notified().await;
+
+        let request = shared.pending.lock().take();
+
+        let Some(request) = request else {
+            if shared.closed.load(Ordering::Acquire) {
+                return;
+            }
+
+            continue;
+        };
+
+        let Ok((returned, result, request)) = nmt_runtime::handle()
+            .spawn_blocking(move || {
+                let result = save(&request.snapshot);
+
+                (save, result, request)
+            })
+            .await
+        else {
+            return;
+        };
+
+        save = returned;
 
         if let Err(error) = &result {
             warn!("failed to save Agent input history: {error}");
@@ -244,6 +299,10 @@ fn run_writer(
                 .map_err(|error| io::Error::new(error.kind(), error.to_string()));
 
             let _ = sender.send(result);
+        }
+
+        if shared.closed.load(Ordering::Acquire) && shared.pending.lock().is_none() {
+            return;
         }
     }
 }

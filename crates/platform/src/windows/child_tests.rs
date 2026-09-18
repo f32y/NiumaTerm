@@ -1,8 +1,11 @@
+use std::future::poll_fn;
 use std::os::windows::io::AsRawHandle;
 use std::process::Command;
+use std::task::Poll;
 use std::time::Duration;
 
-use mio::{Events, Poll, Token};
+use tokio::runtime::Builder;
+use tokio::time::timeout;
 use windows_sys::Win32::Foundation::{DUPLICATE_SAME_ACCESS, DuplicateHandle};
 use windows_sys::Win32::System::Threading::GetCurrentProcess;
 
@@ -11,7 +14,6 @@ use crate::windows::child::*;
 #[test]
 pub fn event_is_emitted_when_child_exits() {
     const WAIT_TIMEOUT: Duration = Duration::from_millis(200);
-    const WAKER_TOKEN: Token = Token(0);
 
     let mut child = Command::new("cmd.exe").spawn().unwrap();
 
@@ -36,24 +38,23 @@ pub fn event_is_emitted_when_child_exits() {
 
     let child_exit_watcher = ChildExitWatcher::new(dup).unwrap();
 
-    // The child-exit channel is a plain `std::sync::mpsc`, so the loop is woken
-    // through the `Waker` instead of a pollable channel.
-    let mut poll = Poll::new().unwrap();
+    let runtime = Builder::new_current_thread().enable_time().build().unwrap();
 
-    let waker = Arc::new(Waker::new(poll.registry(), WAKER_TOKEN).unwrap());
+    runtime.block_on(async {
+        // Register the task before the exit, as the PTY does, so the exit
+        // callback has a parked waker to fire.
+        assert!(
+            poll_fn(|cx| Poll::Ready(child_exit_watcher.poll_exit(cx)))
+                .await
+                .is_pending()
+        );
 
-    child_exit_watcher.set_waker(waker);
+        child.kill().unwrap();
 
-    child.kill().unwrap();
+        timeout(WAIT_TIMEOUT, poll_fn(|cx| child_exit_watcher.poll_exit(cx)))
+            .await
+            .expect("child exit did not wake the waiting task");
+    });
 
-    // Poll for the wakeup or fail with timeout if nothing has been sent.
-    let mut events = Events::with_capacity(1);
-
-    poll.poll(&mut events, Some(WAIT_TIMEOUT)).unwrap();
-
-    assert_eq!(events.iter().next().unwrap().token(), WAKER_TOKEN);
-    assert!(child_exit_watcher.soft().is_ready());
-
-    // The callback delivers an exit notification before marking the watcher ready.
-    assert_eq!(child_exit_watcher.event_rx().try_recv(), Ok(()));
+    assert!(child_exit_watcher.exited());
 }

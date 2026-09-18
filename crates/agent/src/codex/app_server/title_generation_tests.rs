@@ -1,6 +1,5 @@
-use std::sync::mpsc;
-
 use serde_json::json;
+use tokio::sync::mpsc::unbounded_channel;
 
 use crate::codex::app_server::ThreadProfile;
 use crate::codex::app_server::protocol::thread_name_request;
@@ -52,7 +51,7 @@ fn internal_result_parser_keeps_generation_identity() {
 
 #[test]
 fn generation_identity_rejects_stale_results() {
-    let (cancel_tx, cancel_rx) = mpsc::channel();
+    let (cancel_tx, mut cancel_rx) = unbounded_channel();
 
     let active = TitleGenerationHandle {
         generation_id: 7,
@@ -81,7 +80,7 @@ fn generation_identity_rejects_stale_results() {
     active.cancel();
 
     assert_eq!(
-        cancel_rx.recv().unwrap()["method"],
+        cancel_rx.try_recv().unwrap()["method"],
         TITLE_GENERATION_CANCEL_METHOD
     );
 }

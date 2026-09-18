@@ -9,7 +9,7 @@ use rust_i18n::t;
 
 use crate::ui::{AppSettings, WindowRegistry};
 use crate::update::file_users;
-use crate::utils::get_exe_dir;
+use crate::utils::{get_exe_dir, on_runtime};
 
 struct AppUpdate {
     updater: Updater,
@@ -75,10 +75,7 @@ pub(crate) fn check(cx: &mut App) {
     cx.refresh_windows();
 
     cx.spawn(async move |cx| {
-        let checked = cx
-            .background_executor()
-            .spawn(async move { check.run() })
-            .await;
+        let checked = on_runtime(check.run()).await;
 
         cx.update(|cx| {
             if cx.global_mut::<AppUpdate>().updater.finish_check(checked) {
@@ -101,10 +98,7 @@ pub(crate) fn install_now(window: &mut Window, cx: &mut App) {
     cx.refresh_windows();
 
     cx.spawn(async move |cx| {
-        let downloaded = cx
-            .background_executor()
-            .spawn(async move { download.run() })
-            .await;
+        let downloaded = on_runtime(download.run()).await;
 
         cx.update(|cx| {
             let action = cx

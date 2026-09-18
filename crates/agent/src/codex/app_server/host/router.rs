@@ -7,12 +7,13 @@
 //! legal and dropping the early traffic would lose the opening of a turn.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
 use std::time::Instant;
 
 use parking_lot::Mutex;
 use serde_json::{Value, json};
+use tokio::sync::oneshot;
 
 use crate::codex::app_server::host::{
     Delivery, FIRST_HOST_RPC_ID, HOST_EXIT_METHOD, HOST_INIT_RPC_ID, RegistrationId,
@@ -121,11 +122,11 @@ struct RouterState {
     thread_owners: HashMap<String, RegistrationId>,
     root_by_owner: HashMap<RegistrationId, String>,
     early_messages: EarlyMessages,
-    startup_tx: Option<mpsc::SyncSender<Result<(), String>>>,
+    startup_tx: Option<oneshot::Sender<Result<(), String>>>,
 }
 
 impl RouterState {
-    pub(super) fn new(startup_tx: mpsc::SyncSender<Result<(), String>>) -> Self {
+    pub(super) fn new(startup_tx: oneshot::Sender<Result<(), String>>) -> Self {
         Self {
             next_registration_id: 1,
             next_request_id: FIRST_HOST_RPC_ID,
@@ -268,7 +269,7 @@ pub(super) struct Router {
 }
 
 impl Router {
-    pub(super) fn new(startup_tx: mpsc::SyncSender<Result<(), String>>) -> Self {
+    pub(super) fn new(startup_tx: oneshot::Sender<Result<(), String>>) -> Self {
         Self {
             state: Mutex::new(RouterState::new(startup_tx)),
             timer: Mutex::new(None),
@@ -289,23 +290,20 @@ impl Router {
         id
     }
 
-    pub(super) fn start_timer(self: &Arc<Self>) -> Result<(), String> {
+    pub(super) fn start_timer(self: &Arc<Self>) {
         let weak = Arc::downgrade(self);
 
         let timer = DeadlineTimer::new(move || {
             if let Some(router) = weak.upgrade() {
                 router.expire_requests(Instant::now());
             }
-        })
-        .map_err(|error| format!("could not start Codex deadline timer: {error}"))?;
+        });
 
         let state = self.state.lock();
 
         *self.timer.lock() = Some(timer);
 
         self.refresh_timer(&state);
-
-        Ok(())
     }
 
     fn refresh_timer(&self, state: &RouterState) {

@@ -73,7 +73,13 @@ fn switching(client: ApiClient, slot: &SwitchSlot) -> (Switching, mpsc::Receiver
 #[test]
 fn the_announcement_precedes_everything_the_new_streams_reported() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let client = ApiClient::new(format!("http://{}", listener.local_addr().unwrap())).unwrap();
+
+    let client = nmt_runtime::handle()
+        .block_on(ApiClient::new(format!(
+            "http://{}",
+            listener.local_addr().unwrap()
+        )))
+        .unwrap();
 
     let server = thread::spawn(move || {
         let (stream, _) = listener.accept().unwrap();
@@ -152,7 +158,13 @@ fn the_announcement_precedes_everything_the_new_streams_reported() {
 #[test]
 fn a_refused_change_is_reported_against_the_conversation_the_tab_is_on() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let client = ApiClient::new(format!("http://{}", listener.local_addr().unwrap())).unwrap();
+
+    let client = nmt_runtime::handle()
+        .block_on(ApiClient::new(format!(
+            "http://{}",
+            listener.local_addr().unwrap()
+        )))
+        .unwrap();
 
     let server = thread::spawn(move || {
         let (stream, _) = listener.accept().unwrap();

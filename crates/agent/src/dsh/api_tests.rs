@@ -108,7 +108,11 @@ fn startup_token_authenticates_rpc_and_stream_without_corrupting_the_path() {
         let _ = socket.close(None);
     });
 
-    let client = ApiClient::new(format!("http://{address}/?token=startup-secret")).unwrap();
+    let client = nmt_runtime::handle()
+        .block_on(ApiClient::new(format!(
+            "http://{address}/?token=startup-secret"
+        )))
+        .unwrap();
 
     assert_eq!(
         nmt_runtime::handle()
@@ -151,7 +155,9 @@ fn event_reply_keeps_the_generation_and_event_ids() {
         .unwrap();
     });
 
-    let client = ApiClient::new(format!("http://{address}")).unwrap();
+    let client = nmt_runtime::handle()
+        .block_on(ApiClient::new(format!("http://{address}")))
+        .unwrap();
 
     nmt_runtime::handle()
         .block_on(client.respond_event(
@@ -189,7 +195,12 @@ fn command_server(replies: Vec<(Value, Value)>) -> (ApiClient, thread::JoinHandl
         }
     });
 
-    (ApiClient::new(format!("http://{address}")).unwrap(), server)
+    (
+        nmt_runtime::handle()
+            .block_on(ApiClient::new(format!("http://{address}")))
+            .unwrap(),
+        server,
+    )
 }
 
 #[test]

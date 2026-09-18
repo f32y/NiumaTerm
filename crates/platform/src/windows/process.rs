@@ -1,10 +1,14 @@
+pub use crate::child_output::output;
+
 use std::ffi::OsStr;
 use std::os::windows::io::AsRawHandle as _;
 use std::os::windows::process::{CommandExt as _, ExitStatusExt as _};
-use std::process::{Child, Command, ExitStatus};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{Arc, Weak};
 use std::{env, ffi, io, mem, ptr, str};
 
+use tokio::net::windows::named_pipe::NamedPipeServer;
+use tokio::process::{Child as AsyncChild, Command as AsyncCommand};
 use tracing::warn;
 use windows_sys::Win32::Foundation::{CloseHandle, ERROR_MORE_DATA, GetLastError, HANDLE};
 use windows_sys::Win32::Globalization::{CP_OEMCP, MB_ERR_INVALID_CHARS, MultiByteToWideChar};
@@ -17,6 +21,40 @@ use windows_sys::Win32::System::JobObjects::{
 use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
 use crate::process_lifetime::cleanup_failed_attachment;
+use crate::windows::pipes::child_stdio_pair;
+
+/// A child whose standard streams are asynchronous pipes owned by this process.
+pub struct PipedChild {
+    pub child: AsyncChild,
+    pub stdin: NamedPipeServer,
+    pub stdout: NamedPipeServer,
+    pub stderr: NamedPipeServer,
+}
+
+/// Spawn `command` with all three standard streams piped to the shared runtime.
+pub fn spawn_piped(mut command: Command) -> io::Result<PipedChild> {
+    let _runtime = nmt_runtime::handle().enter();
+
+    let (stdin, child_stdin) = child_stdio_pair(false)?;
+    let (stdout, child_stdout) = child_stdio_pair(true)?;
+    let (stderr, child_stderr) = child_stdio_pair(true)?;
+
+    command
+        .stdin(Stdio::from(child_stdin))
+        .stdout(Stdio::from(child_stdout))
+        .stderr(Stdio::from(child_stderr));
+
+    // The command, and with it this process's copy of each child end, drops
+    // after the spawn, so the child's exit closes the pipes and ends reads.
+    let child = AsyncCommand::from(command).spawn()?;
+
+    Ok(PipedChild {
+        child,
+        stdin,
+        stdout,
+        stderr,
+    })
+}
 
 pub fn hidden_command(program: impl AsRef<OsStr>) -> Command {
     let mut command = Command::new(program);
@@ -126,6 +164,23 @@ unsafe impl Sync for JobHandle {}
 impl KillOnCloseJob {
     pub fn attach_or_kill(child: &mut Child) -> io::Result<Self> {
         Self::attach(child).inspect_err(|_| cleanup_failed_attachment(child))
+    }
+
+    /// Contain a child spawned for asynchronous waiting. A failure terminates
+    /// the child; the runtime reaps it once its handle is dropped.
+    pub fn attach_spawned_or_kill(child: &mut AsyncChild) -> io::Result<Self> {
+        let attached = match child.raw_handle() {
+            Some(handle) => Self::new().and_then(|job| {
+                unsafe { job.assign_handle(handle as HANDLE)? };
+
+                Ok(job)
+            }),
+            None => Err(io::Error::other("child exited before containment")),
+        };
+
+        attached.inspect_err(|_| {
+            let _ = child.start_kill();
+        })
     }
 
     pub fn attach(child: &Child) -> io::Result<Self> {

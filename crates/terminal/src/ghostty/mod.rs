@@ -151,9 +151,10 @@ pub struct GhosttyTerminal {
 }
 
 // The Ghostty `Terminal` and its render-state handles are raw FFI pointers
-// (`!Send`). A `GhosttyTerminal` owns them exclusively and is only ever touched
-// from the single thread that holds it (the PTY reader thread), so moving the
-// whole value across threads is sound. It is not `Sync` — no shared access.
+// (`!Send`). A `GhosttyTerminal` owns them exclusively, including callback
+// storage. Operations are synchronous and have no thread-local dependencies,
+// so its owner task may move between workers between calls. It is not `Sync`;
+// the engine and render-state handles must never be used concurrently.
 unsafe impl Send for GhosttyTerminal {}
 
 impl GhosttyTerminal {

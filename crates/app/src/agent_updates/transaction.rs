@@ -21,6 +21,7 @@ use crate::agent_updates::AgentUpdates;
 use crate::agent_updates::maintenance::{
     PreflightFailure, UpdateEnvironment, UpdateMode, run_transaction,
 };
+use crate::utils::on_runtime;
 
 pub(super) fn combine_transaction_error(
     operation_error: Option<UpdateError>,
@@ -286,20 +287,14 @@ impl UpdateEnvironment for SessionUpdateEnvironment<'_> {
         let coordinator = self.coordinator.clone();
         let key = self.key.clone();
 
-        self.cx
-            .background_executor()
-            .spawn(async move { coordinator.run_vendor_update(&key).map(|_| ()) })
-            .await
+        on_runtime(async move { coordinator.run_vendor_update(&key).await.map(|_| ()) }).await
     }
 
     async fn verify(&mut self) -> Result<VersionStatus, UpdateError> {
         let coordinator = self.coordinator.clone();
         let key = self.key.clone();
 
-        self.cx
-            .background_executor()
-            .spawn(async move { coordinator.verify(&key) })
-            .await
+        on_runtime(async move { coordinator.verify(&key).await }).await
     }
 
     fn restore(&mut self, snapshots: &[RecoverySnapshot], suspended: &[usize]) {

@@ -333,7 +333,7 @@ impl Session {
     /// Create a conversation on the running host and start delivering its
     /// frames. `cwd` is the project directory this tab works in; the host's own
     /// working directory applies when it is absent.
-    pub fn create(
+    pub async fn create(
         launch: &crate::LaunchConfig,
         workspace: &AgentWorkspace,
         deliver: impl Fn(Value) + Send + Sync + 'static,
@@ -349,13 +349,11 @@ impl Session {
         // The host is shared by every DeepSeek tab and keyed by launch
         // configuration alone, so which directories a conversation uses must
         // not enter that identity.
-        let host = host::shared(launch)?;
+        let host = host::shared(launch).await?;
         let client = host.client().clone();
 
         let deliver: Arc<dyn Fn(Value) + Send + Sync> = Arc::new(deliver);
 
-        // A session starts on a worker thread that exists to wait for it, so
-        // unlike every later command this one is waited out in place.
         let opening = async {
             let (opened, preset_refusal) =
                 open_new_conversation(&client, cwd.as_deref(), launch.agent_preset.as_deref())
@@ -378,9 +376,8 @@ impl Session {
             Ok((opened, preset_refusal, downlinks, snapshot))
         };
 
-        let (opened, preset_refusal, downlinks, snapshot) = nmt_runtime::handle()
-            .block_on(opening)
-            .map_err(HostError::FailedToStart)?;
+        let (opened, preset_refusal, downlinks, snapshot) =
+            opening.await.map_err(HostError::FailedToStart)?;
 
         let session_id = opened.session_id.clone();
 

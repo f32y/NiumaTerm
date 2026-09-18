@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::{fs, io};
 
+use futures::future::{BoxFuture, FutureExt as _, ready};
 use serde_json::Value;
 use tracing::trace;
 
@@ -171,7 +172,7 @@ impl Backend {
     /// variant. Resume differs by harness — Codex asks the running app-server
     /// to reopen a thread, Claude Code takes a session id as a launch flag —
     /// so the caller passes an identity and this decides how to use it.
-    pub fn spawn(
+    pub async fn spawn(
         kind: AgentKind,
         launch: &LaunchConfig,
         host_catalog: &[LaunchConfig],
@@ -188,19 +189,23 @@ impl Backend {
         // costs enough main-thread time to drop frames.
         match kind {
             AgentKind::Codex => match resume {
-                Some(thread_id) => app_server::Session::spawn_resuming(
-                    launch,
-                    host_catalog,
-                    workspace,
-                    thread_id,
-                    true,
-                    deliver,
-                    |line| trace!("codex app-server: {line}"),
-                ),
+                Some(thread_id) => {
+                    app_server::Session::spawn_resuming(
+                        launch,
+                        host_catalog,
+                        workspace,
+                        thread_id,
+                        true,
+                        deliver,
+                        |line| trace!("codex app-server: {line}"),
+                    )
+                    .await
+                }
                 None => {
                     app_server::Session::spawn(launch, host_catalog, workspace, deliver, |line| {
                         trace!("codex app-server: {line}")
                     })
+                    .await
                 }
             }
             .map(Backend::Codex),
@@ -215,6 +220,7 @@ impl Backend {
             // starting it only if no tab holds one yet. `resume` is unused
             // because continuing an earlier conversation is not mapped yet.
             AgentKind::DeepSeek => dsh::Session::create(launch, workspace, deliver)
+                .await
                 .map(Backend::DeepSeek)
                 .map_err(|error| error.message().to_string()),
         }
@@ -650,15 +656,22 @@ impl Backend {
         }
     }
 
-    pub fn shutdown(&mut self, timeout: Duration, force: bool) -> Result<(), String> {
+    /// Start shutdown now; the returned future waits for the provider process.
+    /// It owns what it needs, so the backend itself may be dropped once it
+    /// resolves.
+    pub fn shutdown(
+        &mut self,
+        timeout: Duration,
+        force: bool,
+    ) -> BoxFuture<'static, Result<(), String>> {
         match self {
-            Backend::Claude(session) => session.shutdown(timeout, force),
+            Backend::Claude(session) => session.shutdown(timeout, force).boxed(),
             Backend::Codex(session) => session.shutdown(timeout, force),
             // Dropping this session releases its hold on the shared host, and
             // the last tab to let go stops it. Nothing here has to wait.
-            Backend::DeepSeek(_) => Ok(()),
+            Backend::DeepSeek(_) => ready(Ok(())).boxed(),
             #[cfg(any(test, feature = "test-support"))]
-            Backend::Test(_) => Ok(()),
+            Backend::Test(_) => ready(Ok(())).boxed(),
         }
     }
 
@@ -867,7 +880,7 @@ impl Backend {
         }
     }
 
-    pub fn spawn_team(
+    pub async fn spawn_team(
         kind: AgentKind,
         launch: &LaunchConfig,
         host_catalog: &[LaunchConfig],
@@ -893,12 +906,13 @@ impl Backend {
                 deliver,
                 |line| trace!("codex app-server: {line}"),
             )
+            .await
             .map(Self::Codex),
             AgentKind::DeepSeek if recovery.is_some() => Err(
                 "DeepSeek cannot resume this saved Team conversation. Keep its history and explicitly create a new member.".into(),
             ),
             AgentKind::Claude | AgentKind::DeepSeek => {
-                Self::spawn(kind, launch, host_catalog, workspace, recovery, deliver)
+                Self::spawn(kind, launch, host_catalog, workspace, recovery, deliver).await
             }
         }
     }

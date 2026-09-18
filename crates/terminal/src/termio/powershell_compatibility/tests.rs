@@ -12,14 +12,13 @@ fn resize_pauses_expire_and_interleaved_input_has_a_fixed_wait_limit() {
 
     let limit = compatibility.input_limit(now);
 
-    assert_eq!(compatibility.timeout(limit, now), None);
+    assert_eq!(compatibility.deadline(limit), None);
 
     compatibility.resized(now);
 
-    assert_eq!(compatibility.timeout(limit, now), Some(RESIZE_INPUT_DELAY));
     assert_eq!(
-        compatibility.timeout(limit, now + RESIZE_INPUT_DELAY),
-        Some(Duration::ZERO)
+        compatibility.deadline(limit),
+        Some(now + RESIZE_INPUT_DELAY)
     );
 
     let later = now + Duration::from_millis(240);
@@ -27,20 +26,16 @@ fn resize_pauses_expire_and_interleaved_input_has_a_fixed_wait_limit() {
     compatibility.resized(later);
 
     assert_eq!(
-        compatibility.timeout(limit, later),
-        Some(Duration::from_millis(10))
-    );
-    assert_eq!(
-        compatibility.timeout(limit, later + RESIZE_INPUT_DELAY),
-        Some(Duration::ZERO)
+        compatibility.deadline(limit),
+        Some(now + Duration::from_millis(250))
     );
 
     compatibility.set_enabled(false);
 
-    assert_eq!(compatibility.timeout(limit, now), None);
+    assert_eq!(compatibility.deadline(limit), None);
     assert_eq!(compatibility.input_limit(now), None);
 
     compatibility.set_enabled(true);
 
-    assert_eq!(compatibility.timeout(limit, now), None);
+    assert_eq!(compatibility.deadline(limit), None);
 }

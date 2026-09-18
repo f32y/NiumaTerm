@@ -1,20 +1,12 @@
 pub use crate::ipc_message::MAX_MESSAGE_BYTES;
 
-use std::fs::{self, File};
 use std::io::{self, Write};
-use std::os::windows::io::FromRawHandle;
 use std::time::{Duration, Instant};
-use std::{ptr, thread};
+use std::{fs, ptr, thread};
 
+use tokio::net::windows::named_pipe::ServerOptions;
 use tracing::warn;
-use windows_sys::Win32::Foundation::{
-    ERROR_ALREADY_EXISTS, ERROR_PIPE_CONNECTED, GetLastError, INVALID_HANDLE_VALUE,
-};
-use windows_sys::Win32::Storage::FileSystem::PIPE_ACCESS_INBOUND;
-use windows_sys::Win32::System::Pipes::{
-    ConnectNamedPipe, CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE,
-    PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
-};
+use windows_sys::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError};
 use windows_sys::Win32::System::Threading::CreateMutexW;
 
 use crate::ipc_message::read_message;
@@ -79,52 +71,42 @@ pub fn send(message: &str, timeout: Duration, testing: bool) -> io::Result<()> {
 }
 
 /// Run the primary process pipe server. Returning `false` from the callback
-/// stops the server thread.
+/// stops the server. The callback runs on the shared runtime and must return
+/// promptly.
 pub fn spawn_server(
     testing: bool,
     on_message: impl FnMut(Vec<u8>) -> bool + Send + 'static,
 ) -> io::Result<()> {
-    thread::Builder::new()
-        .name("nmt-ipc".into())
-        .spawn(move || serve_pipe(testing, on_message))
-        .map(|_| ())
+    nmt_runtime::handle().spawn(serve_pipe(testing, on_message));
+
+    Ok(())
 }
 
-fn serve_pipe(testing: bool, mut on_message: impl FnMut(Vec<u8>) -> bool) {
-    let name = wide(pipe_name(testing));
+async fn serve_pipe(testing: bool, mut on_message: impl FnMut(Vec<u8>) -> bool) {
+    let name = pipe_name(testing);
 
     loop {
-        let handle = unsafe {
-            CreateNamedPipeW(
-                name.as_ptr(),
-                PIPE_ACCESS_INBOUND,
-                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
-                PIPE_UNLIMITED_INSTANCES,
-                512,
-                512,
-                0,
-                ptr::null(),
-            )
+        // Each client gets a fresh instance; a sender that finds none waiting
+        // retries until the next one is created.
+        let server = match ServerOptions::new()
+            .access_outbound(false)
+            .in_buffer_size(512)
+            .out_buffer_size(512)
+            .create(name)
+        {
+            Ok(server) => server,
+            Err(error) => {
+                warn!("creating the IPC pipe failed ({error}); IPC disabled");
+
+                return;
+            }
         };
 
-        if handle == INVALID_HANDLE_VALUE {
-            warn!("CreateNamedPipeW failed ({}); IPC disabled", unsafe {
-                GetLastError()
-            });
-
-            return;
-        }
-
-        let connected = unsafe { ConnectNamedPipe(handle, ptr::null_mut()) } != 0
-            || unsafe { GetLastError() } == ERROR_PIPE_CONNECTED;
-
-        let mut pipe = unsafe { File::from_raw_handle(handle as _) };
-
-        if !connected {
+        if server.connect().await.is_err() {
             continue;
         }
 
-        let Some(bytes) = read_message(&mut pipe) else {
+        let Some(bytes) = read_message(server).await else {
             continue;
         };
 

@@ -10,14 +10,14 @@ use std::process::Output;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-use nmt_platform::process::hidden_command;
+use nmt_platform::process::{hidden_command, output};
 use parking_lot::Mutex;
 use tracing::warn;
 
 /// Run one git command in `dir` and return its stdout, with stderr folded
 /// into the error text so a failed call explains itself.
-pub fn run_git(dir: &str, args: &[&str]) -> Result<Vec<u8>, String> {
-    let output = git_output(dir, args)?;
+pub async fn run_git(dir: &str, args: &[&str]) -> Result<Vec<u8>, String> {
+    let output = git_output(dir, args).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -31,13 +31,13 @@ pub fn run_git(dir: &str, args: &[&str]) -> Result<Vec<u8>, String> {
     Ok(output.stdout)
 }
 
-fn git_output(dir: &str, args: &[&str]) -> Result<Output, String> {
-    hidden_command("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .env("LC_ALL", "C")
-        .output()
+async fn git_output(dir: &str, args: &[&str]) -> Result<Output, String> {
+    let mut command = hidden_command("git");
+
+    command.arg("-C").arg(dir).args(args).env("LC_ALL", "C");
+
+    output(command)
+        .await
         .map_err(|error| format!("failed to run git: {error}"))
 }
 
@@ -79,9 +79,7 @@ const BRANCH_RETENTION: Duration = Duration::from_secs(600);
 /// each. Passing the caller's own polling interval keeps that to a single
 /// process per directory per interval, and bounds how far a branch label can
 /// lag a real switch at one further interval.
-///
-/// Runs git on the calling thread, so callers poll from a background one.
-pub fn current_branch(cwd: &str, max_age: Duration) -> Result<Option<CheckedOut>, String> {
+pub async fn current_branch(cwd: &str, max_age: Duration) -> Result<Option<CheckedOut>, String> {
     let cache = READ_BRANCHES.get_or_init(Mutex::default);
 
     // Scoped so the lock is released before git runs: holding it across a
@@ -100,7 +98,7 @@ pub fn current_branch(cwd: &str, max_age: Duration) -> Result<Option<CheckedOut>
         return answer;
     }
 
-    let answer = read_current_branch(cwd);
+    let answer = read_current_branch(cwd).await;
 
     let mut entries = cache.lock();
 
@@ -129,8 +127,8 @@ pub fn current_branch(cwd: &str, max_age: Duration) -> Result<Option<CheckedOut>
 /// A detached `HEAD` costs a second call: `rev-parse` resolves one revision at
 /// a time, so no single invocation reports both the symbolic name and the short
 /// commit to fall back on.
-fn read_current_branch(cwd: &str) -> Result<Option<CheckedOut>, String> {
-    let output = git_output(cwd, &["branch", "--show-current"])?;
+async fn read_current_branch(cwd: &str) -> Result<Option<CheckedOut>, String> {
+    let output = git_output(cwd, &["branch", "--show-current"]).await?;
 
     if !output.status.success() {
         let error = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -148,7 +146,7 @@ fn read_current_branch(cwd: &str) -> Result<Option<CheckedOut>, String> {
         return Ok(Some(CheckedOut::Branch(branch)));
     }
 
-    let commit = run_git(cwd, &["rev-parse", "--short", "HEAD"])?;
+    let commit = run_git(cwd, &["rev-parse", "--short", "HEAD"]).await?;
     let commit = String::from_utf8_lossy(&commit).trim().to_string();
 
     Ok((!commit.is_empty()).then_some(CheckedOut::Detached(commit)))

@@ -5,10 +5,10 @@
 //! instead: the end this process keeps is overlapped, and the end handed to
 //! the console host stays synchronous, which is what the host expects.
 //!
-//! Output reads use mio's named pipe, so completions arrive directly at the
-//! registered poller's IOCP. Input writes complete against an auto-reset event;
-//! its wait callback marks [`SoftReady`] and wakes the loop. Writes can also
-//! settle on demand without a poller.
+//! Output reads use Tokio's named pipe, so completions arrive directly at the
+//! runtime's IOCP. Input writes complete against an auto-reset event; its wait
+//! callback marks [`SoftReady`] and wakes the waiting task. Writes can also
+//! settle on demand without a runtime.
 
 #[cfg(test)]
 #[path = "pipes_tests.rs"]
@@ -17,11 +17,11 @@ mod pipes_tests;
 use std::ffi::c_void;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, IntoRawHandle, OwnedHandle};
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::task::{Context, Poll as TaskPoll, ready};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{io, mem, process, ptr};
 
-use mio::windows::NamedPipe;
-use mio::{Interest, Poll, Token};
+use tokio::net::windows::named_pipe::NamedPipeServer;
 use windows_sys::Win32::Foundation::{
     ERROR_IO_INCOMPLETE, ERROR_IO_PENDING, GENERIC_READ, GENERIC_WRITE, HANDLE,
     INVALID_HANDLE_VALUE,
@@ -67,6 +67,26 @@ pub(crate) fn conin_pair() -> io::Result<(OwnedHandle, ConinPipe)> {
     let (ours, theirs) = pipe_pair(PIPE_ACCESS_OUTBOUND, GENERIC_READ)?;
 
     Ok((theirs, ConinPipe::new(ours)?))
+}
+
+/// Pipes for one of a child's standard streams; `inbound` carries the child's
+/// output here. Anonymous pipes cannot be overlapped, so Tokio's own child
+/// stdio parks a blocking-pool thread on every pending read. Here the parent
+/// end is registered with the runtime's IOCP instead, and the child's end
+/// stays synchronous as ordinary console programs expect. Call inside a
+/// runtime context.
+pub(crate) fn child_stdio_pair(inbound: bool) -> io::Result<(NamedPipeServer, OwnedHandle)> {
+    let (ours, theirs) = if inbound {
+        pipe_pair(PIPE_ACCESS_INBOUND, GENERIC_WRITE)?
+    } else {
+        pipe_pair(PIPE_ACCESS_OUTBOUND, GENERIC_READ)?
+    };
+
+    // SAFETY: The connected handle has no pending I/O, and ownership moves
+    // exclusively to Tokio.
+    let ours = unsafe { NamedPipeServer::from_raw_handle(ours.into_raw_handle()) }?;
+
+    Ok((ours, theirs))
 }
 
 /// One connected pipe: the overlapped end with `access`, then the synchronous
@@ -300,109 +320,93 @@ impl Drop for PipeEnd {
     }
 }
 
-/// The console output stream, driven by the registered poller's IOCP. `read`
-/// returns `Ok(0)` while no output is waiting and `BrokenPipe` after hangup.
+/// The console output stream, driven by the Tokio runtime's IOCP after
+/// [`ConoutPipe::start_async`]. Reads report `BrokenPipe` after hangup.
 pub struct ConoutPipe {
-    // Mio 1.2.2 uses a 4 KiB internal read buffer with no public size setting.
-    // PIPE_BUFFER only sizes the kernel buffer; larger caller read slices do
-    // not enlarge mio's buffer. Direct IOCP removes the wait-thread hop, but
-    // the smaller reads increase completion and poll frequency during sustained
-    // output and can reduce throughput. Using 64 KiB internal reads requires
-    // a mio dependency patch; its effect on throughput and short-message
-    // latency needs measurement.
-    pipe: NamedPipe,
+    // Mio 1.2.3, which backs Tokio's named pipes, uses a 4 KiB internal read
+    // buffer with no public size setting. PIPE_BUFFER only sizes the kernel
+    // buffer; larger caller read slices do not enlarge mio's buffer. Direct
+    // IOCP removes the wait-thread hop, but the smaller reads increase
+    // completion and poll frequency during sustained output and can reduce
+    // throughput. Using 64 KiB internal reads requires a mio dependency patch;
+    // its effect on throughput and short-message latency needs measurement.
+    pipe: ReadSource,
+}
 
-    /// A successful read can leave data in mio's buffer without another edge.
-    /// Keep the loop reading until it observes `WouldBlock`.
-    readable: bool,
+/// The IOCP association is made inside a runtime context, which session
+/// creation does not have, so the handle waits until the owner task starts.
+enum ReadSource {
+    Unregistered(Option<OwnedHandle>),
+    Registered(NamedPipeServer),
 }
 
 impl ConoutPipe {
     fn new(handle: OwnedHandle) -> Self {
         Self {
-            // SAFETY: The connected handle was opened for overlapped I/O and
-            // has no pending operations. Ownership moves exclusively to mio.
-            pipe: unsafe { NamedPipe::from_raw_handle(handle.into_raw_handle()) },
-            readable: false,
+            pipe: ReadSource::Unregistered(Some(handle)),
         }
     }
 
-    pub(super) fn register(&mut self, poll: &Poll, token: Token) -> io::Result<()> {
-        poll.registry()
-            .register(&mut self.pipe, token, Interest::READABLE)?;
+    pub(super) fn start_async(&mut self) -> io::Result<()> {
+        let ReadSource::Unregistered(handle) = &mut self.pipe else {
+            return Err(io::Error::other("pipe is already registered"));
+        };
 
-        // Mio can retain unread bytes across deregistration without posting
-        // another readable event. Try a read before parking the loop again.
-        self.readable = true;
+        let handle = handle
+            .take()
+            .ok_or_else(|| io::Error::other("pipe initialization failed"))?;
+
+        // SAFETY: No I/O was submitted before this sole ownership transfer.
+        // IOCP association cannot be moved from a different live poller.
+        let pipe = unsafe { NamedPipeServer::from_raw_handle(handle.into_raw_handle()) }?;
+
+        self.pipe = ReadSource::Registered(pipe);
 
         Ok(())
     }
 
-    pub(super) fn deregister(&mut self, poll: &Poll) -> io::Result<()> {
-        poll.registry().deregister(&mut self.pipe)?;
+    pub(super) fn poll_read(
+        &mut self,
+        cx: &mut Context<'_>,
+        buf: &mut [u8],
+    ) -> TaskPoll<io::Result<usize>> {
+        let ReadSource::Registered(pipe) = &mut self.pipe else {
+            return TaskPoll::Ready(Err(io::Error::other("pipe has no async registration")));
+        };
 
-        self.readable = false;
+        loop {
+            ready!(pipe.poll_read_ready(cx))?;
 
-        Ok(())
-    }
+            match pipe.try_read(buf) {
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => continue,
+                Ok(0) if !buf.is_empty() => {
+                    // An empty peer write also produces a zero-byte completion.
+                    // Keep waiting while connected, instead of closing the tab.
+                    // SAFETY: The pipe owns the handle, and optional output
+                    // pointers are null because only connection status is used.
+                    let connected = unsafe {
+                        PeekNamedPipe(
+                            pipe.as_raw_handle(),
+                            ptr::null_mut(),
+                            0,
+                            ptr::null_mut(),
+                            ptr::null_mut(),
+                            ptr::null_mut(),
+                        )
+                    };
 
-    pub(super) fn is_ready(&self) -> bool {
-        self.readable
-    }
-}
-
-impl io::Read for ConoutPipe {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if buf.is_empty() {
-            return Ok(0);
-        }
-
-        match self.pipe.read(buf) {
-            Ok(0) => {
-                self.readable = false;
-
-                // Mio reports both hangup and a zero-length peer write as zero
-                // bytes. Check that the peer is still connected so an empty
-                // write cannot close the terminal, while hangup stays an error.
-                // SAFETY: The pipe owns a live handle; all optional output
-                // pointers are null because only connection status is needed.
-                let connected = unsafe {
-                    PeekNamedPipe(
-                        self.pipe.as_raw_handle(),
-                        ptr::null_mut(),
-                        0,
-                        ptr::null_mut(),
-                        ptr::null_mut(),
-                        ptr::null_mut(),
-                    )
-                };
-
-                if connected == 0 {
-                    Err(io::Error::last_os_error())
-                } else {
-                    Ok(0)
+                    if connected == 0 {
+                        return TaskPoll::Ready(Err(io::Error::last_os_error()));
+                    }
                 }
-            }
-            Ok(read) => {
-                self.readable = true;
-
-                Ok(read)
-            }
-            Err(error) => {
-                self.readable = false;
-
-                if error.kind() == io::ErrorKind::WouldBlock {
-                    Ok(0)
-                } else {
-                    Err(error)
-                }
+                result => return TaskPoll::Ready(result),
             }
         }
     }
 }
 
-/// The console input stream. `write` accepts bytes only while no native write
-/// is running and reports `WouldBlock` otherwise; the ready flag is set while
+/// The console input stream. `poll_write` accepts bytes only while no native
+/// write is running and stays pending otherwise; the ready flag is set while
 /// it would accept.
 pub struct ConinPipe {
     // Declared before `buf`: dropping it completes the write that reads `buf`.
@@ -427,10 +431,55 @@ impl ConinPipe {
         })
     }
 
-    /// The soft-ready handle, so the `Pty` can inject the loop `Waker` at
-    /// `register()` time and query writability in `drain_ready()`.
-    pub fn soft(&self) -> &SoftReady {
-        &self.end.soft
+    pub(super) fn poll_write(
+        &mut self,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> TaskPoll<io::Result<usize>> {
+        // Installed before settling, so a completion racing the check still
+        // wakes the task that is about to suspend.
+        self.end.soft.register_task_waker(cx.waker());
+
+        self.settle()?;
+
+        if self.end.in_flight {
+            return TaskPoll::Pending;
+        }
+
+        // A zero-length write on a byte pipe completes the peer's read with no
+        // data, which a reader can take for the end of the stream.
+        if buf.is_empty() {
+            return TaskPoll::Ready(Ok(0));
+        }
+
+        let accepted = buf.len().min(WRITE_CHUNK);
+
+        self.buf.clear();
+
+        self.buf.extend_from_slice(&buf[..accepted]);
+
+        self.sent = 0;
+
+        self.submit()?;
+
+        // A write that fit the pipe buffer is already complete; settling now
+        // lets a flush that follows succeed without waiting for a wakeup.
+        self.settle()?;
+
+        TaskPoll::Ready(Ok(accepted))
+    }
+
+    /// Complete once every accepted byte reached the pipe.
+    pub(super) fn poll_flush(&mut self, cx: &mut Context<'_>) -> TaskPoll<io::Result<()>> {
+        self.end.soft.register_task_waker(cx.waker());
+
+        self.settle()?;
+
+        if self.end.in_flight {
+            TaskPoll::Pending
+        } else {
+            TaskPoll::Ready(Ok(()))
+        }
     }
 
     fn submit(&mut self) -> io::Result<()> {
@@ -468,47 +517,5 @@ impl ConinPipe {
         }
 
         Ok(())
-    }
-}
-
-impl io::Write for ConinPipe {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.settle()?;
-
-        if self.end.in_flight {
-            return Err(io::ErrorKind::WouldBlock.into());
-        }
-
-        // A zero-length write on a byte pipe completes the peer's read with no
-        // data, which a reader can take for the end of the stream.
-        if buf.is_empty() {
-            return Ok(0);
-        }
-
-        let accepted = buf.len().min(WRITE_CHUNK);
-
-        self.buf.clear();
-
-        self.buf.extend_from_slice(&buf[..accepted]);
-
-        self.sent = 0;
-
-        self.submit()?;
-
-        // A write that fit the pipe buffer is already complete; settling now
-        // lets a `flush` that follows succeed without waiting for a wakeup.
-        self.settle()?;
-
-        Ok(accepted)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        self.settle()?;
-
-        if self.end.in_flight {
-            Err(io::ErrorKind::WouldBlock.into())
-        } else {
-            Ok(())
-        }
     }
 }

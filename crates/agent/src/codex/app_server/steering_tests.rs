@@ -59,16 +59,17 @@ fn a_steer_rejected_after_completion_automatically_starts_the_next_turn() {
 
         let (tx, rx) = channel();
 
-        let mut session = Session::spawn(
-            &launch,
-            &[],
-            &AgentWorkspace::default(),
-            move |message| {
-                let _ = tx.send(message);
-            },
-            |_| {},
-        )
-        .unwrap();
+        let mut session = nmt_runtime::handle()
+            .block_on(Session::spawn(
+                &launch,
+                &[],
+                &AgentWorkspace::default(),
+                move |message| {
+                    let _ = tx.send(message);
+                },
+                |_| {},
+            ))
+            .unwrap();
 
         receive_until(&mut session, &rx, |event| matches!(event, Event::Ready(_)));
 
@@ -123,7 +124,9 @@ fn a_steer_rejected_after_completion_automatically_starts_the_next_turn() {
                 .any(|event| matches!(event, Event::Error { .. }))
         );
 
-        session.shutdown(Duration::from_secs(2), true).unwrap();
+        nmt_runtime::handle()
+            .block_on(session.shutdown(Duration::from_secs(2), true))
+            .unwrap();
 
         let requests: Vec<Value> = fs::read_to_string(log)
             .unwrap()

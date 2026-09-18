@@ -1,5 +1,8 @@
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+
+use futures::executor::block_on;
+use futures::future::BoxFuture;
+use nmt_agent::usage::FetchCancellation;
 
 use crate::agent_usage::*;
 use crate::usage_refresh::FetchError;
@@ -14,7 +17,7 @@ fn compact_projection_keeps_provider_and_window_order() {
                     weekly: Some(UsageWindow::new(80, 10_080)),
                     ..UsageSnapshot::default()
                 },
-                Arc::new(|_: &AtomicBool| -> Result<UsageSnapshot, FetchError> {
+                Arc::new(|_: Arc<FetchCancellation>| -> BoxFuture<'static, Result<UsageSnapshot, FetchError>> {
                     panic!("presentation does not fetch")
                 }),
                 true,
@@ -24,7 +27,7 @@ fn compact_projection_keeps_provider_and_window_order() {
                     five_hour: Some(UsageWindow::new(3, 300)),
                     ..UsageSnapshot::default()
                 },
-                Arc::new(|_: &AtomicBool| -> Result<UsageSnapshot, FetchError> {
+                Arc::new(|_: Arc<FetchCancellation>| -> BoxFuture<'static, Result<UsageSnapshot, FetchError>> {
                     panic!("presentation does not fetch")
                 }),
                 true,
@@ -107,7 +110,7 @@ fn changing_usage_launcher_discards_the_previous_request(cx: &mut gpui::TestAppC
                     updated_at: Some(123),
                     ..UsageSnapshot::default()
                 },
-                Arc::new(|_: &AtomicBool| -> Result<UsageSnapshot, FetchError> {
+                Arc::new(|_: Arc<FetchCancellation>| -> BoxFuture<'static, Result<UsageSnapshot, FetchError>> {
                     panic!("cancelled source must not run")
                 }),
                 true,
@@ -121,7 +124,7 @@ fn changing_usage_launcher_discards_the_previous_request(cx: &mut gpui::TestAppC
 
     view.update(cx, |view, cx| view.on_settings_changed(cx));
 
-    let fetched = old.run();
+    let fetched = block_on(old.run());
 
     view.update(cx, |view, _| {
         assert!(matches!(

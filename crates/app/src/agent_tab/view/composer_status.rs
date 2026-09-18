@@ -16,6 +16,7 @@ use rust_i18n::t;
 use crate::agent_tab::AgentPane;
 use crate::agent_tab::context_usage::{ContextUsageIndicator, cache_hit_percent};
 use crate::agent_tab::settings::AgentSettings;
+use crate::utils::on_runtime;
 
 /// The footer under the composer card: the branch the pane's directory is on,
 /// and what the conversation has spent so far. It owns the branch readout and
@@ -113,12 +114,8 @@ impl ComposerStatusBar {
                 .max(1),
         );
 
-        let fetch = cx
-            .background_executor()
-            .spawn(async move { branch_label(&cwd, max_age) });
-
         cx.spawn(async move |this, cx| {
-            let branch = fetch.await;
+            let branch = on_runtime(async move { branch_label(&cwd, max_age).await }).await;
 
             this.update(cx, |this, cx| {
                 this.composer_status.branch.complete(generation, branch);
@@ -324,8 +321,8 @@ fn latency_readout(latency: Duration) -> String {
 
 /// The pane's branch label: a detached `HEAD` shows its short commit,
 /// matching the git footer's presentation of the same state.
-fn branch_label(cwd: &str, max_age: Duration) -> Option<String> {
-    let branch = match git::current_branch(cwd, max_age) {
+async fn branch_label(cwd: &str, max_age: Duration) -> Option<String> {
+    let branch = match git::current_branch(cwd, max_age).await {
         Ok(branch) => branch?,
         Err(_) => return Some("Git unavailable".into()),
     };

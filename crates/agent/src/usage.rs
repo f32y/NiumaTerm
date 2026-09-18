@@ -4,8 +4,11 @@
 #[path = "usage_tests.rs"]
 mod usage_tests;
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use chrono::{DateTime, Utc};
 use serde_json::Value;
+use tokio::sync::Notify;
 
 pub(crate) const FIVE_HOUR_WINDOW_MINUTES: u32 = 5 * 60;
 pub(crate) const WEEKLY_WINDOW_MINUTES: u32 = 7 * 24 * 60;
@@ -85,6 +88,41 @@ impl UsageSnapshot {
         self.reset_credits = self.reset_credits.or_else(|| other.reset_credits.clone());
 
         self
+    }
+}
+
+/// Cancellation of a usage fetch. The owner sets it synchronously, and the
+/// running fetch awaits it, so a cancelled fetch stops at once.
+#[derive(Default)]
+pub struct FetchCancellation {
+    cancelled: AtomicBool,
+    changed: Notify,
+}
+
+impl FetchCancellation {
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::SeqCst);
+
+        self.changed.notify_waiters();
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::SeqCst)
+    }
+
+    /// Complete once cancelled.
+    pub async fn cancelled(&self) {
+        loop {
+            // Created before the check, so a cancel between the two still
+            // wakes this wait.
+            let changed = self.changed.notified();
+
+            if self.is_cancelled() {
+                return;
+            }
+
+            changed.await;
+        }
     }
 }
 

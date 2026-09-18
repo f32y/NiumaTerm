@@ -22,7 +22,10 @@ fn release_client_rejects_unknown_channels_and_invalid_versions() {
     let client = HttpClaudeReleaseChannel::with_base_url("http://127.0.0.1:9").unwrap();
 
     assert_eq!(
-        client.latest("canary").unwrap_err().kind,
+        nmt_runtime::handle()
+            .block_on(client.latest("canary"))
+            .unwrap_err()
+            .kind,
         UpdateErrorKind::Unsupported
     );
     assert!(parse_strict_version("2.1.222", "version").is_ok());

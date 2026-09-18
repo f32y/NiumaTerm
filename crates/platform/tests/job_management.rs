@@ -3,7 +3,10 @@
 
 #![cfg(windows)]
 
-use nmt_platform::{PtyOptions, create_managed_pty_with_env, create_pty_with_env};
+use std::future::poll_fn;
+
+use nmt_platform::{AsyncPty, PtyOptions, create_managed_pty_with_env, create_pty_with_env};
+use tokio::runtime::Builder;
 
 #[test]
 fn managed_pty_controls_shell_process_tree() {
@@ -24,7 +27,7 @@ fn managed_pty_controls_shell_process_tree() {
 
     drop(pty);
 
-    let pty = create_managed_pty_with_env(options).expect("failed to create managed ConPTY");
+    let mut pty = create_managed_pty_with_env(options).expect("failed to create managed ConPTY");
 
     assert!(
         pty.process_tree().is_some(),
@@ -36,7 +39,14 @@ fn managed_pty_controls_shell_process_tree() {
     assert_eq!(process_tree.process_count().unwrap(), 1);
     assert_eq!(process_tree.other_process_count(), 0);
 
-    drop(pty);
+    // Teardown is asynchronous: it completes once the console is closed and
+    // the job has ended whatever was left of the tree.
+    Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(poll_fn(|cx| pty.poll_shutdown(cx)))
+        .unwrap();
 
     assert_eq!(process_tree.process_count().unwrap(), 0);
 }

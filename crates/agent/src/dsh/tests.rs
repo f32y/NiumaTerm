@@ -89,7 +89,10 @@ fn scripted_api_server(
 #[test]
 fn closing_a_session_drops_queued_work_before_cancelling_the_turn() {
     let (base, requests, server) = api_server(3);
-    let client = ApiClient::new(base).expect("create API client");
+
+    let client = nmt_runtime::handle()
+        .block_on(ApiClient::new(base))
+        .expect("create API client");
 
     let actions = vec![
         CloseAction::RemoveQueued("queued-1".into()),
@@ -446,7 +449,11 @@ fn an_unresolvable_harness_is_reported_as_missing_rather_than_as_a_failed_start(
     };
 
     assert!(matches!(
-        Session::create(&launch, &AgentWorkspace::default(), |_| {}),
+        nmt_runtime::handle().block_on(Session::create(
+            &launch,
+            &AgentWorkspace::default(),
+            |_| {}
+        )),
         Err(HostError::NotInstalled(_))
     ));
 }
@@ -2076,7 +2083,9 @@ fn a_new_conversation_is_composed_from_the_remembered_preset() {
         r#"{"result":{"ok":true,"value":{"sessionId":"sess_1","agentPreset":"reviewer"}}}"#,
     ]);
 
-    let client = ApiClient::new(base).expect("create API client");
+    let client = nmt_runtime::handle()
+        .block_on(ApiClient::new(base))
+        .expect("create API client");
 
     let (opened, refusal) = nmt_runtime::handle()
         .block_on(open_new_conversation(
@@ -2104,7 +2113,9 @@ fn a_refused_remembered_preset_opens_the_conversation_on_the_default() {
         r#"{"result":{"ok":true,"value":{"sessionId":"sess_1","agentPreset":"default"}}}"#,
     ]);
 
-    let client = ApiClient::new(base).expect("create API client");
+    let client = nmt_runtime::handle()
+        .block_on(ApiClient::new(base))
+        .expect("create API client");
 
     let (opened, refusal) = nmt_runtime::handle()
         .block_on(open_new_conversation(

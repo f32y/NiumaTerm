@@ -36,6 +36,7 @@ use crate::agent_updates::maintenance::{
 #[cfg(test)]
 use crate::agent_updates::transaction::{affected_installation_indices, combine_transaction_error};
 use crate::ui::AppSettings;
+use crate::utils::on_runtime;
 
 pub(crate) struct AgentUpdates {
     pub(crate) coordinator: UpdateCoordinator,
@@ -255,13 +256,12 @@ pub(crate) fn manual_check_profiles(profiles: &[AgentProfile], cx: &mut App) {
     let coordinator = updates.coordinator.clone();
 
     cx.spawn(async move |cx| {
-        let worker = cx.background_executor().spawn(async move {
+        on_runtime(async move {
             for key in keys {
-                let _ = coordinator.check(&key, true);
+                let _ = coordinator.check(&key, true).await;
             }
-        });
-
-        worker.await;
+        })
+        .await;
 
         cx.update(AgentUpdates::notify_changed);
     })
@@ -298,13 +298,12 @@ async fn run_automatic_checks(cx: &mut AsyncApp) {
         });
 
         if let Some(coordinator) = active {
-            let worker = cx.background_executor().spawn(async move {
+            on_runtime(async move {
                 for snapshot in coordinator.snapshots() {
-                    let _ = coordinator.check(&snapshot.identity.key, false);
+                    let _ = coordinator.check(&snapshot.identity.key, false).await;
                 }
-            });
-
-            worker.await;
+            })
+            .await;
 
             cx.update(AgentUpdates::notify_changed);
         }

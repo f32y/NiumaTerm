@@ -1,10 +1,10 @@
 use std::cell::RefCell;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, mpsc};
 use std::time::SystemTime;
 
 use futures::executor::block_on;
-use nmt_platform::{Poll, Token, Waker};
+use tokio::sync::mpsc;
 
 use crate::block_store::{BlockStore, SegmentMeta};
 use crate::event::{
@@ -26,7 +26,7 @@ use crate::vt_modes::Mode;
 
 #[test]
 fn path_paste_and_block_replay_obey_session_input_rules() {
-    let (session, messages) = test_session();
+    let (session, mut messages) = test_session();
 
     session
         .vt_modes
@@ -68,7 +68,7 @@ fn path_paste_and_block_replay_obey_session_input_rules() {
     assert!(messages.try_recv().is_err());
 }
 
-pub(super) fn test_session() -> (TerminalSession, mpsc::Receiver<Msg>) {
+pub(super) fn test_session() -> (TerminalSession, mpsc::UnboundedReceiver<Msg>) {
     let mut engine = GhosttyTerminal::new(24, 4, 100).unwrap();
 
     engine.write_vt(b"hello world");
@@ -78,16 +78,14 @@ pub(super) fn test_session() -> (TerminalSession, mpsc::Receiver<Msg>) {
 
 pub(super) fn session_from_engine(
     engine: &mut GhosttyTerminal,
-) -> (TerminalSession, mpsc::Receiver<Msg>) {
-    let (tx, rx) = mpsc::channel();
-    let poll = Poll::new().unwrap();
-    let waker = Arc::new(Waker::new(poll.registry(), Token(0)).unwrap());
+) -> (TerminalSession, mpsc::UnboundedReceiver<Msg>) {
+    let (tx, rx) = mpsc::unbounded_channel();
 
     let mut buffer = RenderBuffer::new(engine.cols() as usize, engine.rows() as usize);
 
     engine.snapshot_into(&mut buffer, 0, 0).unwrap();
 
-    let messenger = MsgSender::new(tx, waker);
+    let messenger = MsgSender::new(tx);
 
     (
         TerminalSession {
@@ -107,7 +105,7 @@ pub(super) fn session_from_engine(
 
 #[test]
 fn writes_report_queue_acceptance_and_reject_closed_or_read_only_sessions() {
-    let (session, rx) = test_session();
+    let (session, mut rx) = test_session();
 
     assert!(!session.write_input(b""));
     assert!(session.write_text("hello"));
@@ -129,7 +127,7 @@ fn writes_report_queue_acceptance_and_reject_closed_or_read_only_sessions() {
 
 #[test]
 fn powershell_setting_only_updates_supported_sessions_and_can_be_disabled() {
-    let (mut session, rx) = test_session();
+    let (mut session, mut rx) = test_session();
 
     assert!(!session.set_powershell_compatibility(true));
     assert!(rx.try_recv().is_err());
@@ -150,7 +148,8 @@ fn powershell_setting_only_updates_supported_sessions_and_can_be_disabled() {
 
 #[test]
 fn runtime_transitions_do_not_require_host_event_consumption() {
-    let (session, rx) = test_session();
+    let (session, mut rx) = test_session();
+
     let proxy = TerminalEventProxy::new(session.shared.clone(), 1, None);
 
     proxy.send_event(TerminalEvent::AltScreen(true));
@@ -273,7 +272,7 @@ fn selection_pieces_cover_block_ranges() {
 fn complete<T>(
     request: Request<T>,
     engine: &mut GhosttyTerminal,
-    messages: &mpsc::Receiver<Msg>,
+    messages: &mut mpsc::UnboundedReceiver<Msg>,
 ) -> T {
     while let Ok(Msg::Query(query)) = messages.try_recv() {
         answer_query(engine, 0, 0, query);
@@ -289,7 +288,8 @@ fn session_block_reads_copy_expand_and_preserve_row_metadata() {
     engine.write_vt(b"hello world\r\n\x1b]8;;https://example.com\x07linked\x1b]8;;\x07");
 
     let handle = engine.finish_block().unwrap().unwrap();
-    let (session, messages) = session_from_engine(&mut engine);
+
+    let (session, mut messages) = session_from_engine(&mut engine);
 
     session
         .block_store()
@@ -306,7 +306,7 @@ fn session_block_reads_copy_expand_and_preserve_row_metadata() {
 
     assert_eq!(session.block_command(0).as_deref(), Some("echo hello"));
     assert_eq!(
-        complete(session.block_text(0).unwrap(), &mut engine, &messages),
+        complete(session.block_text(0).unwrap(), &mut engine, &mut messages),
         "hello world\nlinked"
     );
     assert!(session.block_text(10).is_none());
@@ -322,7 +322,7 @@ fn session_block_reads_copy_expand_and_preserve_row_metadata() {
             .expand_frozen_selection(point, SelectionType::Semantic)
             .unwrap(),
         &mut engine,
-        &messages,
+        &mut messages,
     );
 
     assert_eq!((a.1, b.1), (6, 10));
@@ -340,7 +340,11 @@ fn session_block_reads_copy_expand_and_preserve_row_metadata() {
     };
 
     assert_eq!(
-        complete(session.frozen_selection_text(b, a), &mut engine, &messages),
+        complete(
+            session.frozen_selection_text(b, a),
+            &mut engine,
+            &mut messages
+        ),
         "world"
     );
     assert!(session.block_row_text(0, 1).is_none());
@@ -365,7 +369,8 @@ fn retained_frame_and_history_page_do_not_prevent_reflow() {
     engine.write_vt(b"hello world");
 
     let handle = engine.finish_block().unwrap().unwrap();
-    let (session, messages) = session_from_engine(&mut engine);
+
+    let (session, mut messages) = session_from_engine(&mut engine);
 
     assert!(session.block_page(handle, 0).is_none());
 
@@ -409,7 +414,7 @@ fn answer_all(
     engine: &mut GhosttyTerminal,
     revision: u64,
     theme_revision: u64,
-    messages: &mpsc::Receiver<Msg>,
+    messages: &mut mpsc::UnboundedReceiver<Msg>,
 ) {
     while let Ok(Msg::Query(query)) = messages.try_recv() {
         answer_query(engine, revision, theme_revision, query);
@@ -425,12 +430,13 @@ fn display_page_outlives_its_revision_until_history_is_removed() {
 
     engine.write_vt(b"one\r\ntwo\r\nthree\r\nfour\r\nfive\r\nsix\r\n");
 
-    let (session, messages) = session_from_engine(&mut engine);
+    let (session, mut messages) = session_from_engine(&mut engine);
+
     let first = session.snapshot();
 
     assert!(session.screen_page_for_display(&first, 0).is_none());
 
-    answer_all(&mut engine, 0, 0, &messages);
+    answer_all(&mut engine, 0, 0, &mut messages);
 
     let page = session.screen_page_for_display(&first, 0).unwrap();
 
@@ -444,7 +450,7 @@ fn display_page_outlives_its_revision_until_history_is_removed() {
     assert!(Arc::ptr_eq(&retained, &page));
     assert!(session.screen_row_text_in(&second, 0).is_none());
 
-    answer_all(&mut engine, 1, 0, &messages);
+    answer_all(&mut engine, 1, 0, &mut messages);
 
     let fresh = session.screen_page_for_display(&second, 0).unwrap();
 
@@ -478,12 +484,13 @@ fn display_page_drops_after_reflow_or_theme_change() {
 
     engine.write_vt(b"one\r\ntwo\r\nthree\r\nfour\r\nfive\r\nsix\r\n");
 
-    let (session, messages) = session_from_engine(&mut engine);
+    let (session, mut messages) = session_from_engine(&mut engine);
+
     let first = session.snapshot();
 
     session.screen_page_for_display(&first, 0);
 
-    answer_all(&mut engine, 0, 0, &messages);
+    answer_all(&mut engine, 0, 0, &mut messages);
 
     assert!(session.screen_page_for_display(&first, 0).is_some());
 
@@ -491,7 +498,7 @@ fn display_page_drops_after_reflow_or_theme_change() {
 
     assert!(session.screen_page_for_display(&recolored, 0).is_none());
 
-    answer_all(&mut engine, 1, 1, &messages);
+    answer_all(&mut engine, 1, 1, &mut messages);
 
     assert!(session.screen_page_for_display(&recolored, 0).is_some());
 

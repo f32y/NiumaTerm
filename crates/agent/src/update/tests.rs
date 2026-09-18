@@ -3,6 +3,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 use std::{env, fs, process, thread};
 
+use futures::FutureExt as _;
+use futures::future::{BoxFuture, ready};
 use nmt_platform::process::exit_status_from_code;
 
 use crate::update::{DiscoverySupport, *};
@@ -122,7 +124,9 @@ fn configured_vendor_runners_pass_only_the_allowlisted_update_argument() {
             [("NMT_UPDATE_LOG".to_string(), log.display().to_string())],
         );
 
-        vendor_update(&launcher, provider).unwrap();
+        nmt_runtime::handle()
+            .block_on(vendor_update(&launcher, provider))
+            .unwrap();
 
         assert_eq!(fs::read_to_string(&log).unwrap().trim(), "update");
 
@@ -143,8 +147,8 @@ impl ProviderMaintenance for LockedMaintenance {
         ProviderKind::Codex
     }
 
-    fn probe(&self, _: &AgentCli) -> Result<VersionStatus, UpdateError> {
-        Ok(VersionStatus {
+    fn probe<'a>(&'a self, _: &'a AgentCli) -> BoxFuture<'a, Result<VersionStatus, UpdateError>> {
+        ready(Ok(VersionStatus {
             provider: ProviderKind::Codex,
             current: Some(Version::new(1, 0, 0)),
             available: Some(Version::new(1, 1, 0)),
@@ -153,14 +157,16 @@ impl ProviderMaintenance for LockedMaintenance {
             can_update: true,
             support: DiscoverySupport::Supported,
             remediation: None,
-        })
+        }))
+        .boxed()
     }
 
-    fn update(&self, _: &AgentCli) -> Result<String, UpdateError> {
-        Err(UpdateError::new(
+    fn update<'a>(&'a self, _: &'a AgentCli) -> BoxFuture<'a, Result<String, UpdateError>> {
+        ready(Err(UpdateError::new(
             UpdateErrorKind::ExternalLock,
             "provider files are locked",
-        ))
+        )))
+        .boxed()
     }
 }
 
@@ -169,10 +175,10 @@ impl ProviderMaintenance for FakeMaintenance {
         self.provider
     }
 
-    fn probe(&self, _: &AgentCli) -> Result<VersionStatus, UpdateError> {
+    fn probe<'a>(&'a self, _: &'a AgentCli) -> BoxFuture<'a, Result<VersionStatus, UpdateError>> {
         self.probes.fetch_add(1, Ordering::SeqCst);
 
-        Ok(VersionStatus {
+        ready(Ok(VersionStatus {
             provider: self.provider,
             current: Some(Version::new(1, 0, 0)),
             available: Some(Version::new(1, 1, 0)),
@@ -181,13 +187,14 @@ impl ProviderMaintenance for FakeMaintenance {
             can_update: true,
             support: DiscoverySupport::Supported,
             remediation: Some("do-not-cache-provider-command".into()),
-        })
+        }))
+        .boxed()
     }
 
-    fn update(&self, _: &AgentCli) -> Result<String, UpdateError> {
+    fn update<'a>(&'a self, _: &'a AgentCli) -> BoxFuture<'a, Result<String, UpdateError>> {
         self.updates.fetch_add(1, Ordering::SeqCst);
 
-        Ok("updated".into())
+        ready(Ok("updated".into())).boxed()
     }
 }
 
@@ -213,7 +220,10 @@ fn waiting_for_cache_persistence_keeps_update_state_readable() {
     let disk_busy = coordinator.cache_write.lock();
     let checker = coordinator.clone();
     let checked_key = key.clone();
-    let worker = thread::spawn(move || checker.check(&checked_key, true));
+
+    let worker =
+        thread::spawn(move || nmt_runtime::handle().block_on(checker.check(&checked_key, true)));
+
     let deadline = Instant::now() + Duration::from_secs(3);
 
     let mut available = false;
@@ -265,9 +275,13 @@ fn fresh_cache_is_reused_and_manual_check_bypasses_it() {
         fake.clone(),
     );
 
-    coordinator.check(&key, false).unwrap();
+    nmt_runtime::handle()
+        .block_on(coordinator.check(&key, false))
+        .unwrap();
 
-    coordinator.check(&key, false).unwrap();
+    nmt_runtime::handle()
+        .block_on(coordinator.check(&key, false))
+        .unwrap();
 
     assert_eq!(fake.probes.load(Ordering::SeqCst), 1);
     assert!(
@@ -276,7 +290,9 @@ fn fresh_cache_is_reused_and_manual_check_bypasses_it() {
             .contains("do-not-cache-provider-command")
     );
 
-    coordinator.check(&key, true).unwrap();
+    nmt_runtime::handle()
+        .block_on(coordinator.check(&key, true))
+        .unwrap();
 
     assert_eq!(fake.probes.load(Ordering::SeqCst), 2);
 
@@ -309,13 +325,17 @@ fn operation_claim_serializes_updates_and_dismissal_is_version_keyed() {
     assert_eq!(key, duplicate_key);
     assert_eq!(coordinator.snapshots().len(), 1);
 
-    coordinator.check(&key, true).unwrap();
+    nmt_runtime::handle()
+        .block_on(coordinator.check(&key, true))
+        .unwrap();
 
     coordinator.begin_update(&key).unwrap();
 
     assert!(coordinator.begin_update(&key).is_err());
 
-    coordinator.run_vendor_update(&key).unwrap();
+    nmt_runtime::handle()
+        .block_on(coordinator.run_vendor_update(&key))
+        .unwrap();
 
     assert_eq!(fake.updates.load(Ordering::SeqCst), 1);
 
@@ -355,7 +375,9 @@ fn unchanged_and_partial_recovery_outcomes_keep_verified_versions() {
         fake,
     );
 
-    let available = coordinator.check(&key, true).unwrap();
+    let available = nmt_runtime::handle()
+        .block_on(coordinator.check(&key, true))
+        .unwrap();
 
     coordinator.begin_update(&key).unwrap();
 
@@ -414,11 +436,15 @@ fn updater_external_lock_is_preserved_as_an_actionable_failure() {
         Arc::new(LockedMaintenance),
     );
 
-    coordinator.check(&key, true).unwrap();
+    nmt_runtime::handle()
+        .block_on(coordinator.check(&key, true))
+        .unwrap();
 
     coordinator.begin_update(&key).unwrap();
 
-    let error = coordinator.run_vendor_update(&key).unwrap_err();
+    let error = nmt_runtime::handle()
+        .block_on(coordinator.run_vendor_update(&key))
+        .unwrap_err();
 
     assert_eq!(error.kind, UpdateErrorKind::ExternalLock);
 

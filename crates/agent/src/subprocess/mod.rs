@@ -11,16 +11,19 @@ mod input;
 #[cfg(test)]
 mod tests;
 
-use std::io::{BufRead, BufReader, Write as _};
-use std::process::{Child, Command, Stdio};
+use std::future::Future;
+use std::io::Write as _;
+use std::process::Command;
 use std::str::from_utf8;
 use std::sync::Arc;
-use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use nmt_platform::process::{KillOnCloseJob, decode_child_output};
+use nmt_platform::process::{KillOnCloseJob, PipedChild, decode_child_output, spawn_piped};
 use parking_lot::Mutex;
 use serde_json::{Value, json};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::sync::watch;
+use tokio::time::timeout;
 use tracing::warn;
 
 use crate::subprocess::input::InputQueue;
@@ -30,11 +33,14 @@ pub const OUTPUT_FAILURE_METHOD: &str = "nmt/outputFailure";
 
 /// A spawned agent CLI with piped stdio, kill-on-close containment, and
 /// newline-delimited JSON output. Stdout lines that parse as JSON are handed
-/// to `deliver`, stderr lines to `on_stderr`, each from its own reader thread.
-/// Dropping `deliver` signals EOF: the closure is owned by the reader thread
-/// and dropped when the pipe closes.
+/// to `deliver`, stderr lines to `on_stderr`, each from its own runtime task.
+/// Dropping `deliver` signals EOF: the closure is owned by the reader task
+/// and dropped when the pipe closes. Callbacks run on runtime workers and
+/// must return promptly.
 pub(crate) struct JsonLineProcess {
-    child: Child,
+    /// Becomes true once the root process exits. A task owns the child and
+    /// waits for it, so shutdown never needs exclusive access to this value.
+    exited: watch::Receiver<bool>,
 
     /// Held until the root exits or forced shutdown terminates any remaining
     /// descendants.
@@ -47,8 +53,8 @@ pub(crate) struct JsonLineProcess {
 }
 
 impl JsonLineProcess {
-    /// Spawn `command` with all three stdio streams piped and start the two
-    /// reader threads. `display_command` is the human-readable command line
+    /// Spawn `command` with all three stdio streams piped and start the
+    /// reader tasks. `display_command` is the human-readable command line
     /// quoted in the spawn error.
     #[cfg(test)]
     pub(crate) fn spawn(
@@ -72,70 +78,74 @@ impl JsonLineProcess {
     /// Shared hosts need an explicit exit signal because their router outlives
     /// every individual delivery callback.
     pub(crate) fn spawn_with_stdout_closed(
-        mut command: Command,
+        command: Command,
         display_command: &str,
         provider: &'static str,
         deliver: impl Fn(Value) + Send + 'static,
         on_stderr: impl Fn(String) + Send + 'static,
         on_stdout_closed: impl FnOnce() + Send + 'static,
     ) -> Result<Self, String> {
-        command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-
-        let mut child = command
-            .spawn()
+        let PipedChild {
+            mut child,
+            mut stdin,
+            stdout,
+            stderr,
+        } = spawn_piped(command)
             .map_err(|err| format!("could not run `{display_command}`: {err}"))?;
 
-        let job = KillOnCloseJob::attach_or_kill(&mut child).map_err(|error| error.to_string())?;
+        let job = KillOnCloseJob::attach_spawned_or_kill(&mut child)
+            .map_err(|error| error.to_string())?;
 
-        let mut stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| format!("{provider} stdin unavailable"))?;
-
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| format!("{provider} stdout unavailable"))?;
-
-        let stderr = child
-            .stderr
-            .take()
-            .ok_or_else(|| format!("{provider} stderr unavailable"))?;
-
+        let runtime = nmt_runtime::handle();
         let job = Arc::new(Mutex::new(Some(job)));
+        let (exit_sender, exited) = watch::channel(false);
+
+        runtime.spawn(async move {
+            if let Err(error) = child.wait().await {
+                warn!(provider, %error, "could not observe agent process exit");
+            }
+
+            let _ = exit_sender.send(true);
+        });
+
         let writer_job = Arc::clone(&job);
         let (input_tx, input_rx) = InputQueue::new();
 
-        thread::Builder::new()
-            .name(format!("{provider}-stdin"))
-            .spawn(move || {
-                for input in input_rx {
-                    let result = input.messages.iter().try_for_each(|message| {
-                        writeln!(stdin, "{message}").and_then(|_| stdin.flush())
-                    });
+        runtime.spawn(async move {
+            while let Some(input) = input_rx.recv().await {
+                // Serializing the whole batch first writes a started batch in
+                // one piece, so cancellation can never split it.
+                let mut lines = Vec::new();
 
-                    if let Err(error) = result {
-                        warn!(provider, %error, "agent input writer stopped");
-
-                        // A child can close stdin without closing stdout. Terminating
-                        // its tree makes the existing EOF notification reliable.
-                        writer_job.lock().take();
-
-                        break;
-                    }
+                for message in &input.messages {
+                    let _ = writeln!(lines, "{message}");
                 }
-            })
-            .map_err(|error| format!("could not start {provider} input writer: {error}"))?;
+
+                let written = async {
+                    stdin.write_all(&lines).await?;
+
+                    stdin.flush().await
+                };
+
+                if let Err(error) = written.await {
+                    warn!(provider, %error, "agent input writer stopped");
+
+                    // A child can close stdin without closing stdout. Terminating
+                    // its tree makes the existing EOF notification reliable.
+                    writer_job.lock().take();
+
+                    break;
+                }
+            }
+        });
 
         let reader_job = Arc::clone(&job);
 
-        thread::spawn(move || {
+        runtime.spawn(async move {
+            let mut deliver = deliver;
             let mut reader = BufReader::new(stdout);
 
-            if let Err(message) = read_messages(&mut reader, provider, &deliver) {
+            if let Err(message) = read_messages(&mut reader, provider, &mut deliver).await {
                 warn!(provider, reason = %message, "agent protocol reader stopped");
 
                 deliver(json!({"method": OUTPUT_FAILURE_METHOD, "params": {"message": message}}));
@@ -146,8 +156,10 @@ impl JsonLineProcess {
             on_stdout_closed();
         });
 
-        thread::spawn(move || {
-            for line in BufReader::new(stderr).split(b'\n').map_while(Result::ok) {
+        runtime.spawn(async move {
+            let mut lines = BufReader::new(stderr).split(b'\n');
+
+            while let Ok(Some(line)) = lines.next_segment().await {
                 on_stderr(decode_child_output(
                     line.strip_suffix(b"\r").unwrap_or(&line),
                 ));
@@ -155,7 +167,7 @@ impl JsonLineProcess {
         });
 
         Ok(Self {
-            child,
+            exited,
             job,
             stdin: Some(input_tx),
             provider,
@@ -227,44 +239,41 @@ impl JsonLineProcess {
     /// Close the protocol input (EOF is the CLIs' graceful-shutdown signal)
     /// and wait for the process to exit. Forced termination is opt-in because
     /// it can interrupt an active tool operation; dropping the Job Object
-    /// affects only this process's tree.
-    pub(crate) fn shutdown(&mut self, timeout: Duration, force: bool) -> Result<(), String> {
+    /// affects only this process's tree. The returned wait owns what it needs,
+    /// so callers hold neither this value nor a lock while it runs.
+    pub(crate) fn shutdown(
+        &mut self,
+        wait: Duration,
+        force: bool,
+    ) -> impl Future<Output = Result<(), String>> + Send + use<> {
         drop(self.stdin.take());
 
-        let started = Instant::now();
+        let mut exited = self.exited.clone();
 
-        loop {
-            match self.child.try_wait() {
-                Ok(Some(_)) => {
-                    self.job.lock().take();
+        let job = Arc::clone(&self.job);
+        let provider = self.provider;
 
-                    return Ok(());
-                }
-                Ok(None) if started.elapsed() < timeout => {
-                    thread::sleep(Duration::from_millis(20));
-                }
-                Ok(None) if force => {
-                    self.job.lock().take();
+        async move {
+            if timeout(wait, exited.wait_for(|exited| *exited))
+                .await
+                .is_ok()
+            {
+                job.lock().take();
 
-                    self.child.wait().map_err(|error| {
-                        format!("could not wait for {} to stop: {error}", self.provider)
-                    })?;
-
-                    return Ok(());
-                }
-                Ok(None) => {
-                    return Err(format!(
-                        "{} did not stop before the update timeout",
-                        self.provider
-                    ));
-                }
-                Err(error) => {
-                    return Err(format!(
-                        "could not observe {} process exit: {error}",
-                        self.provider
-                    ));
-                }
+                return Ok(());
             }
+
+            if !force {
+                return Err(format!("{provider} did not stop before the update timeout"));
+            }
+
+            job.lock().take();
+
+            exited
+                .wait_for(|exited| *exited)
+                .await
+                .map(|_| ())
+                .map_err(|error| format!("could not wait for {provider} to stop: {error}"))
         }
     }
 }
@@ -272,18 +281,18 @@ impl JsonLineProcess {
 impl Drop for JsonLineProcess {
     fn drop(&mut self) {
         // Closing stdin delivers EOF, which both CLIs treat as shutdown, and
-        // the reader threads exit with their pipes. The forced fallback drops
-        // the Job Object, which terminates the npm shim and its descendant
-        // together instead of stranding the descendant.
-        let _ = self.shutdown(Duration::from_millis(250), true);
+        // the reader tasks end with their pipes. The forced fallback drops the
+        // Job Object, which terminates the npm shim and its descendant together
+        // instead of stranding the descendant. Dropping never waits for it.
+        nmt_runtime::handle().spawn(self.shutdown(Duration::from_millis(250), true));
     }
 }
 
 /// Startup wrappers may print plain-text notices before the first protocol
 /// object. Once the protocol starts, skipping a malformed line could lose a
 /// response or transcript item, so decoding failure ends the stream.
-fn read_messages(
-    reader: &mut impl BufRead,
+async fn read_messages(
+    reader: &mut (impl AsyncBufRead + Unpin),
     provider: &str,
     mut deliver: impl FnMut(Value),
 ) -> Result<(), String> {
@@ -297,6 +306,7 @@ fn read_messages(
 
         reader
             .read_until(b'\n', &mut line)
+            .await
             .map_err(|error| format!("Agent output read failed: {error}"))?;
 
         if line.is_empty() {
