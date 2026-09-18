@@ -165,12 +165,9 @@ impl SessionHistoryUi {
         &mut self,
         request: &FilesystemHistoryRequest,
         cwd: Option<&str>,
-        epoch: u64,
         count: usize,
     ) -> CountPublication {
-        let result = self
-            .data
-            .publish_filesystem_count(request, cwd, epoch, count);
+        let result = self.data.publish_filesystem_count(request, cwd, count);
 
         if matches!(result, CountPublication::Empty) {
             self.selected = 0;
@@ -183,10 +180,9 @@ impl SessionHistoryUi {
         &mut self,
         request: &FilesystemHistoryRequest,
         cwd: Option<&str>,
-        epoch: u64,
         rows: Vec<SessionSummary>,
     ) -> bool {
-        if !self.data.publish_filesystem_rows(request, cwd, epoch, rows) {
+        if !self.data.publish_filesystem_rows(request, cwd, rows) {
             return false;
         }
 
@@ -242,18 +238,19 @@ impl SessionHistoryUi {
     }
 
     /// Read the list from the harness's transcript directory for `cwd`, off
-    /// the pane's thread, as of session `epoch`. A cheap count comes first so
-    /// the list can reserve its final height with placeholder rows, then title
-    /// parsing swaps in the real rows.
+    /// the pane's thread. A cheap count comes first so the list can reserve
+    /// its final height with placeholder rows, then title parsing swaps in the
+    /// real rows. The listing depends only on `cwd` and scope, so a session
+    /// start while it runs does not retire it; a conversation replacement
+    /// retires it explicitly.
     pub(crate) fn load_filesystem_history(
         &mut self,
         cwd: Option<String>,
-        epoch: u64,
         cx: &mut Context<AgentPane>,
     ) {
         let scope = self.data.scope;
 
-        let request = self.data.begin_filesystem_history(cwd.clone(), epoch);
+        let request = self.data.begin_filesystem_history(cwd.clone());
 
         cx.notify();
 
@@ -621,12 +618,10 @@ async fn load_history_passes(
         .update(cx, |this, cx| {
             let cwd = this.cwd(cx);
 
-            match this.history_ui.publish_filesystem_count(
-                &request,
-                cwd.as_deref(),
-                this.session.borrow().runtime().epoch(),
-                count,
-            ) {
+            match this
+                .history_ui
+                .publish_filesystem_count(&request, cwd.as_deref(), count)
+            {
                 CountPublication::Stale => false,
                 CountPublication::Empty => {
                     cx.notify();
@@ -662,12 +657,10 @@ async fn load_history_passes(
     let _ = this.update(cx, |this, cx| {
         let cwd = this.cwd(cx);
 
-        if this.history_ui.publish_filesystem_rows(
-            &request,
-            cwd.as_deref(),
-            this.session.borrow().runtime().epoch(),
-            sessions,
-        ) {
+        if this
+            .history_ui
+            .publish_filesystem_rows(&request, cwd.as_deref(), sessions)
+        {
             cx.notify();
         }
     });

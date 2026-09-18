@@ -23,7 +23,6 @@ pub struct FilesystemHistoryRequest {
     id: u64,
     scope: SessionScope,
     cwd: Option<String>,
-    epoch: u64,
 }
 
 pub enum CountPublication {
@@ -40,11 +39,7 @@ impl SessionHistory {
         self.pending = None;
     }
 
-    pub fn begin_filesystem_history(
-        &mut self,
-        cwd: Option<String>,
-        epoch: u64,
-    ) -> FilesystemHistoryRequest {
+    pub fn begin_filesystem_history(&mut self, cwd: Option<String>) -> FilesystemHistoryRequest {
         self.invalidate_filesystem_history();
 
         self.next_request_id = self
@@ -56,7 +51,6 @@ impl SessionHistory {
             id: self.next_request_id,
             scope: self.scope,
             cwd,
-            epoch,
         };
 
         self.filesystem_request = Some(request.clone());
@@ -68,22 +62,19 @@ impl SessionHistory {
         &self,
         request: &FilesystemHistoryRequest,
         cwd: Option<&str>,
-        epoch: u64,
     ) -> bool {
         self.filesystem_request.as_ref() == Some(request)
             && self.scope == request.scope
             && request.cwd.as_deref() == cwd
-            && request.epoch == epoch
     }
 
     pub fn publish_filesystem_count(
         &mut self,
         request: &FilesystemHistoryRequest,
         cwd: Option<&str>,
-        epoch: u64,
         count: usize,
     ) -> CountPublication {
-        if !self.owns_filesystem_request(request, cwd, epoch) {
+        if !self.owns_filesystem_request(request, cwd) {
             return CountPublication::Stale;
         }
 
@@ -104,10 +95,9 @@ impl SessionHistory {
         &mut self,
         request: &FilesystemHistoryRequest,
         cwd: Option<&str>,
-        epoch: u64,
         sessions: Vec<SessionSummary>,
     ) -> bool {
-        if !self.owns_filesystem_request(request, cwd, epoch) {
+        if !self.owns_filesystem_request(request, cwd) {
             return false;
         }
 
