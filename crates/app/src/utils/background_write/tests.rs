@@ -3,7 +3,7 @@ use std::fs;
 use gpui::TestAppContext;
 use tempfile::tempdir;
 
-use crate::utils::background_write;
+use crate::utils::{background_write, background_write_reply};
 
 #[gpui::test]
 async fn accepted_writes_keep_their_order_when_the_caller_drops_its_reply(cx: &mut TestAppContext) {
@@ -15,13 +15,11 @@ async fn accepted_writes_keep_their_order_when_the_caller_drops_its_reply(cx: &m
     let saved = cx.update(|cx| {
         let first_path = path.clone();
 
-        drop(background_write(cx, move || {
-            fs::write(first_path, "first").unwrap()
-        }));
+        background_write(cx, move || fs::write(first_path, "first").unwrap());
 
         let second_path = path.clone();
 
-        let saved = background_write(cx, move || {
+        let saved = background_write_reply(cx, move || {
             let previous = fs::read_to_string(&second_path).unwrap();
 
             fs::write(second_path, "second").unwrap();

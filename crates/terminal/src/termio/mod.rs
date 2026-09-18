@@ -29,7 +29,7 @@ use nmt_platform::{AsyncPty, WinsizeBuilder};
 use nmt_profiling::pty::{BatchEnd, PtyProfiler, Stage};
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 use tokio::task::yield_now;
-use tokio::time::{Instant as TimerInstant, sleep_until};
+use tokio::time::{Instant, sleep_until};
 use tracing::{error, warn};
 
 use crate::event::{self, Checkpoint, EventListener, Msg, MsgSender, RequestError, TerminalEvent};
@@ -56,6 +56,23 @@ const SNAPSHOT_MIN_INTERVAL: time::Duration = time::Duration::from_millis(5);
 /// leave the last committed frame visible indefinitely.
 const SYNC_OUTPUT_TIMEOUT: time::Duration = time::Duration::from_millis(100);
 
+/// A size change handed to the PTY and not yet completed. Input waits behind
+/// it, and the PowerShell pause starts only once it has finished.
+#[derive(Clone)]
+struct ResizeInFlight {
+    size: WinsizeBuilder,
+    grid_changed: bool,
+}
+
+/// What one pass over queued commands did, so the owner task knows whether to
+/// poll again before parking.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Step {
+    Idle,
+    Advanced,
+    Shutdown,
+}
+
 #[derive(Clone, Copy)]
 enum FlushReason {
     Drained,
@@ -74,9 +91,9 @@ pub struct Termio<T: AsyncPty, U: EventListener> {
     receiver: UnboundedReceiver<Msg>,
 
     /// Inputs carry a fixed wait limit measured at receipt; other commands carry None.
-    pending_commands: VecDeque<(Msg, Option<time::Instant>)>,
+    pending_commands: VecDeque<(Msg, Option<Instant>)>,
 
-    pending_resize: Option<(WinsizeBuilder, bool)>,
+    pending_resize: Option<ResizeInFlight>,
 
     powershell_compatibility: PowerShellCompatibility,
     pty: T,
@@ -144,7 +161,7 @@ pub struct Termio<T: AsyncPty, U: EventListener> {
     prev_alt_screen_sent: bool,
 
     /// The last capture time; absent until the first PTY output is captured.
-    last_snapshot_at: Option<time::Instant>,
+    last_snapshot_at: Option<Instant>,
 
     /// True when a recent capture or synchronized update deferred its readback.
     /// Makes the event loop run `pty_read` without requiring new PTY bytes.
@@ -152,7 +169,7 @@ pub struct Termio<T: AsyncPty, U: EventListener> {
 
     /// Start of the current DEC 2026 transaction. The event-loop poll uses this
     /// deadline to recover when an application omits the matching reset.
-    sync_output_started_at: Option<time::Instant>,
+    sync_output_started_at: Option<Instant>,
 
     #[cfg(enable_profiling)]
     profile: PtyProfiler,
@@ -256,8 +273,7 @@ where
         event_proxy: U,
         options: &SessionOptions,
     ) -> Result<Termio<T, U>, Box<dyn error::Error>> {
-        let (tx, rx) = mpsc::unbounded_channel();
-        let sender = MsgSender::new(tx);
+        let (sender, receiver) = mpsc::unbounded_channel();
 
         // Start the engine at the render buffer's viewport dimensions so the first
         // resize cannot diverge from a zero-sized construction.
@@ -289,7 +305,7 @@ where
 
         Ok(Termio {
             sender,
-            receiver: rx,
+            receiver,
             pending_commands: VecDeque::new(),
             pending_resize: None,
             powershell_compatibility: PowerShellCompatibility::default(),
@@ -382,21 +398,7 @@ where
                     break;
                 }
                 Ok(got) => unprocessed += got,
-                Err(err) => match err.kind() {
-                    ErrorKind::Interrupted | ErrorKind::WouldBlock => {
-                        if err.kind() == ErrorKind::Interrupted {
-                            cx.waker().wake_by_ref();
-                        }
-
-                        // Suspend only after all bytes already read have been parsed.
-                        if unprocessed == 0 {
-                            caught_up = true;
-
-                            break;
-                        }
-                    }
-                    _ => return Err(err),
-                },
+                Err(err) => return Err(err),
             }
 
             self.on_pty_chunk(&buf[..unprocessed]);
@@ -647,8 +649,7 @@ where
             .store(vt_modes.bits(), sync::atomic::Ordering::Relaxed);
 
         if sync_output {
-            self.sync_output_started_at
-                .get_or_insert_with(time::Instant::now);
+            self.sync_output_started_at.get_or_insert_with(Instant::now);
         } else {
             self.sync_output_started_at = None;
         }
@@ -666,7 +667,7 @@ where
             return Ok(());
         };
 
-        self.last_snapshot_at = Some(time::Instant::now());
+        self.last_snapshot_at = Some(Instant::now());
         self.snapshot_pending = false;
 
         self.publish_capture(capture);
@@ -705,7 +706,7 @@ where
         self.event_proxy.send_event(TerminalEvent::Render);
     }
 
-    fn pending_snapshot_deadline(&self) -> Option<time::Instant> {
+    fn pending_snapshot_deadline(&self) -> Option<Instant> {
         if !self.snapshot_pending {
             return None;
         }
@@ -714,7 +715,7 @@ where
             Some(started) => started + SYNC_OUTPUT_TIMEOUT,
             None => self
                 .last_snapshot_at
-                .map_or_else(time::Instant::now, |at| at + SNAPSHOT_MIN_INTERVAL),
+                .map_or_else(Instant::now, |at| at + SNAPSHOT_MIN_INTERVAL),
         })
     }
 
@@ -735,18 +736,20 @@ where
     }
 
     /// Collect a bounded batch and execute commands in submission order.
-    ///
-    /// Returns the received count, or `None` on shutdown or input write failure.
-    fn drain_recv_channel(&mut self, state: &mut PtyState, cx: &mut Context<'_>) -> Option<usize> {
-        for received in 0..64 {
+    fn drain_recv_channel(&mut self, state: &mut PtyState, cx: &mut Context<'_>) -> Step {
+        let mut step = Step::Idle;
+
+        for _ in 0..64 {
             let TaskPoll::Ready(Some(msg)) = self.receiver.poll_recv(cx) else {
-                return self.process_pending_commands(state, cx).then_some(received);
+                break;
             };
+
+            step = Step::Advanced;
 
             // Only unexecuted, adjacent size changes are interchangeable.
             // An input or query between them observes the earlier geometry.
             match msg {
-                Msg::Shutdown => return None,
+                Msg::Shutdown => return Step::Shutdown,
                 Msg::PowerShellCompatibility(enabled) => {
                     self.powershell_compatibility.set_enabled(enabled);
                 }
@@ -759,60 +762,70 @@ where
                 }
                 Msg::Input(input) => self.pending_commands.push_back((
                     Msg::Input(input),
-                    self.powershell_compatibility
-                        .input_limit(time::Instant::now()),
+                    self.powershell_compatibility.input_limit(Instant::now()),
                 )),
                 request => self.pending_commands.push_back((request, None)),
             }
         }
 
-        cx.waker().wake_by_ref();
-
-        self.process_pending_commands(state, cx).then_some(64)
+        match self.process_pending_commands(state, cx) {
+            Step::Idle => step,
+            processed => processed,
+        }
     }
 
-    fn process_pending_commands(&mut self, state: &mut PtyState, cx: &mut Context<'_>) -> bool {
+    fn process_pending_commands(&mut self, state: &mut PtyState, cx: &mut Context<'_>) -> Step {
+        let mut step = Step::Idle;
+
         for _ in 0..64 {
-            if let Some((size, grid_changed)) = self.pending_resize.clone() {
+            if let Some(ResizeInFlight { size, grid_changed }) = self.pending_resize.clone() {
                 match self.pty.poll_resize(cx, size) {
-                    TaskPoll::Pending => return true,
+                    TaskPoll::Pending => return step,
                     TaskPoll::Ready(Err(error)) => warn!("PTY resize failed: {error}"),
                     TaskPoll::Ready(Ok(())) => {}
                 }
 
                 self.pending_resize = None;
+                step = Step::Advanced;
 
-                if grid_changed && !self.ghostty.mode(mode::ALT_SCREEN) {
-                    self.powershell_compatibility.resized(time::Instant::now());
+                // The input pause starts when the native resize completes. An
+                // alternate screen application owns its redraw, so no pause
+                // applies there, and one left from an earlier resize ends.
+                if self.ghostty.mode(mode::ALT_SCREEN) {
+                    self.powershell_compatibility.clear_resize();
+                } else if grid_changed {
+                    self.powershell_compatibility.resized(Instant::now());
                 }
             }
 
             if self
                 .pending_input_deadline()
-                .is_some_and(|deadline| deadline > time::Instant::now())
+                .is_some_and(|deadline| deadline > Instant::now())
             {
-                return true;
+                return step;
             }
 
             if matches!(self.pending_commands.front(), Some((Msg::Resize(_), _))) {
                 if state.needs_write() {
-                    return true;
+                    return step;
                 }
 
                 match self.pty.poll_flush(cx) {
                     TaskPoll::Ready(Ok(())) => {}
-                    TaskPoll::Pending => return true,
+                    TaskPoll::Pending => return step,
                     TaskPoll::Ready(Err(error)) => {
                         error!("failed to finish PTY input before resize: {error}");
 
-                        return false;
+                        return Step::Shutdown;
                     }
                 }
             }
 
             let Some((msg, _)) = self.pending_commands.pop_front() else {
-                return true;
+                return step;
             };
+
+            step = Step::Advanced;
 
             match msg {
                 Msg::Input(input) => {
@@ -821,20 +834,20 @@ where
                 Msg::Resize(window_size) => {
                     let grid_changed = self.on_resize(window_size.clone());
 
-                    self.pending_resize = Some((window_size, grid_changed));
+                    self.pending_resize = Some(ResizeInFlight {
+                        size: window_size,
+                        grid_changed,
+                    });
                 }
-                Msg::Shutdown => return false,
+                Msg::Shutdown => return Step::Shutdown,
                 request => self.on_request(request),
             }
         }
 
-        // A bounded drain must re-arm its wake even when no new sender arrives.
-        cx.waker().wake_by_ref();
-
-        true
+        step
     }
 
-    fn pending_input_deadline(&self) -> Option<time::Instant> {
+    fn pending_input_deadline(&self) -> Option<Instant> {
         // Only completion can release a running native resize. An expired
         // input deadline must not keep waking a task still waiting for it.
         if self.pending_resize.is_some() {
@@ -932,17 +945,11 @@ where
             ]));
         }
 
-        self.last_snapshot_at = Some(time::Instant::now());
+        self.last_snapshot_at = Some(Instant::now());
 
         // VT modes do not change on resize, so the lock-free atomic remains
         // valid from the last PTY read.
         self.publish_capture(snapshot);
-
-        // The input pause starts when the native resize completes; an alternate
-        // screen application owns its redraw, so no pause applies there.
-        if self.ghostty.mode(mode::ALT_SCREEN) {
-            self.powershell_compatibility.clear_resize();
-        }
 
         grid_changed
     }
@@ -961,18 +968,10 @@ where
         let mut buf = vec![0u8; READ_BUFFER_SIZE];
         let mut io_failed = false;
 
-        if let Err(error) = self.pty.start_async() {
-            error!("failed to register async PTY: {error}");
-
-            self.announce_closed();
-
-            return (self, state);
-        }
-
         // Sustained output keeps a capture deadline pending on every batch.
         // Reusing one registered timer and moving it only when the deadline
         // changes avoids a timer-wheel insert and removal per batch.
-        let mut timer = pin!(sleep_until(TimerInstant::now()));
+        let mut timer = pin!(sleep_until(Instant::now()));
 
         loop {
             #[cfg(enable_profiling)]
@@ -982,8 +981,7 @@ where
                 .pending_snapshot_deadline()
                 .into_iter()
                 .chain(self.pending_input_deadline())
-                .min()
-                .map(TimerInstant::from_std);
+                .min();
 
             if let Some(deadline) = deadline
                 && timer.deadline() != deadline
@@ -1006,7 +1004,7 @@ where
                 Ok(true) => {}
                 Ok(false) => break,
                 Err(error) => {
-                    if error.kind() != ErrorKind::BrokenPipe && !self.pty.is_hangup_error(&error) {
+                    if error.kind() != ErrorKind::BrokenPipe {
                         error!("PTY I/O failed: {error}");
                     }
 
@@ -1062,18 +1060,21 @@ where
         buf: &mut [u8],
         cx: &mut Context<'_>,
     ) -> TaskPoll<io::Result<bool>> {
-        let pending_before = self.pending_commands.len();
-        let resizing_before = self.pending_resize.is_some();
+        let mut advanced = false;
 
-        let Some(received) = self.drain_recv_channel(state, cx) else {
-            return TaskPoll::Ready(Ok(false));
-        };
+        match self.drain_recv_channel(state, cx) {
+            Step::Shutdown => return TaskPoll::Ready(Ok(false)),
+            Step::Advanced => advanced = true,
+            Step::Idle => {}
+        }
 
         let read = self.pty_read(state, buf, cx)?;
         let written = self.pty_write(state, cx)?;
 
-        if !self.process_pending_commands(state, cx) {
-            return TaskPoll::Ready(Ok(false));
+        match self.process_pending_commands(state, cx) {
+            Step::Shutdown => return TaskPoll::Ready(Ok(false)),
+            Step::Advanced => advanced = true,
+            Step::Idle => {}
         }
 
         if !self.child_exited {
@@ -1086,12 +1087,9 @@ where
             return TaskPoll::Ready(Ok(false));
         }
 
-        if received != 0
-            || read != 0
-            || written != 0
-            || self.pending_commands.len() != pending_before
-            || self.pending_resize.is_some() != resizing_before
-        {
+        // Progress means another pass may find more; parking relies on every
+        // pending source having registered the task's waker.
+        if advanced || read != 0 || written != 0 {
             TaskPoll::Ready(Ok(true))
         } else {
             TaskPoll::Pending

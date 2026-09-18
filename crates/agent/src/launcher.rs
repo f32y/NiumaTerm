@@ -5,7 +5,6 @@
 mod launcher_tests;
 
 use std::cmp::Reverse;
-use std::collections::VecDeque;
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
@@ -305,28 +304,28 @@ where
     let stdout_reader = spawn_bounded_reader(stdout, capture_limit);
     let stderr_reader = spawn_bounded_reader(stderr, capture_limit);
 
-    // Descendants can hold the pipes open after the root exits. Dropping the
-    // job ends them, so the readers are joined only afterwards.
-    let status = match timeout(limits.timeout, child.wait()).await {
+    let waited = timeout(limits.timeout, child.wait()).await;
+
+    // Descendants can hold the pipes open after the root exits, and a root
+    // that outlived its timeout is still running. Dropping the job ends both,
+    // so the readers are joined only afterwards.
+    drop(job);
+
+    if waited.is_err() {
+        let _ = child.wait().await;
+    }
+
+    let stdout = join_reader(stdout_reader).await?;
+    let stderr = join_reader(stderr_reader).await?;
+
+    let status = match waited {
         Ok(Ok(status)) => status,
         Ok(Err(error)) => {
-            drop(job);
-
-            let _ = child.wait().await;
-            let _ = stdout_reader.await;
-            let _ = stderr_reader.await;
-
             return Err(ProcessError::Failed(format!(
                 "could not observe configured launcher exit: {error}"
             )));
         }
         Err(_) => {
-            drop(job);
-
-            let _ = child.wait().await;
-            let stdout = join_reader(stdout_reader).await?;
-            let stderr = join_reader(stderr_reader).await?;
-
             let raw_diagnostic = if stderr.is_empty() {
                 decode_child_output(&stdout)
             } else {
@@ -342,10 +341,6 @@ where
         }
     };
 
-    drop(job);
-
-    let stdout = join_reader(stdout_reader).await?;
-    let stderr = join_reader(stderr_reader).await?;
     let raw_stdout = utf8_suffix(&decode_child_output(&stdout), limits.max_output_bytes);
 
     Ok(ProcessOutput {
@@ -376,7 +371,7 @@ fn spawn_bounded_reader(
     limit: usize,
 ) -> JoinHandle<io::Result<Vec<u8>>> {
     nmt_runtime::handle().spawn(async move {
-        let mut retained = VecDeque::with_capacity(limit.min(64 * 1024));
+        let mut retained = Vec::with_capacity(limit.min(64 * 1024));
         let mut buffer = [0_u8; 8 * 1024];
 
         loop {
@@ -386,18 +381,14 @@ fn spawn_bounded_reader(
                 break;
             }
 
-            for byte in &buffer[..read] {
-                if retained.len() == limit {
-                    retained.pop_front();
-                }
+            retained.extend_from_slice(&buffer[..read]);
 
-                if limit > 0 {
-                    retained.push_back(*byte);
-                }
+            if retained.len() > limit {
+                retained.drain(..retained.len() - limit);
             }
         }
 
-        Ok(retained.into())
+        Ok(retained)
     })
 }
 

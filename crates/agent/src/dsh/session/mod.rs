@@ -62,7 +62,7 @@ pub struct Session {
     host: Arc<Host>,
 
     /// Reader threads for both downlinks; dropping them ends the delivery.
-    _downlinks: Downlinks,
+    downlinks: Downlinks,
 
     /// The pane's delivery channel, for results of unary calls. Whatever a
     /// background read produces has to arrive the same way a pushed frame does,
@@ -403,7 +403,7 @@ impl Session {
             session_id,
             cwd,
             host,
-            _downlinks: downlinks,
+            downlinks,
             deliver,
             profile,
             running: false,
@@ -465,7 +465,7 @@ impl Session {
 
         self.controls.clear();
 
-        self._downlinks = downlinks;
+        self.downlinks = downlinks;
 
         // Everything below describes the conversation this tab just
         // left; carrying it over would attribute it to the new one.

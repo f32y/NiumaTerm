@@ -15,21 +15,24 @@ use std::future::Future;
 use std::io::Write as _;
 use std::process::Command;
 use std::str::from_utf8;
-use std::sync::Arc;
 use std::time::Duration;
 
 use nmt_platform::process::{KillOnCloseJob, PipedChild, decode_child_output, spawn_piped};
-use parking_lot::Mutex;
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::watch;
 use tokio::time::timeout;
+use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
 use crate::subprocess::input::InputQueue;
 
 /// Local notification used when a subprocess cannot safely continue reading.
 pub const OUTPUT_FAILURE_METHOD: &str = "nmt/outputFailure";
+
+/// How long a dropped process may leave on its own after its input closes
+/// before its tree is ended. Short, because dropping never waits for it.
+pub(crate) const DROP_SHUTDOWN_GRACE: Duration = Duration::from_millis(250);
 
 /// A spawned agent CLI with piped stdio, kill-on-close containment, and
 /// newline-delimited JSON output. Stdout lines that parse as JSON are handed
@@ -42,9 +45,9 @@ pub(crate) struct JsonLineProcess {
     /// waits for it, so shutdown never needs exclusive access to this value.
     exited: watch::Receiver<bool>,
 
-    /// Held until the root exits or forced shutdown terminates any remaining
-    /// descendants.
-    job: Arc<Mutex<Option<KillOnCloseJob>>>,
+    /// Ends the process tree. The exit task owns the Job Object and drops it
+    /// once this fires or the root exits, so no other party needs the job.
+    kill: CancellationToken,
 
     stdin: Option<InputQueue>,
 
@@ -97,10 +100,22 @@ impl JsonLineProcess {
             .map_err(|error| error.to_string())?;
 
         let runtime = nmt_runtime::handle();
-        let job = Arc::new(Mutex::new(Some(job)));
+        let kill = CancellationToken::new();
         let (exit_sender, exited) = watch::channel(false);
 
+        let exit_kill = kill.clone();
+
         runtime.spawn(async move {
+            tokio::select! {
+                _ = child.wait() => {}
+                () = exit_kill.cancelled() => {}
+            }
+
+            // Dropping the Job Object ends whatever is left of the tree: the
+            // descendants of an exited root, or the whole tree on a kill. The
+            // root's exit is then observed the same way in both cases.
+            drop(job);
+
             if let Err(error) = child.wait().await {
                 warn!(provider, %error, "could not observe agent process exit");
             }
@@ -108,7 +123,7 @@ impl JsonLineProcess {
             let _ = exit_sender.send(true);
         });
 
-        let writer_job = Arc::clone(&job);
+        let writer_kill = kill.clone();
         let (input_tx, input_rx) = InputQueue::new();
 
         runtime.spawn(async move {
@@ -132,14 +147,14 @@ impl JsonLineProcess {
 
                     // A child can close stdin without closing stdout. Terminating
                     // its tree makes the existing EOF notification reliable.
-                    writer_job.lock().take();
+                    writer_kill.cancel();
 
                     break;
                 }
             }
         });
 
-        let reader_job = Arc::clone(&job);
+        let reader_kill = kill.clone();
 
         runtime.spawn(async move {
             let mut deliver = deliver;
@@ -150,7 +165,7 @@ impl JsonLineProcess {
 
                 deliver(json!({"method": OUTPUT_FAILURE_METHOD, "params": {"message": message}}));
 
-                reader_job.lock().take();
+                reader_kill.cancel();
             }
 
             on_stdout_closed();
@@ -168,7 +183,7 @@ impl JsonLineProcess {
 
         Ok(Self {
             exited,
-            job,
+            kill,
             stdin: Some(input_tx),
             provider,
         })
@@ -184,9 +199,7 @@ impl JsonLineProcess {
 
             // Callers use this path for required replies and lifecycle controls.
             // A disconnected writer cannot deliver a required reply.
-            self.stdin.take();
-
-            self.job.lock().take();
+            self.abort();
         }
 
         result
@@ -217,9 +230,7 @@ impl JsonLineProcess {
             .submit_tracked(messages);
 
         if result.is_err() {
-            self.stdin.take();
-
-            self.job.lock().take();
+            self.abort();
         }
 
         result
@@ -228,12 +239,13 @@ impl JsonLineProcess {
     pub(crate) fn abort(&mut self) {
         self.stdin.take();
 
-        self.job.lock().take();
+        self.kill.cancel();
     }
 
-    /// False once shutdown has closed the protocol input.
+    /// False once shutdown has closed the protocol input or a task has ended
+    /// the tree.
     pub(crate) fn has_stdin(&self) -> bool {
-        self.stdin.is_some() && self.job.lock().is_some()
+        self.stdin.is_some() && !self.kill.is_cancelled()
     }
 
     /// Close the protocol input (EOF is the CLIs' graceful-shutdown signal)
@@ -250,7 +262,7 @@ impl JsonLineProcess {
 
         let mut exited = self.exited.clone();
 
-        let job = Arc::clone(&self.job);
+        let kill = self.kill.clone();
         let provider = self.provider;
 
         async move {
@@ -258,8 +270,6 @@ impl JsonLineProcess {
                 .await
                 .is_ok()
             {
-                job.lock().take();
-
                 return Ok(());
             }
 
@@ -267,7 +277,7 @@ impl JsonLineProcess {
                 return Err(format!("{provider} did not stop before the update timeout"));
             }
 
-            job.lock().take();
+            kill.cancel();
 
             exited
                 .wait_for(|exited| *exited)
@@ -284,7 +294,7 @@ impl Drop for JsonLineProcess {
         // the reader tasks end with their pipes. The forced fallback drops the
         // Job Object, which terminates the npm shim and its descendant together
         // instead of stranding the descendant. Dropping never waits for it.
-        nmt_runtime::handle().spawn(self.shutdown(Duration::from_millis(250), true));
+        nmt_runtime::handle().spawn(self.shutdown(DROP_SHUTDOWN_GRACE, true));
     }
 }
 

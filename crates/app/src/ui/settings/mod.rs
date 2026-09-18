@@ -53,7 +53,7 @@ use std::io;
 use std::path::PathBuf;
 
 use app::design::SETTINGS_NAV_WIDTH;
-use app::utils::background_write;
+use app::utils::background_write_reply;
 #[cfg(test)]
 use gpui::WindowBackgroundAppearance;
 use gpui::{
@@ -154,8 +154,8 @@ struct OpenSettings {
 
 impl SettingsSurface {
     pub(super) fn open(&mut self, window: &mut Window, cx: &mut Context<AppWindow>) {
-        Hook::Claude.refresh(None, cx);
-        Hook::Codex.refresh(None, cx);
+        Hook::Claude.refresh(cx);
+        Hook::Codex.refresh(cx);
 
         let state = SettingsState::owned(SelectIndex::default(), window, cx);
         let editing = cx.new(|_| SettingsEditing::default());
@@ -207,44 +207,37 @@ fn new_settings_view(
 
 struct SettingsSaveFailure;
 
-/// Keep failed edits in memory and offer another write after the user fixes
-/// the configuration file or its permissions.
-pub(crate) fn save_settings(
-    window: &mut Window,
-    cx: &mut App,
-    completed: impl FnOnce(bool, &mut Window, &mut App) + 'static,
-) {
-    save_settings_to(config_file_path(), window, cx, completed);
+/// Write the settings out and resolve with whether they reached disk. Failed
+/// edits stay in memory, and the failure notification offers another write
+/// after the user fixes the configuration file or its permissions.
+pub(crate) fn save_settings(window: &mut Window, cx: &mut App) -> Task<bool> {
+    save_settings_to(config_file_path(), window, cx)
 }
 
-fn save_settings_to(
-    path: PathBuf,
-    window: &mut Window,
-    cx: &mut App,
-    completed: impl FnOnce(bool, &mut Window, &mut App) + 'static,
-) {
+fn save_settings_to(path: PathBuf, window: &mut Window, cx: &mut App) -> Task<bool> {
     let settings = cx.global::<AppSettings>().clone();
     let config = settings.config().clone();
     let target = path.clone();
-    let saved = background_write(cx, move || settings.save_to(&target));
+    let saved = background_write_reply(cx, move || settings.save_to(&target));
 
-    window
-        .spawn(cx, async move |cx| {
-            let result = saved.await;
+    window.spawn(cx, async move |cx| {
+        let result = saved.await;
 
-            let _ = cx.update(|window, cx| {
-                if result.is_ok() && *cx.global::<AppSettings>().config() != config {
-                    save_settings_to(path, window, cx, completed);
+        let completed = cx.update(|window, cx| {
+            // Edits made while the write ran are still only in memory. Write
+            // again before reporting, so a close waiting on this sees them.
+            if result.is_ok() && *cx.global::<AppSettings>().config() != config {
+                return save_settings_to(path, window, cx);
+            }
 
-                    return;
-                }
+            Task::ready(settings_save_completed(result, window, cx))
+        });
 
-                let saved = settings_save_completed(result, window, cx);
-
-                completed(saved, window, cx);
-            });
-        })
-        .detach();
+        match completed {
+            Ok(completed) => completed.await,
+            Err(_) => false,
+        }
+    })
 }
 
 fn settings_save_completed(result: io::Result<()>, window: &mut Window, cx: &mut App) -> bool {
@@ -271,7 +264,7 @@ fn settings_save_completed(result: io::Result<()>, window: &mut Window, cx: &mut
                         Button::new("retry-settings-save")
                             .label(t!("shell-updates-retry"))
                             .on_click(|_, window, cx| {
-                                save_settings(window, cx, |_, _, _| {});
+                                save_settings(window, cx).detach();
                             })
                     }),
                 cx,

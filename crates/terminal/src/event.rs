@@ -7,7 +7,6 @@ use nmt_config::CursorShape;
 use nmt_config::colors::Colors;
 use nmt_platform::WinsizeBuilder;
 use tokio::sync::mpsc::UnboundedSender;
-use tokio::sync::mpsc::error::SendError;
 
 use crate::block_store::SegmentMeta;
 use crate::clipboard::ClipboardType;
@@ -100,21 +99,8 @@ pub enum Msg {
     PowerShellCompatibility(bool),
 }
 
-/// Sends ordered commands and wakes the owning async terminal task.
-#[derive(Clone)]
-pub struct MsgSender {
-    tx: UnboundedSender<Msg>,
-}
-
-impl MsgSender {
-    pub fn new(tx: UnboundedSender<Msg>) -> Self {
-        Self { tx }
-    }
-
-    pub fn send(&self, msg: Msg) -> Result<(), SendError<Msg>> {
-        self.tx.send(msg)
-    }
-}
+/// Sends ordered commands to the owning async terminal task.
+pub type MsgSender = UnboundedSender<Msg>;
 
 #[derive(Clone)]
 pub enum TerminalEvent {

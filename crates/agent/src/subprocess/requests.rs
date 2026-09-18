@@ -96,9 +96,16 @@ impl DeadlineTimer {
     }
 }
 
+/// What the deadline worker found when it looked at the timer.
+enum Wait {
+    Expired,
+    Idle,
+    Until(Instant),
+}
+
 async fn run_deadlines(worker: TimerHandle, callback: impl Fn()) {
     loop {
-        let next = {
+        let wait = {
             let mut state = worker.0.state.lock();
 
             if state.stopped {
@@ -109,18 +116,19 @@ async fn run_deadlines(worker: TimerHandle, callback: impl Fn()) {
                 Some(next) if next <= Instant::now() => {
                     state.next = None;
 
-                    None
+                    Wait::Expired
                 }
-                next => Some(next),
+                Some(next) => Wait::Until(next),
+                None => Wait::Idle,
             }
         };
 
-        match next {
-            // Expired: the callback can re-arm the timer while resolving
-            // requests, so it runs without the state lock.
-            None => callback(),
-            Some(None) => worker.0.changed.notified().await,
-            Some(Some(next)) => {
+        match wait {
+            // The callback can re-arm the timer while resolving requests, so
+            // it runs without the state lock.
+            Wait::Expired => callback(),
+            Wait::Idle => worker.0.changed.notified().await,
+            Wait::Until(next) => {
                 tokio::select! {
                     () = worker.0.changed.notified() => {}
 

@@ -13,7 +13,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 use tokio::time::timeout;
 
 use crate::launcher::AgentCli;
-use crate::subprocess::{JsonLineProcess, OUTPUT_FAILURE_METHOD};
+use crate::subprocess::{DROP_SHUTDOWN_GRACE, JsonLineProcess, OUTPUT_FAILURE_METHOD};
 use crate::usage::{
     FIVE_HOUR_WINDOW_MINUTES, FetchCancellation, UsageResetCredits, UsageSnapshot, UsageWindow,
     WEEKLY_WINDOW_MINUTES, parse_timestamp_millis,
@@ -61,21 +61,24 @@ pub async fn fetch(
         || {},
     )?;
 
-    let result = tokio::select! {
-        biased;
-        () = cancellation.cancelled() => Err("Codex usage request cancelled".to_string()),
-        read = timeout(FETCH_TIMEOUT, read_rate_limits(&mut process, &mut rx)) => {
-            read.unwrap_or_else(|_| Err("Codex app-server timed out".into()))
-        }
-    }
-    .map(UsageSnapshot::with_updated_now);
+    let result = cancellation
+        .run_until_cancelled(timeout(
+            FETCH_TIMEOUT,
+            read_rate_limits(&mut process, &mut rx),
+        ))
+        .await
+        .map_or_else(
+            || Err("Codex usage request cancelled".to_string()),
+            |read| read.unwrap_or_else(|_| Err("Codex app-server timed out".into())),
+        )
+        .map(UsageSnapshot::with_updated_now);
 
     drop(rx);
 
     let grace = if cancellation.is_cancelled() {
         Duration::ZERO
     } else {
-        Duration::from_millis(250)
+        DROP_SHUTDOWN_GRACE
     };
 
     let _ = process.shutdown(grace, true).await;

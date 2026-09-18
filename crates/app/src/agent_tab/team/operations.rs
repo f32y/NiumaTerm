@@ -15,11 +15,11 @@ use crate::agent_tab::team::events::DecisionArguments;
 use crate::agent_tab::team::member_host::MemberHost;
 
 pub(super) struct MemberSnapshot {
-    pub id: MemberId,
-    pub active: Option<AttemptId>,
-    pub interaction: Option<InteractionId>,
-    pub ready_epoch: Option<u64>,
-    pub start_failure: Option<String>,
+    pub(super) id: MemberId,
+    pub(super) active: Option<AttemptId>,
+    pub(super) interaction: Option<InteractionId>,
+    pub(super) ready_epoch: Option<u64>,
+    pub(super) start_failure: Option<String>,
     work: WorkStatus,
     status: Status,
     suspended: bool,
@@ -347,11 +347,23 @@ pub(super) fn command(
     Ok(())
 }
 
+/// What a backend signal did to the attempt it was addressed to.
+pub(super) enum ExecutionOutcome {
+    /// The signal was for an attempt or turn the room no longer tracks.
+    Ignored,
+    /// The attempt advanced.
+    Applied,
+    /// The moderator decision was valid and taken.
+    DecisionAccepted,
+    /// The moderator decision was malformed or rejected.
+    DecisionRejected,
+}
+
 pub(super) fn execution(
     session: &mut TeamSession,
     key: AttemptEventKey,
     signal: ExecutionSignal,
-) -> Result<bool, TeamError> {
+) -> Result<ExecutionOutcome, TeamError> {
     let Some(attempt) = session
         .store()
         .room()
@@ -360,22 +372,24 @@ pub(super) fn execution(
         .find(|attempt| attempt.id == key.attempt)
         .cloned()
     else {
-        return Ok(false);
+        return Ok(ExecutionOutcome::Ignored);
     };
 
     if key.backend_generation != attempt.intent.backend_generation {
-        return Ok(false);
+        return Ok(ExecutionOutcome::Ignored);
     }
 
     match signal {
         ExecutionSignal::Accepted { id, .. } => {
             session.accept_attempt(key, &id)?;
+
+            Ok(ExecutionOutcome::Applied)
         }
         ExecutionSignal::Finished {
             id, error, text, ..
         } => {
             if attempt.provider_turn.as_deref() != Some(id.as_str()) {
-                return Ok(false);
+                return Ok(ExecutionOutcome::Ignored);
             }
 
             if error.is_some() {
@@ -383,34 +397,36 @@ pub(super) fn execution(
             } else {
                 session.complete_reply(key, &id, text)?;
             }
+
+            Ok(ExecutionOutcome::Applied)
         }
         ExecutionSignal::Decision { request, .. } => {
             if attempt.provider_turn.as_deref() != Some(request.provider_turn.as_str()) {
-                return Ok(false);
+                return Ok(ExecutionOutcome::Ignored);
             }
 
-            let result = if let Some((stage, operation, action)) =
+            let accepted = if let Some((stage, operation, action)) =
                 serde_json::from_value::<DecisionArguments>(request.arguments)
                     .ok()
                     .and_then(DecisionArguments::moderator_action)
             {
-                session.moderator_decision(key, stage, operation, action)
+                session.moderator_decision(key, stage, operation, action)?
             } else {
-                Ok(false)
+                false
             };
 
-            let accepted = matches!(result, Ok(true));
+            if accepted {
+                return Ok(ExecutionOutcome::DecisionAccepted);
+            }
 
-            if !accepted && let BudgetScope::Discussion(discussion) = attempt.intent.budget {
+            if let BudgetScope::Discussion(discussion) = attempt.intent.budget {
                 session.pause_discussion(
                     discussion,
                     PauseReason::InvalidModeration(attempt.intent.operation),
                 )?;
             }
 
-            return result;
+            Ok(ExecutionOutcome::DecisionRejected)
         }
     }
-
-    Ok(false)
 }

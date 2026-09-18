@@ -141,9 +141,7 @@ impl WindowTitleBar {
             // WM_CLOSE), skipping `on_window_should_close` — so the
             // shared close confirmation is handled here too.
             .on_close_window(cx.listener(|this, _, window, cx| {
-                if this.confirm_window_close(window, cx) {
-                    window.remove_window();
-                }
+                this.request_window_close(window, cx);
             }))
             .child(
                 title_bar_leading_region(leading_width)

@@ -179,6 +179,8 @@ impl NativeRequest {
 /// System notification calls block on the notification service. One runtime
 /// task runs them in submission order, each on the blocking pool, so a removal
 /// cannot overtake the show it withdraws and no call waits on the UI thread.
+/// The queue is separate from the file-write queue on purpose: a slow or hung
+/// notification service must not hold settings and session saves behind it.
 fn submit_native(request: NativeRequest) {
     static QUEUE: OnceLock<UnboundedSender<NativeRequest>> = OnceLock::new();
 

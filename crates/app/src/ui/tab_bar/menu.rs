@@ -47,6 +47,10 @@ pub(crate) fn refresh_saved_rooms(cx: &mut App) {
                 Ok(rooms) => saved.rooms = rooms,
                 Err(error) => tracing::warn!("failed to list saved team rooms: {error}"),
             }
+
+            // Arrived from a background task, outside any frame: an open menu
+            // shows the new list only if something asks for a repaint.
+            cx.refresh_windows();
         });
     })
     .detach();

@@ -30,7 +30,7 @@ use nmt_config::profile::AgentProfile;
 use crate::agent_tab::execution::{AgentSession, ExecutionSignal, SessionOwner};
 use crate::agent_tab::settings::AgentSettings;
 use crate::agent_tab::team::member_host::MemberHost;
-use crate::agent_tab::team::operations::MemberSnapshot;
+use crate::agent_tab::team::operations::{ExecutionOutcome, MemberSnapshot};
 
 type Operation = Box<dyn FnOnce(&mut TeamRuntime, &mut Context<TeamRuntime>)>;
 
@@ -265,12 +265,29 @@ impl TeamRuntime {
         }
     }
 
+    /// Queue `work` behind the operations already waiting and resolve with
+    /// its result once `apply` has folded it into this runtime.
     fn run<R: Send + 'static>(
         &mut self,
         work: impl FnOnce(&mut TeamSession) -> Result<R, TeamError> + Send + 'static,
         apply: impl FnOnce(&mut Self, &Result<R, TeamError>, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) -> Task<Result<R, TeamError>> {
+        self.run_prepared(move |_, _| work, apply, cx)
+    }
+
+    /// Queue an operation whose work is decided when it starts, so it sees
+    /// the hosts as they are then instead of as they were when queued.
+    fn run_prepared<R, W>(
+        &mut self,
+        prepare: impl FnOnce(&mut Self, &mut Context<Self>) -> W + 'static,
+        apply: impl FnOnce(&mut Self, &Result<R, TeamError>, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<R, TeamError>>
+    where
+        R: Send + 'static,
+        W: FnOnce(&mut TeamSession) -> Result<R, TeamError> + Send + 'static,
+    {
         if self.load_failed {
             return Task::ready(Err(TeamError::Unavailable));
         }
@@ -278,31 +295,31 @@ impl TeamRuntime {
         let (sender, receiver) = oneshot::channel();
 
         self.enqueue(
-            Box::new(move |this, cx| this.start(work, apply, sender, cx)),
+            Box::new(move |this, cx| {
+                let work = prepare(this, cx);
+
+                this.run_now(
+                    work,
+                    move |this, result, cx| {
+                        apply(this, &result, cx);
+
+                        let _ = sender.send(result);
+                    },
+                    cx,
+                );
+            }),
             cx,
         );
 
         cx.spawn(async move |_, _| receiver.await.unwrap_or(Err(TeamError::Unavailable)))
     }
 
+    /// Run `work` on the session right away. Only an operation that already
+    /// holds its turn may call this: the session is taken for the duration.
     fn run_now<R: Send + 'static>(
         &mut self,
         work: impl FnOnce(&mut TeamSession) -> Result<R, TeamError> + Send + 'static,
-        apply: impl FnOnce(&mut Self, &Result<R, TeamError>, &mut Context<Self>) + 'static,
-        cx: &mut Context<Self>,
-    ) -> Task<Result<R, TeamError>> {
-        let (sender, receiver) = oneshot::channel();
-
-        self.start(work, apply, sender, cx);
-
-        cx.spawn(async move |_, _| receiver.await.unwrap_or(Err(TeamError::Unavailable)))
-    }
-
-    fn start<R: Send + 'static>(
-        &mut self,
-        work: impl FnOnce(&mut TeamSession) -> Result<R, TeamError> + Send + 'static,
-        apply: impl FnOnce(&mut Self, &Result<R, TeamError>, &mut Context<Self>) + 'static,
-        sender: oneshot::Sender<Result<R, TeamError>>,
+        apply: impl FnOnce(&mut Self, Result<R, TeamError>, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) {
         let mut session = self.session.take().expect("one Team operation at a time");
@@ -324,9 +341,7 @@ impl TeamRuntime {
             let _ = this.update(cx, |this, cx| {
                 this.install(finished.take().unwrap());
 
-                apply(this, &result, cx);
-
-                let _ = sender.send(result);
+                apply(this, result, cx);
 
                 this.start_next(cx);
 
@@ -468,25 +483,24 @@ impl TeamRuntime {
                     return;
                 }
 
-                if let Err(error) = result {
-                    this.error = Some(error.to_string());
-                }
+                match result {
+                    Err(error) => this.error = Some(error.to_string()),
+                    Ok((members, pending)) => {
+                        for member in members {
+                            if let Some(message) = &member.start_failure {
+                                this.error = Some(message.clone());
+                            }
 
-                if let Ok((members, pending)) = result {
-                    for member in members {
-                        if let Some(message) = &member.start_failure {
-                            this.error = Some(message.clone());
+                            if let Some(host) = this.hosts.get_mut(&member.id) {
+                                host.active = member.active;
+                                host.interaction = member.interaction;
+                                host.ready_epoch = member.ready_epoch;
+                            }
                         }
 
-                        if let Some(host) = this.hosts.get_mut(&member.id) {
-                            host.active = member.active;
-                            host.interaction = member.interaction;
-                            host.ready_epoch = member.ready_epoch;
+                        for id in pending {
+                            this.dispatch(id, cx);
                         }
-                    }
-
-                    for id in pending {
-                        this.dispatch(*id, cx);
                     }
                 }
 
@@ -497,8 +511,7 @@ impl TeamRuntime {
                 }
             },
             cx,
-        )
-        .detach();
+        );
     }
 
     pub fn close(&mut self, cx: &mut Context<Self>) -> Task<Result<(), TeamError>> {
@@ -526,15 +539,22 @@ impl TeamRuntime {
         command: TeamCommand,
         cx: &mut Context<Self>,
     ) -> Task<Result<(), TeamError>> {
-        if self.load_failed {
-            return Task::ready(Err(TeamError::Unavailable));
-        }
-
         let closed = self.closed;
-        let (sender, receiver) = oneshot::channel();
 
-        self.enqueue(
-            Box::new(move |this, cx| {
+        let settings_member = match &command {
+            TeamCommand::MemberSettings { member, .. } => Some(*member),
+            _ => None,
+        };
+
+        let stopped = match &command {
+            TeamCommand::Stop(member) => Some(*member),
+            _ => None,
+        };
+
+        self.run_prepared(
+            move |this, cx| {
+                // Which members are busy is read when the command starts, so
+                // a turn that finished while it waited in the queue counts.
                 let busy: Vec<_> = this
                     .hosts
                     .iter()
@@ -542,52 +562,36 @@ impl TeamRuntime {
                     .map(|(id, _)| *id)
                     .collect();
 
-                let settings_member = match &command {
-                    TeamCommand::MemberSettings { member, .. } => Some(*member),
-                    _ => None,
-                };
+                move |session| {
+                    if closed {
+                        return Err(TeamError::Unavailable);
+                    }
 
-                let stopped = match &command {
-                    TeamCommand::Stop(member) => Some(*member),
-                    _ => None,
-                };
+                    operations::command(session, command, &busy)
+                }
+            },
+            move |this, result, cx| {
+                if result.is_ok() && !this.closed {
+                    this.error = None;
 
-                this.start(
-                    move |session| {
-                        if closed {
-                            return Err(TeamError::Unavailable);
-                        }
+                    if let Some(id) = settings_member
+                        && let Some(member) = this.room.member(id)
+                        && let Some(host) = this.hosts.get(&id)
+                    {
+                        host.apply_settings(member.settings().clone(), cx);
+                    }
 
-                        operations::command(session, command, &busy)
-                    },
-                    move |this, result, cx| {
-                        if result.is_ok() && !this.closed {
-                            this.error = None;
+                    if let Some(id) = stopped
+                        && let Some(host) = this.hosts.get(&id)
+                    {
+                        host.interrupt(cx);
+                    }
 
-                            if let Some(id) = settings_member
-                                && let Some(member) = this.room.member(id)
-                                && let Some(host) = this.hosts.get(&id)
-                            {
-                                host.apply_settings(member.settings().clone(), cx);
-                            }
-
-                            if let Some(id) = stopped
-                                && let Some(host) = this.hosts.get(&id)
-                            {
-                                host.interrupt(cx);
-                            }
-
-                            this.schedule(cx);
-                        }
-                    },
-                    sender,
-                    cx,
-                );
-            }),
+                    this.schedule(cx);
+                }
+            },
             cx,
-        );
-
-        cx.spawn(async move |_, _| receiver.await.unwrap_or(Err(TeamError::Unavailable)))
+        )
     }
 
     fn dispatch(&mut self, id: AttemptId, cx: &mut Context<Self>) {
@@ -619,11 +623,15 @@ impl TeamRuntime {
                         Err(error) => Err(error),
                     },
                     move |this, result, cx| {
-                        if let Err(error) = result {
-                            this.error = Some(error.to_string());
-                        }
+                        let intent = match result {
+                            Ok(Some(intent)) => intent,
+                            Ok(None) => return,
+                            Err(error) => {
+                                this.error = Some(error.to_string());
 
-                        let Ok(Some(intent)) = result else { return };
+                                return;
+                            }
+                        };
 
                         let recipient = intent.recipient;
 
@@ -637,7 +645,7 @@ impl TeamRuntime {
                                 (Some(host), Some(member)) => {
                                     host.active = Some(id);
 
-                                    host.submit(intent, member.settings(), cx)
+                                    host.submit(&intent, member.settings(), cx)
                                 }
                                 _ => SendOutcome::NotReady,
                             }
@@ -660,12 +668,10 @@ impl TeamRuntime {
                                 this.schedule(cx);
                             },
                             cx,
-                        )
-                        .detach();
+                        );
                     },
                     cx,
-                )
-                .detach();
+                );
             }),
             cx,
         );
@@ -680,20 +686,10 @@ impl TeamRuntime {
             return;
         };
 
-        let epoch = match signal {
-            ExecutionSignal::Accepted { epoch, .. }
-            | ExecutionSignal::Finished { epoch, .. }
-            | ExecutionSignal::Decision { epoch, .. } => *epoch,
-        };
-
-        let decision = match signal {
-            ExecutionSignal::Decision { request, .. } => Some(request.clone()),
-            _ => None,
-        };
-
-        let failure = match signal {
-            ExecutionSignal::Finished { error, .. } => error.clone(),
-            _ => None,
+        let (epoch, decision, failure) = match signal {
+            ExecutionSignal::Accepted { epoch, .. } => (*epoch, None, None),
+            ExecutionSignal::Finished { epoch, error, .. } => (*epoch, None, error.clone()),
+            ExecutionSignal::Decision { epoch, request } => (*epoch, Some(request.clone()), None),
         };
 
         let signal = signal.clone();
@@ -711,14 +707,26 @@ impl TeamRuntime {
                 )
             },
             move |this, result, cx| {
-                if let Err(error) = result {
-                    this.error = Some(error.to_string());
-                }
+                let accepted = match result {
+                    Ok(ExecutionOutcome::DecisionAccepted) => true,
+                    Ok(
+                        ExecutionOutcome::Ignored
+                        | ExecutionOutcome::Applied
+                        | ExecutionOutcome::DecisionRejected,
+                    ) => false,
+                    Err(error) => {
+                        this.error = Some(error.to_string());
 
+                        false
+                    }
+                };
+
+                // A decision request needs an answer whatever became of it;
+                // an unanswered one would leave the backend waiting.
                 if let Some(request) = decision
                     && let Some(host) = this.hosts.get(&member)
                 {
-                    host.respond_decision(&request, matches!(result, Ok(true)), cx);
+                    host.respond_decision(&request, accepted, cx);
                 }
 
                 if let Some(failure) = failure {

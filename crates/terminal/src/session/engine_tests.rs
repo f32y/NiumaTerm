@@ -85,11 +85,11 @@ pub(super) fn session_from_engine(
 
     engine.snapshot_into(&mut buffer, 0, 0).unwrap();
 
-    let messenger = MsgSender::new(tx);
+    let messenger: MsgSender = tx;
 
     (
         TerminalSession {
-            _worker: SessionWorker::without_thread_for_test(messenger.clone()),
+            _worker: SessionWorker::detached_for_test(messenger.clone()),
             pages: RefCell::new(PageCache::default()),
             render_buffer: Arc::new(FrameStore::new(buffer)),
             vt_modes: Arc::new(AtomicU32::new(0)),

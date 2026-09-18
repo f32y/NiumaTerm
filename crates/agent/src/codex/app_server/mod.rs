@@ -72,6 +72,7 @@ use crate::codex::app_server::title_generation::{
     TITLE_GENERATION_RESULT_METHOD, TitleGenerationHandle,
 };
 use crate::session::team_capabilities::TeamLaunch;
+use crate::subprocess::DROP_SHUTDOWN_GRACE;
 use crate::workspace::AgentWorkspace;
 
 const FIRST_TURN_RPC_ID: u64 = 100;
@@ -1295,7 +1296,7 @@ impl Session {
 
 impl Drop for Session {
     fn drop(&mut self) {
-        nmt_runtime::handle().spawn(self.shutdown(Duration::from_millis(250), true));
+        nmt_runtime::handle().spawn(self.shutdown(DROP_SHUTDOWN_GRACE, true));
     }
 }
 

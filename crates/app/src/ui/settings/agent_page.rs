@@ -20,7 +20,7 @@ fn agent_hook_item(name: Cow<'static, str>, hook: Hook, cx: &App) -> SettingItem
                 hook.state(cx)
                     .is_some_and(|state| state.status == Some(HookInstallStatus::Installed))
             },
-            move |enabled, cx| hook.refresh(Some(enabled), cx),
+            move |enabled, cx| hook.set_installed(enabled, cx),
         ),
     )
     .disabled(!detected || unavailable);

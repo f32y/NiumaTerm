@@ -258,15 +258,10 @@ fn remaining_percentage(window: Option<&OAuthUsageWindow>) -> Option<u8> {
 async fn fetch_via_oauth(
     cancellation: &FetchCancellation,
 ) -> Result<UsageSnapshot, OAuthFetchError> {
-    if cancellation.is_cancelled() {
-        return Err(OAuthFetchError::Cancelled);
-    }
-
-    tokio::select! {
-        biased;
-        () = cancellation.cancelled() => Err(OAuthFetchError::Cancelled),
-        usage = request_oauth_usage() => usage,
-    }
+    cancellation
+        .run_until_cancelled(request_oauth_usage())
+        .await
+        .unwrap_or(Err(OAuthFetchError::Cancelled))
 }
 
 async fn request_oauth_usage() -> Result<UsageSnapshot, OAuthFetchError> {
@@ -340,15 +335,10 @@ async fn supplement_from_cli(
 }
 
 async fn fetch_via_cli(cancellation: &FetchCancellation) -> Result<UsageSnapshot, UsageFetchError> {
-    if cancellation.is_cancelled() {
-        return Err(UsageFetchError::Cancelled);
-    }
-
-    tokio::select! {
-        biased;
-        () = cancellation.cancelled() => Err(UsageFetchError::Cancelled),
-        usage = read_usage_panel() => usage,
-    }
+    cancellation
+        .run_until_cancelled(read_usage_panel())
+        .await
+        .unwrap_or(Err(UsageFetchError::Cancelled))
 }
 
 async fn read_usage_panel() -> Result<UsageSnapshot, UsageFetchError> {

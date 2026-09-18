@@ -200,36 +200,32 @@ impl TeamPane {
         cx.notify();
 
         let result = self.perform(command, cx);
-        let pane = cx.weak_entity();
 
-        window
-            .spawn(cx, async move |cx| {
-                let saved = result.await;
+        cx.spawn_in(window, async move |this, cx| {
+            let saved = result.await;
 
-                let _ = cx.update(|window, cx| {
-                    let _ = pane.update(cx, |this, cx| {
-                        this.submitting = false;
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.submitting = false;
 
-                        cx.notify();
+                cx.notify();
 
-                        if !saved {
-                            return;
-                        }
+                if !saved {
+                    return;
+                }
 
-                        if *this.input.read(cx).text() == text {
-                            this.input
-                                .update(cx, |input, cx| input.set_value("", window, cx));
-                        }
+                if *this.input.read(cx).text() == text {
+                    this.input
+                        .update(cx, |input, cx| input.set_value("", window, cx));
+                }
 
-                        this.transcript.update(cx, |transcript, cx| {
-                            transcript.scroll_to_bottom();
+                this.transcript.update(cx, |transcript, cx| {
+                    transcript.scroll_to_bottom();
 
-                            cx.notify();
-                        });
-                    });
+                    cx.notify();
                 });
-            })
-            .detach();
+            });
+        })
+        .detach();
     }
 
     fn stop(&mut self, cx: &mut Context<Self>) {
@@ -278,34 +274,29 @@ impl TeamPane {
             .runtime
             .update(cx, |runtime, cx| runtime.add_member(profile, config, cx));
 
-        let pane = cx.weak_entity();
+        cx.spawn_in(window, async move |this, cx| {
+            let result = task.await;
 
-        window
-            .spawn(cx, async move |cx| {
-                let result = task.await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.adding_member = false;
 
-                let _ = cx.update(|window, cx| {
-                    let _ = pane.update(cx, |this, cx| {
-                        this.adding_member = false;
+                match result {
+                    Ok(id) => {
+                        this.targeting.member_added(id);
 
-                        match result {
-                            Ok(id) => {
-                                this.targeting.member_added(id);
+                        this.member_draft.clear(window, cx);
 
-                                this.member_draft.clear(window, cx);
+                        this.error = None;
 
-                                this.error = None;
+                        window.close_dialog(cx);
+                    }
+                    Err(error) => this.error = Some(error.to_string()),
+                }
 
-                                window.close_dialog(cx);
-                            }
-                            Err(error) => this.error = Some(error.to_string()),
-                        }
-
-                        cx.notify();
-                    });
-                });
-            })
-            .detach();
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn render_controls(&self, cx: &mut Context<Self>) -> AnyElement {

@@ -128,10 +128,8 @@ impl TokenUsageView {
 
         cx.notify();
 
-        let worker = cx.background_executor().spawn(on_runtime(fetch.run()));
-
         cx.spawn(async move |view, cx| {
-            let fetched = worker.await;
+            let fetched = on_runtime(fetch.run()).await;
 
             let _ = view.update(cx, |this, cx| {
                 this.user_requested = false;

@@ -26,20 +26,23 @@ impl ProviderMaintenance for CodexMaintenance {
         &'a self,
         launcher: &'a AgentCli,
     ) -> BoxFuture<'a, Result<VersionStatus, UpdateError>> {
-        async move {
-            match run_bounded(launcher, ["doctor", "--json"], PROBE_LIMITS).await {
-                Ok(output) => match parse_codex_doctor(output.stdout_for_parsing()) {
-                    Ok(status) => Ok(status),
-                    Err(doctor_error) => version_fallback(launcher, doctor_error.message()).await,
-                },
-                Err(error) => version_fallback(launcher, &error.to_string()).await,
-            }
-        }
-        .boxed()
+        Self::probe_installation(launcher).boxed()
     }
 
     fn update<'a>(&'a self, launcher: &'a AgentCli) -> BoxFuture<'a, Result<String, UpdateError>> {
         vendor_update(launcher, ProviderKind::Codex).boxed()
+    }
+}
+
+impl CodexMaintenance {
+    async fn probe_installation(launcher: &AgentCli) -> Result<VersionStatus, UpdateError> {
+        match run_bounded(launcher, ["doctor", "--json"], PROBE_LIMITS).await {
+            Ok(output) => match parse_codex_doctor(output.stdout_for_parsing()) {
+                Ok(status) => Ok(status),
+                Err(doctor_error) => version_fallback(launcher, doctor_error.message()).await,
+            },
+            Err(error) => version_fallback(launcher, &error.to_string()).await,
+        }
     }
 }
 
