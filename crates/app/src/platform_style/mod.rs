@@ -24,7 +24,7 @@ mod macos;
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 mod windows;
 
-use gpui::{AnyElement, App, Div, Hsla, Stateful};
+use gpui::{AnyElement, Div, Stateful};
 use gpui_component::TitleBar;
 use gpui_component::button::Button;
 use gpui_component::input::Input;
@@ -102,10 +102,6 @@ pub trait PlatformStyle {
 
     /// The button that forms the agent quota row.
     fn agent_usage_row(row: Button) -> Button;
-
-    /// The strip listing recent sessions above the composer, drawn over a
-    /// pane filled with `background`.
-    fn history_strip(strip: Div, background: Hsla, cx: &App) -> Div;
 }
 
 /// The conventions this build targets. Linux draws its window controls inside

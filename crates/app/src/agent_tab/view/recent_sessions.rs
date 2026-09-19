@@ -3,8 +3,8 @@ use std::time::Duration;
 
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, AsyncApp, Context, FontWeight, Hsla, IntoElement, ListSizingBehavior,
-    MouseMoveEvent, Pixels, Point, ScrollStrategy, WeakEntity, div, px, relative, size,
+    AnyElement, AsyncApp, Context, FontWeight, IntoElement, ListSizingBehavior, MouseMoveEvent,
+    Pixels, Point, ScrollStrategy, WeakEntity, div, px, relative, size,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::scroll::Scrollbar;
@@ -25,8 +25,8 @@ use crate::agent_tab::session::history::FilesystemHistoryRequest;
 use crate::agent_tab::session::{directories_match, directory_label};
 use crate::agent_tab::settings::UI_RADIUS;
 use crate::agent_tab::transcript::relative_time;
+use crate::agent_tab::view::composer_layout::{COMPOSER_PANEL_TUCK, composer_panel};
 use crate::agent_tab::{AgentPane, PaletteControl};
-use crate::platform_style::{Host, PlatformStyle as _};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum RecentSessionsMode {
@@ -302,13 +302,9 @@ impl SessionHistoryUi {
         }
     }
 
-    /// Recent sessions share the composer's width and keep a stable height
-    /// while loading, so returning results do not move the input field.
-    pub(crate) fn render(
-        &self,
-        background: Hsla,
-        cx: &mut Context<AgentPane>,
-    ) -> impl IntoElement + use<> {
+    /// Recent sessions keep a stable height while loading, so returning results
+    /// do not move the input field.
+    pub(crate) fn render(&self, cx: &mut Context<AgentPane>) -> impl IntoElement + use<> {
         let rows = self.rows();
 
         let body_height = px((HISTORY_ROW_HEIGHT * rows as f32).min(HISTORY_MAX_HEIGHT));
@@ -409,7 +405,6 @@ impl SessionHistoryUi {
                 .into_any_element()
         };
 
-        // The picker shares the composer width and leaves a visible gap above it.
         div()
             .w_full()
             .flex()
@@ -423,10 +418,8 @@ impl SessionHistoryUi {
                 }
             }))
             .child(
-                v_flex()
-                    .w_full()
-                    .map(|strip| Host::history_strip(strip, background, cx))
-                    .pb(px(2.))
+                composer_panel(cx)
+                    .pb(px(COMPOSER_PANEL_TUCK + 2.))
                     .child(
                         h_flex()
                             .w_full()

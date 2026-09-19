@@ -125,14 +125,14 @@ use crate::agent_tab::view::blocking_overlay::{
 };
 use crate::agent_tab::view::cache_expiry::cache_expiry_dialog;
 use crate::agent_tab::view::composer_layout::{
-    ComposerEnterBehavior, composer_card, composer_controls_row, composer_enter_behavior,
-    composer_input_row, send_button,
+    COMPOSER_PANEL_TUCK, ComposerEnterBehavior, composer_card, composer_controls_row,
+    composer_enter_behavior, composer_input_row, send_button,
 };
 use crate::agent_tab::view::composer_notices::{
     last_response_mark, multi_root_notice, multi_root_strip, queued_prompts,
 };
 use crate::agent_tab::view::composer_status::{ComposerStatusBar, poll_git_branch};
-use crate::agent_tab::view::progress_panel::{PROGRESS_PANEL_TUCK, ProgressPanel};
+use crate::agent_tab::view::progress_panel::ProgressPanel;
 use crate::agent_tab::view::recent_sessions::{ListControl, RecentSessionsMode, SessionHistoryUi};
 use crate::agent_tab::view::selection_menu::show_selected_text_menu;
 use crate::agent_tab::workflows::WorkflowUi;
@@ -3747,7 +3747,7 @@ impl Render for AgentPane {
         let history = self
             .history_ui
             .is_visible(transcript_empty, composer_empty)
-            .then(|| self.history_ui.render(background, cx));
+            .then(|| self.history_ui.render(cx));
 
         // A list opened over a live conversation is a picker, and the
         // transcript behind it is not what the next click should reach. Blur
@@ -3765,7 +3765,6 @@ impl Render for AgentPane {
                 session.goal(),
                 session.task_list(),
                 session.plan_mode(),
-                background,
                 window,
                 cx,
             )
@@ -3834,7 +3833,7 @@ impl Render for AgentPane {
                         .w_full()
                         .children(
                             progress.map(|panel| {
-                                div().w_full().mb(px(-PROGRESS_PANEL_TUCK)).child(panel)
+                                div().w_full().mb(px(-COMPOSER_PANEL_TUCK)).child(panel)
                             }),
                         )
                         .child(
@@ -3850,7 +3849,7 @@ impl Render for AgentPane {
                                         .left_0()
                                         .right_0()
                                         .bottom(relative(1.))
-                                        .mb(px(HISTORY_PANEL_GAP))
+                                        .mb(px(-COMPOSER_PANEL_TUCK))
                                         .child(panel)
                                 }))
                                 .child(
@@ -4030,10 +4029,6 @@ impl Render for AgentPane {
 
 // The composer sits in the same column as the transcript above it, so the
 // two edges line up at every window width.
-
-/// Space between the recent-sessions list and the composer card it floats
-/// above.
-const HISTORY_PANEL_GAP: f32 = 12.0;
 
 /// Cap for a tab title taken from a prompt. The strip truncates whatever it is
 /// given, so this only bounds what the tab carries around.
