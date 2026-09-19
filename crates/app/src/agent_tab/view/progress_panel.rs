@@ -6,10 +6,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use gpui::prelude::*;
-use gpui::{
-    AnyElement, App, Bounds, Context, FontWeight, Hsla, Pixels, ScrollHandle, Window, div, px,
-    relative,
-};
+use gpui::{AnyElement, App, Bounds, Context, FontWeight, Pixels, ScrollHandle, Window, div, px};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, v_flex};
 use nmt_agent::progress::{GoalStatus, Task, TaskList, TaskStatus};
@@ -17,12 +14,7 @@ use rust_i18n::t;
 
 use crate::agent_tab::AgentPane;
 use crate::agent_tab::fade::Fade;
-use crate::agent_tab::settings::UI_RADIUS;
-
-/// How far the panel's lower edge runs behind the composer card. The panel
-/// pads its bottom by the same amount, so the part left visible holds only the
-/// header's own symmetric padding and the header reads as centred in it.
-pub(crate) const PROGRESS_PANEL_TUCK: f32 = 14.0;
+use crate::agent_tab::view::composer_layout::composer_panel;
 
 /// Opening the details pushes the transcript up, and a moving edge needs longer
 /// than an opacity change before the eye reads it as travel instead of a jump.
@@ -56,7 +48,6 @@ impl ProgressPanel {
         goal: Option<&GoalStatus>,
         tasks: Option<&TaskList>,
         plan_mode: bool,
-        background: Hsla,
         window: &mut Window,
         cx: &mut Context<AgentPane>,
     ) -> Option<AnyElement> {
@@ -215,15 +206,8 @@ impl ProgressPanel {
                 .flex()
                 .justify_center()
                 .child(
-                    v_flex()
+                    composer_panel(cx)
                         .debug_selector(|| "agent-progress-panel".into())
-                        .w(relative(0.95))
-                        .rounded_t(UI_RADIUS)
-                        .border_1()
-                        .border_b_0()
-                        .border_color(cx.theme().border.opacity(0.6))
-                        .bg(background.blend(cx.theme().muted))
-                        .pb(px(PROGRESS_PANEL_TUCK))
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
                         .child(header)

@@ -1,10 +1,9 @@
-use gpui::{AnyElement, App, Div, Hsla, Stateful, Styled as _, px};
+use gpui::{AnyElement, Div, Stateful, Styled as _, px};
+use gpui_component::TitleBar;
 use gpui_component::button::Button;
 use gpui_component::input::Input;
 use gpui_component::tab::Tab;
-use gpui_component::{ActiveTheme as _, TitleBar};
 
-use crate::agent_tab::settings::UI_RADIUS;
 use crate::platform_style::{PlatformStyle, TabDensity};
 
 /// The caption controls are part of the title bar at its trailing edge, so
@@ -75,18 +74,5 @@ impl PlatformStyle for Windows {
     /// Symmetric padding keeps the quota text off both edges of the row fill.
     fn agent_usage_row(row: Button) -> Button {
         row.px_1()
-    }
-
-    // A bordered strip of a slightly deeper surface sets the history list
-    // apart from the pane. The tint is composited over the pane rather than
-    // taken at full alpha: Fluent's `muted` is a translucent overlay, so
-    // forcing its alpha to 1 would paint the strip in the tint's bare RGB,
-    // solid black in the light theme and solid white in the dark one.
-    fn history_strip(strip: Div, background: Hsla, cx: &App) -> Div {
-        strip
-            .rounded(UI_RADIUS)
-            .border_1()
-            .border_color(cx.theme().border.opacity(0.6))
-            .bg(background.blend(cx.theme().muted))
     }
 }

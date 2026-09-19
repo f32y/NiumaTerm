@@ -1,12 +1,28 @@
 use gpui::prelude::*;
-use gpui::{App, Div, ElementId, SharedString, px};
+use gpui::{App, Div, ElementId, SharedString, px, relative};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::Enter;
 use gpui_component::{ActiveTheme as _, Disableable as _, IconName, IconNamed, h_flex, v_flex};
 use nmt_config::system::NewlineShortcut;
 use rust_i18n::t;
 
+use crate::agent_tab::settings::UI_RADIUS;
 use crate::design::CARD_RADIUS;
+
+/// Panels extend beneath the composer by this amount. Matching bottom padding
+/// keeps their content above the card while its rounded edge covers the join.
+pub(crate) const COMPOSER_PANEL_TUCK: f32 = 14.0;
+
+pub(crate) fn composer_panel(cx: &App) -> Div {
+    v_flex()
+        .w(relative(0.95))
+        .rounded_t(UI_RADIUS)
+        .border_1()
+        .border_b_0()
+        .border_color(cx.theme().border.opacity(0.6))
+        .bg(cx.theme().popover)
+        .pb(px(COMPOSER_PANEL_TUCK))
+}
 
 /// Ordinary and Team conversations share the input card so font and spacing
 /// changes stay aligned with the transcript in both views.
