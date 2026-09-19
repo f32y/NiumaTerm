@@ -1,5 +1,5 @@
 use gpui::prelude::*;
-use gpui::{AnyElement, App, Div, Edges, Hsla, Stateful, div, px};
+use gpui::{AnyElement, Div, Edges, Stateful, div, px};
 use gpui_component::TitleBar;
 use gpui_component::button::Button;
 use gpui_component::input::Input;
@@ -107,11 +107,5 @@ impl PlatformStyle for MacOs {
     /// leading padding or border of its own and its text keeps the column.
     fn agent_usage_row(row: Button) -> Button {
         row.pl_0().pr_1().border_0()
-    }
-
-    /// The history list sits directly on the pane surface, without a frame or
-    /// a tint of its own.
-    fn history_strip(strip: Div, _background: Hsla, _cx: &App) -> Div {
-        strip
     }
 }
