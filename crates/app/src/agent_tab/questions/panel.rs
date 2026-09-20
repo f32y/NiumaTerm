@@ -456,6 +456,7 @@ impl QuestionPanel {
         );
 
         let mut panel = v_flex()
+            .debug_selector(|| "agent-question-panel".into())
             .w_full()
             .px_4()
             .py_2()

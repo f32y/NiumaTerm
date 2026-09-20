@@ -1024,6 +1024,7 @@
 "settings-agent-enable-team" = "启用智能体团队"
 "settings-agent-enable-team-description" = "创建和重新打开智能体团队标签页。关闭后停止已打开的团队，并保留已保存的对话。"
 "team-disabled" = "智能体团队已关闭。请在设置 > 智能体 > 常规中开启“启用智能体团队”，以重新打开此团队。"
+"team-member-needs-answer" = "%{name} 等待你回答"
 
 "settings-terminal-advanced" = "高级"
 "settings-terminal-powershell-compatibility" = "改善 PowerShell 兼容性"

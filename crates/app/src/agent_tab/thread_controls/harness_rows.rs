@@ -1,12 +1,12 @@
-//! The strip each harness gets, because each exposes a different set of
+//! The settings each harness offers, because each exposes a different set of
 //! controls over a different surface.
 //!
-//! What they share is the pill chrome and the pickers in the module root; what
-//! differs is which controls exist and what a change to one is sent as.
+//! What they share is the pill chrome, the pickers, and the menu listing in
+//! the module root; what differs is which settings exist and what a change to
+//! one is sent as.
 
-use gpui::prelude::*;
-use gpui::{Context, IntoElement, px};
-use gpui_component::{ActiveTheme as _, IconName, h_flex};
+use gpui::{App, Context};
+use gpui_component::IconName;
 use nmt_agent::claude_code::stream_json;
 use nmt_agent::codex::app_server;
 use nmt_agent::session::settings::ConversationSettings;
@@ -16,10 +16,9 @@ use crate::agent_tab::AgentPane;
 use crate::agent_tab::commands::setting_value_label;
 use crate::agent_tab::composer::PendingSlashCommand;
 use crate::agent_tab::profile::AgentKind;
-use crate::agent_tab::thread_controls::effort::{effort_levels, effort_panel};
+use crate::agent_tab::thread_controls::effort::effort_levels;
 use crate::agent_tab::thread_controls::{
-    FoldedSetting, SETTINGS_PILL_GAP, folded_settings_pill, model_options, remember_defaults,
-    setting_picker, settings_group,
+    FoldedSetting, HarnessSettings, model_options, remember_defaults,
 };
 use crate::agent_tab::transcript::permission_icon;
 
@@ -27,13 +26,11 @@ use crate::agent_tab::transcript::permission_icon;
 /// model catalog comes from the initialize handshake, and all three apply
 /// via control requests before the next message. Models without effort
 /// support (e.g. Haiku) get no effort control.
-pub(super) fn render_claude_row(
+pub(super) fn claude_settings(
     state: &ConversationSettings,
     kind: AgentKind,
-    cx: &mut Context<AgentPane>,
-) -> impl IntoElement + use<> {
-    let model_options = model_options(state, cx);
-
+    cx: &App,
+) -> HarnessSettings {
     let permission_options: Vec<(String, String)> = stream_json::PERMISSION_OPTIONS
         .iter()
         .map(|v| (v.to_string(), setting_value_label(v)))
@@ -49,20 +46,36 @@ pub(super) fn render_claude_row(
         .find(|m| Some(&m.model) == state.settings.model.as_ref())
         .is_some_and(|m| !m.efforts.is_empty());
 
-    let model = setting_picker(
-        cx,
-        "agent-model",
-        t!("agent-setting-model"),
-        IconName::Cpu,
-        state.settings.model.clone(),
-        model_options,
-        |this, value, cx| {
+    let model = FoldedSetting {
+        name: t!("agent-setting-model"),
+        icon: IconName::Cpu,
+        current: state.settings.model.clone(),
+        options: model_options(state, cx),
+        set: |this, value, cx| {
             update_settings(this, cx, |settings| {
                 settings.set_model(value);
             });
         },
-    )
-    .into_any_element();
+    };
+
+    let effort = supports_effort.then(|| FoldedSetting {
+        name: t!("agent-setting-effort"),
+        icon: IconName::Zap,
+        // The protocol never reports the session's current effort;
+        // until the user picks one, the honest label is the CLI's
+        // own per-model default rather than an empty dash.
+        current: state
+            .settings
+            .effort
+            .clone()
+            .or_else(|| Some("default".to_string())),
+        options: effort_levels(kind),
+        set: |this, value, cx| {
+            update_settings(this, cx, |settings| {
+                settings.settings.effort = Some(value);
+            });
+        },
+    });
 
     let folded = vec![FoldedSetting {
         name: t!("agent-setting-permissions"),
@@ -76,40 +89,11 @@ pub(super) fn render_claude_row(
         },
     }];
 
-    let mut row = h_flex()
-        .w_full()
-        .gap(px(SETTINGS_PILL_GAP))
-        .flex_wrap()
-        .text_color(cx.theme().muted_foreground)
-        .child(settings_group(t!("agent-settings-model"), vec![model]));
-
-    if supports_effort {
-        let effort = effort_panel(
-            cx,
-            // The protocol never reports the session's current effort;
-            // until the user picks one, the honest label is the CLI's
-            // own per-model default rather than an empty dash.
-            state
-                .settings
-                .effort
-                .clone()
-                .or_else(|| Some("default".to_string())),
-            effort_levels(kind),
-            |this, value, cx| {
-                update_settings(this, cx, |settings| {
-                    settings.settings.effort = Some(value);
-                });
-            },
-        )
-        .into_any_element();
-
-        row = row.child(settings_group(
-            t!("agent-settings-quality-cost"),
-            vec![effort],
-        ));
+    HarnessSettings {
+        model,
+        effort,
+        folded,
     }
-
-    row.children(folded_settings_pill(cx, folded))
 }
 
 /// DeepSeek settings: model, reasoning effort, and permission preset. Each
@@ -120,13 +104,11 @@ pub(super) fn render_claude_row(
 /// the deployment; a list written here would offer values a deployment does
 /// not serve and hide the ones it does. A composition with no permission
 /// service reports none, and then the control is absent rather than empty.
-pub(super) fn render_deepseek_row(
+pub(super) fn deepseek_settings(
     state: &ConversationSettings,
     kind: AgentKind,
-    cx: &mut Context<AgentPane>,
-) -> impl IntoElement + use<> {
-    let model_options = model_options(state, cx);
-
+    cx: &App,
+) -> HarnessSettings {
     // The setting belongs to the exact model route, so a model that
     // advertises no levels simply has no effort control; the levels it
     // then offers are the shared ladder.
@@ -136,20 +118,31 @@ pub(super) fn render_deepseek_row(
         .find(|m| Some(&m.model) == state.settings.model.as_ref())
         .is_some_and(|m| !m.efforts.is_empty());
 
-    let model = setting_picker(
-        cx,
-        "agent-model",
-        t!("agent-setting-model"),
-        IconName::Cpu,
-        state.settings.model.clone(),
-        model_options,
-        |this, value, cx| {
+    let model = FoldedSetting {
+        name: t!("agent-setting-model"),
+        icon: IconName::Cpu,
+        current: state.settings.model.clone(),
+        options: model_options(state, cx),
+        set: |this, value, cx| {
             if update_settings(this, cx, |settings| settings.set_model(value)) {
                 this.apply_model_selection(cx);
             }
         },
-    )
-    .into_any_element();
+    };
+
+    let effort = supports_effort.then(|| FoldedSetting {
+        name: t!("agent-setting-effort"),
+        icon: IconName::Zap,
+        current: state.settings.effort.clone(),
+        options: effort_levels(kind),
+        set: |this, value, cx| {
+            if update_settings(this, cx, |settings| {
+                settings.settings.effort = Some(value);
+            }) {
+                this.apply_model_selection(cx);
+            }
+        },
+    });
 
     let mut folded = Vec::new();
 
@@ -188,47 +181,21 @@ pub(super) fn render_deepseek_row(
         });
     }
 
-    let mut row = h_flex()
-        .w_full()
-        .gap(px(SETTINGS_PILL_GAP))
-        .flex_wrap()
-        .text_color(cx.theme().muted_foreground)
-        .child(settings_group(t!("agent-settings-model"), vec![model]));
-
-    if supports_effort {
-        let effort = effort_panel(
-            cx,
-            state.settings.effort.clone(),
-            effort_levels(kind),
-            |this, value, cx| {
-                if update_settings(this, cx, |settings| {
-                    settings.settings.effort = Some(value);
-                }) {
-                    this.apply_model_selection(cx);
-                }
-            },
-        )
-        .into_any_element();
-
-        row = row.child(settings_group(
-            t!("agent-settings-quality-cost"),
-            vec![effort],
-        ));
+    HarnessSettings {
+        model,
+        effort,
+        folded,
     }
-
-    row.children(folded_settings_pill(cx, folded))
 }
 
 /// Codex settings: model, approval policy, approval reviewer, sandbox,
 /// reasoning effort, and service tier. Values are thread settings sent as
 /// overrides on the next `turn/start`.
-pub(super) fn render_codex_row(
+pub(super) fn codex_settings(
     state: &ConversationSettings,
     kind: AgentKind,
-    cx: &mut Context<AgentPane>,
-) -> impl IntoElement + use<> {
-    let model_options = model_options(state, cx);
-
+    cx: &App,
+) -> HarnessSettings {
     // Service tiers are per model, and the catalog only lists the
     // additional tiers (e.g. "Fast") — the normal tier is implicit, so
     // the menu carries a synthetic entry for it. Empty protocol value =
@@ -260,20 +227,29 @@ pub(super) fn render_codex_row(
         .map(|(v, label)| (v.to_string(), setting_value_label(label)))
         .collect();
 
-    let model = setting_picker(
-        cx,
-        "agent-model",
-        t!("agent-setting-model"),
-        IconName::Cpu,
-        state.settings.model.clone(),
-        model_options,
-        |this, value, cx| {
+    let model = FoldedSetting {
+        name: t!("agent-setting-model"),
+        icon: IconName::Cpu,
+        current: state.settings.model.clone(),
+        options: model_options(state, cx),
+        set: |this, value, cx| {
             update_settings(this, cx, |settings| {
                 settings.set_model(value);
             });
         },
-    )
-    .into_any_element();
+    };
+
+    let effort = Some(FoldedSetting {
+        name: t!("agent-setting-effort"),
+        icon: IconName::Zap,
+        current: state.settings.effort.clone(),
+        options: effort_levels(kind),
+        set: |this, value, cx| {
+            update_settings(this, cx, |settings| {
+                settings.settings.effort = Some(value);
+            });
+        },
+    });
 
     let folded = vec![
         FoldedSetting {
@@ -322,29 +298,11 @@ pub(super) fn render_codex_row(
         },
     ];
 
-    let effort = effort_panel(
-        cx,
-        state.settings.effort.clone(),
-        effort_levels(kind),
-        |this, value, cx| {
-            update_settings(this, cx, |settings| {
-                settings.settings.effort = Some(value);
-            });
-        },
-    )
-    .into_any_element();
-
-    h_flex()
-        .w_full()
-        .gap(px(SETTINGS_PILL_GAP))
-        .flex_wrap()
-        .text_color(cx.theme().muted_foreground)
-        .child(settings_group(t!("agent-settings-model"), vec![model]))
-        .child(settings_group(
-            t!("agent-settings-quality-cost"),
-            vec![effort],
-        ))
-        .children(folded_settings_pill(cx, folded))
+    HarnessSettings {
+        model,
+        effort,
+        folded,
+    }
 }
 
 fn update_settings(
@@ -360,6 +318,17 @@ fn update_settings(
     let profile = host.read(cx).profile.clone();
 
     update(&mut pane.session.borrow_mut().controls);
+
+    // A Team member's settings belong to its room, which persists them from
+    // the session's controls the next time its runtime looks: that runtime
+    // observes the session entity, so the change has to notify it. They are
+    // one member's choices, so they never become the profile's defaults for
+    // new conversations.
+    if pane.team_member {
+        host.update(cx, |_, cx| cx.notify());
+
+        return true;
+    }
 
     remember_defaults(&pane.session.borrow().controls, kind, &profile, cx);
 

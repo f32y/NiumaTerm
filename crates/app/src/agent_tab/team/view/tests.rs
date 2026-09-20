@@ -6,7 +6,10 @@ use nmt_agent::AgentWorkspace;
 use nmt_agent::background_task::{
     BackgroundTaskKey, BackgroundTaskRegistry, BackgroundTaskState, BackgroundTaskUpdate,
 };
-use nmt_agent::chat::{Event, Item, SendOutcome, SlashCommandOutcome, ThreadSettings};
+use nmt_agent::chat::{
+    Event, Item, Question, QuestionInput, QuestionMode, QuestionRequest, SendOutcome,
+    SlashCommandOutcome, ThreadSettings,
+};
 use nmt_agent::session::lifecycle::Status;
 use nmt_agent::session::team_capabilities::{ModeratorAdmission, RecoveredTeamTurn};
 use nmt_agent::session::test_support::TestBackend;
@@ -776,4 +779,168 @@ async fn completed_reply_waits_for_background_work_before_advancing(cx: &mut Tes
         assert_eq!(runtime.room().attempts()[1].state, AttemptState::Sending);
         assert_eq!(runtime.error(), None);
     });
+}
+
+#[gpui::test]
+async fn member_question_shows_in_team_composer_and_blocks_new_requests(cx: &mut TestAppContext) {
+    let directory = tempdir().unwrap();
+
+    let (runtime, pane, host, window, member) = cx.update(|cx| {
+        gpui_component::init(cx);
+
+        cx.set_global(AgentSettings::default());
+
+        cx.set_global(AgentThreadDefaults::default());
+
+        let mut session =
+            TeamSession::create(directory.path(), Room::new(AgentWorkspace::default())).unwrap();
+
+        let member = session
+            .add_member(MemberConfig {
+                name: "Alice".into(),
+                profile: ProfileReference {
+                    kind: AgentKind::Codex,
+                    name: "test".into(),
+                },
+                roots: AgentWorkspace::default(),
+                settings: ThreadSettings::default(),
+                role: "Explain clearly".into(),
+            })
+            .unwrap();
+
+        let runtime = cx.new(|cx| TeamRuntime::new(session, cx.background_executor().clone()));
+
+        let owner = AgentSession::create(
+            AgentProfile {
+                name: "test".into(),
+                kind: AgentKind::Codex,
+                ..AgentProfile::default()
+            },
+            AgentWorkspace::default(),
+            None,
+            cx,
+        );
+
+        let host = owner.session().clone();
+
+        runtime.update(cx, |runtime, cx| {
+            runtime.attach_member_owner(member, owner, cx)
+        });
+
+        let mut pane = None;
+
+        let window = cx
+            .open_window(Default::default(), |window, cx| {
+                let view = cx.new(|cx| TeamPane::new(runtime.clone(), window, cx));
+
+                pane = Some(view.clone());
+
+                cx.new(|cx| Root::new(view, window, cx))
+            })
+            .unwrap();
+
+        (runtime, pane.unwrap(), host, window, member)
+    });
+
+    let mut cx = VisualTestContext::from_window(window.into(), cx);
+
+    host.update(&mut cx, |session, cx| {
+        let backend = TestBackend::new(
+            [SendOutcome::StartedTurn],
+            SlashCommandOutcome::NotReady,
+            vec![],
+        )
+        .with_recovery(AgentKind::Codex, "asking-team-thread");
+
+        let epoch = session.controller.borrow_mut().starting(None);
+
+        session.install(Ok(Backend::Test(backend)), epoch, "test", cx);
+
+        session.on_event(epoch, Event::Ready(ThreadSettings::default()), cx);
+
+        session.on_event(
+            epoch,
+            Event::InputRequested(QuestionRequest {
+                id: "scope".into(),
+                mode: QuestionMode::Blocking,
+                questions: vec![Question {
+                    input: QuestionInput::Text,
+                    header: None,
+                    question: "How far should this go?".into(),
+                    multi_select: false,
+                    options: Vec::new(),
+                }],
+            }),
+            cx,
+        );
+    });
+
+    cx.run_until_parked();
+
+    cx.update(|window, cx| {
+        let _ = window.draw(cx);
+    });
+
+    let composer = cx.debug_bounds("team-composer").unwrap();
+
+    let question = cx
+        .debug_bounds("agent-question-panel")
+        .expect("a member's question must be drawn in the Team composer");
+
+    assert!(
+        question.top() >= composer.top() && question.bottom() <= composer.bottom(),
+        "the question belongs inside the composer card"
+    );
+
+    cx.update(|window, cx| {
+        pane.update(cx, |pane, cx| {
+            pane.input.update(cx, |input, cx| {
+                input.set_value("Go all the way", window, cx)
+            });
+
+            pane.focus(window, cx);
+        })
+    });
+
+    cx.simulate_keystrokes("enter");
+
+    cx.run_until_parked();
+
+    runtime.update(&mut cx, |runtime, _| {
+        assert!(
+            runtime.room().attempts().is_empty(),
+            "a request to a member waiting on the user must not be queued"
+        );
+    });
+
+    pane.update(&mut cx, |pane, cx| {
+        assert_eq!(
+            pane.error.as_deref(),
+            Some(rust_i18n::t!("team-member-needs-answer", name = "Alice").as_ref())
+        );
+        assert_eq!(pane.input.read(cx).text().to_string(), "Go all the way");
+    });
+
+    cx.update(|window, cx| {
+        pane.update(cx, |pane, cx| pane.inspect_member(member, window, cx));
+
+        let _ = window.draw(cx);
+    });
+
+    let surface = cx.debug_bounds("team-surface").unwrap();
+
+    let composer = cx
+        .debug_bounds("team-member-composer")
+        .expect("the member's view carries its own composer card");
+
+    let question = cx.debug_bounds("agent-question-panel").unwrap();
+
+    assert!(
+        composer.size.width < surface.size.width,
+        "the member's card keeps the reading column instead of the pane width"
+    );
+    assert!(
+        question.left() >= composer.left() && question.right() <= composer.right(),
+        "the question sits inside the member's card"
+    );
 }

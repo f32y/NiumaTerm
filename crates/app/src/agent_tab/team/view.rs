@@ -5,6 +5,8 @@ mod timeline;
 #[cfg(test)]
 mod tests;
 
+use std::collections::BTreeMap;
+
 use gpui::prelude::*;
 use gpui::{
     Anchor, AnyElement, App, Context, Entity, FocusHandle, Focusable, Render, Subscription, Task,
@@ -25,11 +27,12 @@ use rust_i18n::t;
 
 use crate::agent_tab::AgentPane;
 use crate::agent_tab::settings::{AgentSettings, UI_RADIUS};
+use crate::agent_tab::team::dispatch::work_status;
 use crate::agent_tab::team::view::membership::MemberDraft;
 use crate::agent_tab::team::view::targeting::{DiscussionTargeting, MissingAuthor};
 use crate::agent_tab::team::view::timeline::TimelineMirror;
 use crate::agent_tab::team::{TeamCommand, TeamRuntime};
-use crate::agent_tab::thread_controls::settings_pill;
+use crate::agent_tab::thread_controls::{harness_settings, harness_submenus, settings_pill};
 use crate::agent_tab::transcript::{TranscriptView, transcript_column};
 use crate::agent_tab::view::composer_layout::{
     ComposerEnterBehavior, composer_card, composer_controls_row, composer_enter_behavior,
@@ -42,7 +45,14 @@ pub struct TeamPane {
     input: Entity<TextareaState>,
     transcript: Entity<TranscriptView>,
     targeting: DiscussionTargeting,
-    inspected: Option<(MemberId, Entity<AgentPane>)>,
+    inspected: Option<MemberId>,
+
+    /// One view per member session, made when first needed and kept: a
+    /// member's questions are answered through its view, from the Team
+    /// composer as much as from the member's own page, and binding a second
+    /// view to the session would retire the first one's answers.
+    member_panes: BTreeMap<MemberId, Entity<AgentPane>>,
+
     timeline: TimelineMirror,
     member_draft: MemberDraft,
     error: Option<String>,
@@ -96,6 +106,7 @@ impl TeamPane {
             transcript,
             targeting,
             inspected: None,
+            member_panes: BTreeMap::new(),
             timeline: TimelineMirror::default(),
             member_draft,
             error: None,
@@ -174,6 +185,18 @@ impl TeamPane {
             return;
         }
 
+        // A member waiting for an approval or an answer cannot take a new
+        // request until it has one; a request queued behind that wait would
+        // sit as "waiting to start" with nothing to say why. The question is
+        // drawn in this composer, so the answer is a click away.
+        if let Some(name) = self.waiting_member_name(cx) {
+            self.error = Some(t!("team-member-needs-answer", name = name).into_owned());
+
+            cx.notify();
+
+            return;
+        }
+
         let active = self
             .runtime
             .read(cx)
@@ -244,16 +267,110 @@ impl TeamPane {
     }
 
     fn inspect_member(&mut self, member: MemberId, window: &mut Window, cx: &mut Context<Self>) {
+        self.inspected = self.member_pane(member, window, cx).map(|_| member);
+
+        cx.notify();
+    }
+
+    /// The view of `member`'s session, made on first use.
+    fn member_pane(
+        &mut self,
+        member: MemberId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Entity<AgentPane>> {
+        if let Some(pane) = self.member_panes.get(&member) {
+            return Some(pane.clone());
+        }
+
         let pane = self.runtime.update(cx, |runtime, cx| {
             runtime
                 .hosts
                 .get(&member)
                 .map(|host| cx.new(|cx| AgentPane::attach_team_member(&host.owner, window, cx)))
-        });
+        })?;
 
-        self.inspected = pane.map(|pane| (member, pane));
+        self.member_panes.insert(member, pane.clone());
 
-        cx.notify();
+        Some(pane)
+    }
+
+    /// The first selected recipient whose session waits on the user.
+    fn waiting_member_name(&self, cx: &App) -> Option<String> {
+        let runtime = self.runtime.read(cx);
+
+        runtime
+            .room()
+            .members()
+            .iter()
+            .filter(|member| self.targeting.selected().contains(&member.id()))
+            .find(|member| {
+                runtime
+                    .hosts
+                    .get(&member.id())
+                    .is_some_and(|host| work_status(host.owner.session().read(cx)).interaction)
+            })
+            .map(|member| member.name().to_owned())
+    }
+
+    /// Every member that asks the user something, with what it asks: an
+    /// approval or questions, drawn by the member's own view so answering
+    /// here is the same as answering there.
+    fn render_member_interactions(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let asking: Vec<_> = {
+            let runtime = self.runtime.read(cx);
+
+            runtime
+                .room()
+                .members()
+                .iter()
+                .filter(|member| {
+                    runtime.hosts.get(&member.id()).is_some_and(|host| {
+                        let session = host.owner.session().read(cx);
+                        let state = session.controller.borrow();
+
+                        state.input().waiting() || state.input().pending_count() > 0
+                    })
+                })
+                .map(|member| (member.id(), member.name().to_owned()))
+                .collect()
+        };
+
+        let mut blocks = Vec::new();
+
+        for (id, name) in asking {
+            let Some(pane) = self.member_pane(id, window, cx) else {
+                continue;
+            };
+
+            let interactions =
+                pane.update(cx, |pane, cx| pane.render_team_interactions(window, cx));
+
+            if interactions.is_empty() {
+                continue;
+            }
+
+            blocks.push(
+                v_flex()
+                    .w_full()
+                    .child(
+                        div()
+                            .px_4()
+                            .pt_2()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(t!("team-member-needs-answer", name = name).into_owned()),
+                    )
+                    .children(interactions)
+                    .into_any_element(),
+            );
+        }
+
+        blocks
     }
 
     fn add_member(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -299,7 +416,26 @@ impl TeamPane {
         .detach();
     }
 
-    fn render_controls(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_controls(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        // Each member's settings are listed from its own view, which is also
+        // what applies a pick, so the menu needs those views before it
+        // opens; the runtime then persists the pick into the room.
+        let member_settings: Vec<_> = self
+            .runtime
+            .read(cx)
+            .room()
+            .members()
+            .iter()
+            .filter(|member| !member.excluded())
+            .map(|member| (member.id(), member.name().to_owned(), member.profile().kind))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .filter_map(|(id, name, kind)| {
+                self.member_pane(id, window, cx)
+                    .map(|member_pane| (name, kind, member_pane))
+            })
+            .collect();
+
         let room = self.runtime.read(cx).room();
 
         let pending_recovery: Vec<_> = self
@@ -333,10 +469,10 @@ impl TeamPane {
 
         let settings = settings_pill(Button::new("team-settings"))
             .label(t!("team-options"))
-            .dropdown_menu_with_anchor(Anchor::BottomLeft, move |menu, _, _| {
+            .dropdown_menu_with_anchor(Anchor::BottomLeft, move |menu, window, cx| {
                 let summaries = pane.clone();
 
-                menu.item(
+                let mut menu = menu.item(
                     PopupMenuItem::new(t!("team-auto-summaries"))
                         .checked(controls.automatic_summaries)
                         .on_click(move |_, _, cx| {
@@ -348,7 +484,28 @@ impl TeamPane {
                                 .detach();
                             });
                         }),
-                )
+                );
+
+                if !member_settings.is_empty() {
+                    menu = menu.separator();
+                }
+
+                for (name, kind, member_pane) in &member_settings {
+                    let member_pane = member_pane.clone();
+                    let kind = *kind;
+
+                    menu = menu.submenu(name.clone(), window, cx, move |submenu, window, cx| {
+                        let settings = {
+                            let session = member_pane.read(cx).session.borrow();
+
+                            harness_settings(&session.controls, kind, cx)
+                        };
+
+                        harness_submenus(submenu, &member_pane, settings, window, cx)
+                    });
+                }
+
+                menu
             });
 
         h_flex()
@@ -684,7 +841,7 @@ impl Focusable for TeamPane {
 }
 
 impl Render for TeamPane {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let settings = cx.global::<AgentSettings>();
 
         let background = if settings.pane_background_follows_terminal {
@@ -709,12 +866,15 @@ impl Render for TeamPane {
             .text_size(px(font_size))
             .track_focus(&self.focus);
 
-        if let Some((id, pane)) = &self.inspected {
+        if let Some((id, pane)) = self
+            .inspected
+            .and_then(|id| self.member_panes.get(&id).map(|pane| (id, pane.clone())))
+        {
             let name = self
                 .runtime
                 .read(cx)
                 .room()
-                .member(*id)
+                .member(id)
                 .map_or("", |member| member.name())
                 .to_owned();
 
@@ -755,7 +915,8 @@ impl Render for TeamPane {
             .or_else(|| runtime.error().map(str::to_owned));
 
         let status = self.status_text(cx);
-        let controls = self.render_controls(cx);
+        let interactions = self.render_member_interactions(window, cx);
+        let controls = self.render_controls(window, cx);
 
         let send = send_button(
             "team-send",
@@ -796,6 +957,7 @@ impl Render for TeamPane {
                         .child(
                             composer_card(cx)
                                 .debug_selector(|| "team-composer".into())
+                                .children(interactions)
                                 .when_some(failure, |view, failure| {
                                     view.child(
                                         div()

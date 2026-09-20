@@ -3479,6 +3479,26 @@ impl AgentPane {
         ))
     }
 
+    /// What this Team member is waiting on the user for: an approval, then
+    /// the questions it asked. Empty while it asks nothing. The Team view
+    /// draws these in its own composer as well as in the member's view, so
+    /// an answer never depends on which of the two is open.
+    pub(crate) fn render_team_interactions(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let composer_free = !self.branch_flow_holds_composer();
+
+        self.render_approval_panel(cx)
+            .into_iter()
+            .chain(
+                self.prompts
+                    .render(&self.session, composer_free, window, cx),
+            )
+            .collect()
+    }
+
     /// A strip naming the workspace directories the installed harness cannot
     /// use, when there are any.
     pub(super) fn render_multi_root_notice(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -3659,20 +3679,40 @@ impl Render for AgentPane {
 
         let session_kind = session_host.read(cx).kind;
 
+        // A Team member takes its requests from the room, so its view has no
+        // input line: the card under the transcript holds what the member is
+        // asking of the user and the settings its next turn runs with, on
+        // the same column and card as an ordinary conversation.
         if self.team_member {
+            let interactions = self.render_team_interactions(window, cx);
+
             return v_flex()
                 .size_full()
                 .min_h_0()
                 .track_focus(&self.focus)
                 .child(div().flex_1().min_h_0().child(self.transcript.clone()))
-                .children(self.render_approval_panel(cx))
-                .children({
-                    let composer_free = !self.branch_flow_holds_composer();
-
-                    self.prompts
-                        .render(&self.session, composer_free, window, cx)
-                })
-                .child(self.render_composer_status(cx))
+                .child(
+                    transcript_column(
+                        v_flex()
+                            .w_full()
+                            .child(
+                                composer_card(cx)
+                                    .debug_selector(|| "team-member-composer".into())
+                                    .children(interactions)
+                                    .child(composer_controls_row().pt_2().child(
+                                        div().flex_1().min_w_0().child(render_row(
+                                            &self.session.borrow().controls,
+                                            session_kind,
+                                            cx,
+                                        )),
+                                    )),
+                            )
+                            .child(self.render_composer_status(cx)),
+                        cx,
+                    )
+                    .pb_3()
+                    .pt_1(),
+                )
                 .into_any_element();
         }
 

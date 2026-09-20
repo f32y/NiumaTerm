@@ -1025,6 +1025,7 @@
 "settings-agent-enable-team" = "Enable Agent Team"
 "settings-agent-enable-team-description" = "Create and reopen Agent Team tabs. Turning this off stops open teams and keeps their saved conversations."
 "team-disabled" = "Agent Team is disabled. Turn on Enable Agent Team in Settings > Agent > General to reopen this team."
+"team-member-needs-answer" = "%{name} needs your answer"
 
 "settings-terminal-advanced" = "Advanced"
 "settings-terminal-powershell-compatibility" = "Improve PowerShell compatibility"
