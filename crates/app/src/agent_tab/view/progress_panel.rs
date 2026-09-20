@@ -15,7 +15,7 @@ use rust_i18n::t;
 
 use crate::agent_tab::AgentPane;
 use crate::agent_tab::fade::Fade;
-use crate::agent_tab::view::composer_layout::composer_panel;
+use crate::agent_tab::view::composer_layout::{composer_panel, composer_panel_slot};
 
 /// Opening the details pushes the transcript up, and a moving edge needs longer
 /// than an opacity change before the eye reads it as travel instead of a jump.
@@ -207,19 +207,15 @@ impl ProgressPanel {
         });
 
         Some(
-            div()
-                .w_full()
-                .flex()
-                .justify_center()
-                .child(
-                    composer_panel(cx)
-                        .debug_selector(|| "agent-progress-panel".into())
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(header)
-                        .children(details),
-                )
-                .into_any_element(),
+            composer_panel_slot(
+                composer_panel(cx)
+                    .debug_selector(|| "agent-progress-panel".into())
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(header)
+                    .children(details),
+            )
+            .into_any_element(),
         )
     }
 }

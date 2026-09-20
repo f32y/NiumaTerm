@@ -25,7 +25,9 @@ use crate::agent_tab::session::history::FilesystemHistoryRequest;
 use crate::agent_tab::session::{directories_match, directory_label};
 use crate::agent_tab::settings::UI_RADIUS;
 use crate::agent_tab::transcript::relative_time;
-use crate::agent_tab::view::composer_layout::{COMPOSER_PANEL_TUCK, composer_panel};
+use crate::agent_tab::view::composer_layout::{
+    COMPOSER_PANEL_TUCK, composer_panel, composer_panel_slot,
+};
 use crate::agent_tab::{AgentPane, PaletteControl};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -405,59 +407,55 @@ impl SessionHistoryUi {
                 .into_any_element()
         };
 
-        div()
-            .w_full()
-            .flex()
-            .justify_center()
-            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
-            .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                if this.history_ui.mode.dismisses_on_outside_click() {
-                    this.history_ui.mode = RecentSessionsMode::Hidden;
+        composer_panel_slot(
+            composer_panel(cx)
+                .pb(px(COMPOSER_PANEL_TUCK + 2.))
+                .child(
+                    h_flex()
+                        .w_full()
+                        .px_2()
+                        .pt_2()
+                        .pb_1()
+                        .gap_2()
+                        .items_center()
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .text_xs()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(cx.theme().muted_foreground)
+                                .child(t!("agent-history-recent-sessions")),
+                        )
+                        .child(
+                            Button::new("history-scope")
+                                .ghost()
+                                .small()
+                                .label(
+                                    t!(if self.data.scope == SessionScope::AllDirectories {
+                                        "agent-history-all-directories"
+                                    } else {
+                                        "agent-history-current-directory"
+                                    })
+                                    .into_owned(),
+                                )
+                                .tooltip(t!("agent-history-show-all-sessions-tooltip"))
+                                .on_click(
+                                    cx.listener(|this, _, _, cx| this.toggle_history_scope(cx)),
+                                ),
+                        ),
+                )
+                .child(body),
+        )
+        .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+        .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+            if this.history_ui.mode.dismisses_on_outside_click() {
+                this.history_ui.mode = RecentSessionsMode::Hidden;
 
-                    cx.notify();
-                }
-            }))
-            .child(
-                composer_panel(cx)
-                    .pb(px(COMPOSER_PANEL_TUCK + 2.))
-                    .child(
-                        h_flex()
-                            .w_full()
-                            .px_2()
-                            .pt_2()
-                            .pb_1()
-                            .gap_2()
-                            .items_center()
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .truncate()
-                                    .text_xs()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(t!("agent-history-recent-sessions")),
-                            )
-                            .child(
-                                Button::new("history-scope")
-                                    .ghost()
-                                    .small()
-                                    .label(
-                                        t!(if self.data.scope == SessionScope::AllDirectories {
-                                            "agent-history-all-directories"
-                                        } else {
-                                            "agent-history-current-directory"
-                                        })
-                                        .into_owned(),
-                                    )
-                                    .tooltip(t!("agent-history-show-all-sessions-tooltip"))
-                                    .on_click(
-                                        cx.listener(|this, _, _, cx| this.toggle_history_scope(cx)),
-                                    ),
-                            ),
-                    )
-                    .child(body),
-            )
+                cx.notify();
+            }
+        }))
     }
 
     /// One history row: title, branch, and relative time, in the settings

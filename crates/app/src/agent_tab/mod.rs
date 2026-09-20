@@ -125,8 +125,8 @@ use crate::agent_tab::view::blocking_overlay::{
 };
 use crate::agent_tab::view::cache_expiry::cache_expiry_dialog;
 use crate::agent_tab::view::composer_layout::{
-    COMPOSER_PANEL_TUCK, ComposerEnterBehavior, composer_card, composer_controls_row,
-    composer_enter_behavior, composer_input_row, composer_notice_panel, send_button,
+    ComposerEnterBehavior, composer_card, composer_controls_row, composer_enter_behavior,
+    composer_input_row, composer_notice_panel, send_button,
 };
 use crate::agent_tab::view::composer_notices::{
     last_response_mark, multi_root_notice, multi_root_strip, queued_prompts,
@@ -3936,16 +3936,8 @@ impl Render for AgentPane {
                 transcript_column(
                     v_flex()
                         .w_full()
-                        .children(
-                            progress.map(|panel| {
-                                div().w_full().mb(px(-COMPOSER_PANEL_TUCK)).child(panel)
-                            }),
-                        )
-                        .children(
-                            notices.map(|panel| {
-                                div().w_full().mb(px(-COMPOSER_PANEL_TUCK)).child(panel)
-                            }),
-                        )
+                        .children(progress)
+                        .children(notices)
                         .child(
                             div()
                                 .w_full()
@@ -3959,7 +3951,6 @@ impl Render for AgentPane {
                                         .left_0()
                                         .right_0()
                                         .bottom(relative(1.))
-                                        .mb(px(-COMPOSER_PANEL_TUCK))
                                         .child(panel)
                                 }))
                                 .child(

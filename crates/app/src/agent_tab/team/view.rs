@@ -34,8 +34,8 @@ use crate::agent_tab::team::{TeamCommand, TeamRuntime};
 use crate::agent_tab::thread_controls::{harness_settings, harness_submenus, settings_pill};
 use crate::agent_tab::transcript::{TranscriptView, transcript_column};
 use crate::agent_tab::view::composer_layout::{
-    COMPOSER_PANEL_TUCK, ComposerEnterBehavior, composer_card, composer_controls_row,
-    composer_enter_behavior, composer_input_row, composer_notice_panel, send_button,
+    ComposerEnterBehavior, composer_card, composer_controls_row, composer_enter_behavior,
+    composer_input_row, composer_notice_panel, send_button,
 };
 use crate::agent_tab::{AgentPane, AgentPaneEvent};
 
@@ -1021,11 +1021,7 @@ impl Render for TeamPane {
                                 ),
                             )
                         })
-                        .children(
-                            notices.map(|panel| {
-                                div().w_full().mb(px(-COMPOSER_PANEL_TUCK)).child(panel)
-                            }),
-                        )
+                        .children(notices)
                         .child(
                             composer_card(cx)
                                 .debug_selector(|| "team-composer".into())

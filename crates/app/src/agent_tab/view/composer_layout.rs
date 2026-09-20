@@ -24,6 +24,19 @@ pub(crate) fn composer_panel(cx: &App) -> Div {
         .pb(px(COMPOSER_PANEL_TUCK))
 }
 
+/// The place a panel takes above the composer card: centred on the column,
+/// with its lower edge pulled behind whatever is drawn next by the same
+/// amount the panel pads its bottom, so its rounded top corners show and its
+/// join with the card does not.
+pub(crate) fn composer_panel_slot(panel: Div) -> Div {
+    div()
+        .w_full()
+        .flex()
+        .justify_center()
+        .mb(px(-COMPOSER_PANEL_TUCK))
+        .child(panel)
+}
+
 /// The strip above the input that carries what the composer has to say
 /// beside the message: command acknowledgements, errors, and the prompts
 /// queued behind a running turn. Drawn as its own panel rather than inside
@@ -36,18 +49,14 @@ pub(crate) fn composer_notice_panel(notices: Vec<AnyElement>, cx: &App) -> Optio
     }
 
     Some(
-        div()
-            .w_full()
-            .flex()
-            .justify_center()
-            .child(
-                composer_panel(cx)
-                    .debug_selector(|| "agent-notice-panel".into())
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .children(notices),
-            )
-            .into_any_element(),
+        composer_panel_slot(
+            composer_panel(cx)
+                .debug_selector(|| "agent-notice-panel".into())
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .children(notices),
+        )
+        .into_any_element(),
     )
 }
 
