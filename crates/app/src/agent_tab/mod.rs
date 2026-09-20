@@ -164,6 +164,10 @@ pub enum AgentPaneEvent {
     /// The tab holding this pane should close. A pane owns no tab, so the
     /// chrome that does is asked to close it.
     CloseRequested,
+    /// Text the user wrote to a Team member in the member's own view. The
+    /// member's requests come from its room, so the Team that owns the room
+    /// sends it and records the exchange where every member can see it.
+    TeamPrompt(String),
 }
 
 pub struct AgentPane {
@@ -779,6 +783,12 @@ impl AgentPane {
     /// been idle long enough for the provider's prompt cache to have expired.
     pub(super) fn send_user_message(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.team_member {
+            let text = self.input.read(cx).text().to_string();
+
+            if !text.trim().is_empty() {
+                cx.emit(AgentPaneEvent::TeamPrompt(text));
+            }
+
             return;
         }
 
@@ -3479,6 +3489,12 @@ impl AgentPane {
         ))
     }
 
+    /// Empty the composer once the Team has taken what it held.
+    pub(crate) fn clear_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.input
+            .update(cx, |input, cx| input.set_value("", window, cx));
+    }
+
     /// What this Team member is waiting on the user for: an approval, then
     /// the questions it asked. Empty while it asks nothing. The Team view
     /// draws these in its own composer as well as in the member's view, so
@@ -3679,12 +3695,18 @@ impl Render for AgentPane {
 
         let session_kind = session_host.read(cx).kind;
 
-        // A Team member takes its requests from the room, so its view has no
-        // input line: the card under the transcript holds what the member is
-        // asking of the user and the settings its next turn runs with, on
-        // the same column and card as an ordinary conversation.
+        // A Team member takes its requests from the room: what is typed here
+        // goes to the Team that owns the room, which sends it and records the
+        // exchange for every member. The card under the transcript holds what
+        // the member is asking of the user, the input, and the settings its
+        // next turn runs with, on the same column and card as an ordinary
+        // conversation.
         if self.team_member {
             let interactions = self.render_team_interactions(window, cx);
+
+            // A member waiting on the user's answer cannot take a request
+            // until it has one, and its question is drawn just above.
+            let waiting = self.session.borrow().input().waiting();
 
             return v_flex()
                 .size_full()
@@ -3699,13 +3721,49 @@ impl Render for AgentPane {
                                 composer_card(cx)
                                     .debug_selector(|| "team-member-composer".into())
                                     .children(interactions)
-                                    .child(composer_controls_row().pt_2().child(
-                                        div().flex_1().min_w_0().child(render_row(
-                                            &self.session.borrow().controls,
-                                            session_kind,
-                                            cx,
-                                        )),
-                                    )),
+                                    .child(
+                                        composer_input_row()
+                                            .capture_action(cx.listener(
+                                                |this, action: &Enter, window, cx| {
+                                                    match composer_enter_behavior(
+                                                        cx.global::<AgentSettings>()
+                                                            .newline_shortcut,
+                                                        action,
+                                                    ) {
+                                                        ComposerEnterBehavior::InsertNewline => {
+                                                            this.input.update(cx, |input, cx| {
+                                                                input.replace("\n", window, cx)
+                                                            })
+                                                        }
+                                                        ComposerEnterBehavior::Submit
+                                                        | ComposerEnterBehavior::ActivateOrSubmit => {
+                                                            this.send_user_message(window, cx)
+                                                        }
+                                                    }
+
+                                                    cx.stop_propagation();
+                                                },
+                                            ))
+                                            .child(div().flex_1().min_w_0().child(
+                                                Textarea::new(&self.input).appearance(false),
+                                            )),
+                                    )
+                                    .child(
+                                        composer_controls_row()
+                                            .child(div().flex_1().min_w_0().child(render_row(
+                                                &self.session.borrow().controls,
+                                                session_kind,
+                                                cx,
+                                            )))
+                                            .child(
+                                                send_button("team-member-send", false, waiting)
+                                                    .on_click(cx.listener(
+                                                        |this, _, window, cx| {
+                                                            this.send_user_message(window, cx)
+                                                        },
+                                                    )),
+                                            ),
+                                    ),
                             )
                             .child(self.render_composer_status(cx)),
                         cx,

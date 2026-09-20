@@ -3046,6 +3046,9 @@ impl AppWindow {
 
                 return;
             }
+            // Addressed to the Team that owns the member's room; a member's
+            // session is never a tab of its own.
+            AgentPaneEvent::TeamPrompt(_) => return,
             AgentPaneEvent::ResumeElsewhere { cwd, session_id } => {
                 // Opening a tab needs a window, which an event
                 // subscription has none of; the next render has one.

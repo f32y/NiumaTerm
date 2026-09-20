@@ -1083,3 +1083,135 @@ async fn member_conversation_is_named_after_the_request_once(cx: &mut TestAppCon
         );
     });
 }
+
+#[gpui::test]
+async fn a_message_written_in_the_member_view_is_a_team_request(cx: &mut TestAppContext) {
+    let directory = tempdir().unwrap();
+
+    let (runtime, pane, host, window, member) = cx.update(|cx| {
+        gpui_component::init(cx);
+
+        cx.set_global(AgentSettings::default());
+
+        cx.set_global(AgentThreadDefaults::default());
+
+        let mut session =
+            TeamSession::create(directory.path(), Room::new(AgentWorkspace::default())).unwrap();
+
+        let member = session
+            .add_member(MemberConfig {
+                name: "Alice".into(),
+                profile: ProfileReference {
+                    kind: AgentKind::Codex,
+                    name: "test".into(),
+                },
+                roots: AgentWorkspace::default(),
+                settings: ThreadSettings::default(),
+                role: "Explain clearly".into(),
+            })
+            .unwrap();
+
+        let runtime = cx.new(|cx| TeamRuntime::new(session, cx.background_executor().clone()));
+
+        let owner = AgentSession::create(
+            AgentProfile {
+                name: "test".into(),
+                kind: AgentKind::Codex,
+                ..AgentProfile::default()
+            },
+            AgentWorkspace::default(),
+            None,
+            cx,
+        );
+
+        let host = owner.session().clone();
+
+        runtime.update(cx, |runtime, cx| {
+            runtime.attach_member_owner(member, owner, cx)
+        });
+
+        let mut pane = None;
+
+        let window = cx
+            .open_window(Default::default(), |window, cx| {
+                let view = cx.new(|cx| TeamPane::new(runtime.clone(), window, cx));
+
+                pane = Some(view.clone());
+
+                cx.new(|cx| Root::new(view, window, cx))
+            })
+            .unwrap();
+
+        (runtime, pane.unwrap(), host, window, member)
+    });
+
+    let mut cx = VisualTestContext::from_window(window.into(), cx);
+
+    host.update(&mut cx, |session, cx| {
+        let backend = TestBackend::new(
+            [SendOutcome::StartedTurn],
+            SlashCommandOutcome::NotReady,
+            vec![],
+        )
+        .with_recovery(AgentKind::Codex, "member-chat-thread");
+
+        let epoch = session.controller.borrow_mut().starting(None);
+
+        session.install(Ok(Backend::Test(backend)), epoch, "test", cx);
+
+        session.on_event(epoch, Event::Ready(ThreadSettings::default()), cx);
+    });
+
+    cx.run_until_parked();
+
+    cx.update(|window, cx| {
+        pane.update(cx, |pane, cx| {
+            pane.inspect_member(member, window, cx);
+
+            let member_pane = pane.member_panes[&member].clone();
+
+            member_pane.update(cx, |member_pane, cx| {
+                member_pane.input.update(cx, |input, cx| {
+                    input.set_value("Explain the cache", window, cx)
+                });
+
+                member_pane.focus(window, cx);
+            });
+        });
+
+        let _ = window.draw(cx);
+    });
+
+    cx.simulate_keystrokes("enter");
+
+    cx.run_until_parked();
+
+    runtime.update(&mut cx, |runtime, _| {
+        assert_eq!(runtime.error(), None);
+        assert_eq!(
+            runtime.room().attempts().len(),
+            1,
+            "the member view sends one direct request to its member"
+        );
+        assert_eq!(runtime.room().attempts()[0].intent.recipient, member);
+        assert_eq!(runtime.room().messages()[0].text, "Explain the cache");
+    });
+
+    pane.update(&mut cx, |pane, cx| {
+        assert!(
+            pane.timeline
+                .rows
+                .iter()
+                .any(|row| row.text == "Explain the cache"),
+            "the request is part of the Team conversation"
+        );
+
+        let member_pane = pane.member_panes[&member].clone();
+
+        assert_eq!(
+            member_pane.read(cx).input.read(cx).text().to_string(),
+            "",
+            "a sent message leaves the member composer"
+        );
+    });
+}

@@ -25,7 +25,6 @@ use nmt_agent::team::model::{MemberId, RoomId, UserInput};
 use nmt_agent::team::session::TeamError;
 use rust_i18n::t;
 
-use crate::agent_tab::AgentPane;
 use crate::agent_tab::settings::{AgentSettings, UI_RADIUS};
 use crate::agent_tab::team::dispatch::work_status;
 use crate::agent_tab::team::view::membership::MemberDraft;
@@ -38,6 +37,7 @@ use crate::agent_tab::view::composer_layout::{
     ComposerEnterBehavior, composer_card, composer_controls_row, composer_enter_behavior,
     composer_input_row, send_button,
 };
+use crate::agent_tab::{AgentPane, AgentPaneEvent};
 
 pub struct TeamPane {
     runtime: Entity<TeamRuntime>,
@@ -290,9 +290,60 @@ impl TeamPane {
                 .map(|host| cx.new(|cx| AgentPane::attach_team_member(&host.owner, window, cx)))
         })?;
 
+        let prompts = cx.subscribe_in(&pane, window, move |this, _, event, window, cx| {
+            if let AgentPaneEvent::TeamPrompt(text) = event {
+                this.send_to_member(member, text.clone(), window, cx);
+            }
+        });
+
+        self._observers.push(prompts);
+
         self.member_panes.insert(member, pane.clone());
 
         Some(pane)
+    }
+
+    /// Send `text`, written in `member`'s own view, as a direct request to
+    /// that member alone. The room records the request and the reply, so the
+    /// exchange appears in the Team conversation as well.
+    fn send_to_member(
+        &mut self,
+        member: MemberId,
+        text: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let input = UserInput {
+            text,
+            ..UserInput::default()
+        };
+
+        let result = self.perform(
+            TeamCommand::Direct {
+                input,
+                recipients: vec![member],
+            },
+            cx,
+        );
+
+        cx.spawn_in(window, async move |this, cx| {
+            if !result.await {
+                return;
+            }
+
+            let _ = this.update_in(cx, |this, window, cx| {
+                if let Some(pane) = this.member_panes.get(&member) {
+                    pane.update(cx, |pane, cx| pane.clear_input(window, cx));
+                }
+
+                this.transcript.update(cx, |transcript, cx| {
+                    transcript.scroll_to_bottom();
+
+                    cx.notify();
+                });
+            });
+        })
+        .detach();
     }
 
     /// The first selected recipient whose session waits on the user.
