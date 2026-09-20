@@ -153,7 +153,7 @@ impl ProgressPanel {
                 .overflow_y_scroll()
                 .track_scroll(&self.scroll)
                 .px_3()
-                .pb_2()
+                .pt_2()
                 .gap_2()
                 .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
                 .when(plan_mode, |this| {
@@ -208,12 +208,16 @@ impl ProgressPanel {
 
         Some(
             composer_panel_slot(
+                // The header sits under the details. The panel grows upward
+                // from the card it stands on, so a header above the details
+                // would move away from the pointer that opened it; below them
+                // it stays where the toggle was clicked.
                 composer_panel(cx)
                     .debug_selector(|| "agent-progress-panel".into())
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(header)
-                    .children(details),
+                    .children(details)
+                    .child(header),
             )
             .into_any_element(),
         )

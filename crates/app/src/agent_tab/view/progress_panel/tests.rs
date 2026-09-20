@@ -132,6 +132,12 @@ fn progress_panel_is_narrower_and_expands_above_the_composer(cx: &mut TestAppCon
     let objective = cx.debug_bounds("agent-progress-objective").unwrap();
 
     assert!(expanded.size.height > collapsed.size.height);
+    assert_eq!(
+        cx.debug_bounds("agent-progress-header").unwrap(),
+        header,
+        "opening grows the panel upward and leaves the header where it was clicked"
+    );
+    assert!(details.bottom() <= header.top());
 
     // Opening the details takes space from the transcript instead of covering
     // its last rows.
