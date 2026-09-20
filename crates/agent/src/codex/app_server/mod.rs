@@ -71,6 +71,7 @@ use crate::codex::app_server::team::TeamState;
 use crate::codex::app_server::title_generation::{
     TITLE_GENERATION_RESULT_METHOD, TitleGenerationHandle,
 };
+use crate::session::ConversationTitleRequest;
 use crate::session::team_capabilities::TeamLaunch;
 use crate::subprocess::DROP_SHUTDOWN_GRACE;
 use crate::workspace::AgentWorkspace;
@@ -466,19 +467,22 @@ impl Session {
     }
 
     /// Submit the first primary prompt and start its isolated title request
-    /// only after the primary thread accepts the prompt.
+    /// only after the primary thread accepts the prompt. The title is
+    /// generated from the request's description rather than from `text`:
+    /// the two differ when the prompt carries instructions around what the
+    /// user asked, and the title should name what the user asked.
     pub(crate) fn send_user_message_with_generated_title(
         &mut self,
         text: &str,
         settings: &ThreadSettings,
         skill: Option<&SkillReference>,
         images: &[PathBuf],
-        provisional_title: &str,
+        title: &ConversationTitleRequest,
     ) -> SendOutcome {
         let outcome = self.send_user_message_with_skill(text, settings, skill, images);
 
         if matches!(outcome, SendOutcome::StartedTurn | SendOutcome::Steered) {
-            self.begin_title_generation(text, provisional_title);
+            self.begin_title_generation(&title.description, &title.provisional_title);
         }
 
         outcome

@@ -9,6 +9,7 @@ use crate::codex::app_server::protocol::{
     turn_start_params,
 };
 use crate::codex::app_server::*;
+use crate::session::ConversationTitleRequest;
 use crate::workspace::AgentWorkspace;
 
 /// Replayed conversation with its turn grouping flattened away, for the tests
@@ -491,7 +492,10 @@ fn disconnected_submissions_are_rejected_without_requesting_a_title() {
             &ThreadSettings::default(),
             None,
             &[],
-            "draft title",
+            &ConversationTitleRequest {
+                description: "keep this draft".into(),
+                provisional_title: "draft title".into(),
+            },
         );
 
         assert!(

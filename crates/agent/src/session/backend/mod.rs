@@ -268,7 +268,7 @@ impl Backend {
                         settings,
                         skill,
                         image_paths,
-                        &title.provisional_title,
+                        title,
                     ),
                     None => {
                         session.send_user_message_with_skill(text, settings, skill, image_paths)
@@ -296,10 +296,16 @@ impl Backend {
                 session.send_user_message(text, &inline_images(images.iter().copied()))
             }
             #[cfg(any(test, feature = "test-support"))]
-            Backend::Test(session) => session
-                .send_outcomes
-                .pop_front()
-                .unwrap_or(SendOutcome::NotReady),
+            Backend::Test(session) => {
+                if let Some(title) = title {
+                    session.title_requests.push(title.description.clone());
+                }
+
+                session
+                    .send_outcomes
+                    .pop_front()
+                    .unwrap_or(SendOutcome::NotReady)
+            }
         }
     }
 

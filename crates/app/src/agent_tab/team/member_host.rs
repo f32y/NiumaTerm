@@ -3,7 +3,7 @@
 use gpui::{App, Subscription};
 use nmt_agent::chat::{SendOutcome, TeamDecisionRequest, ThreadSettings};
 use nmt_agent::session::lifecycle::Status;
-use nmt_agent::session::{PromptRequest, RecoveryIdentity};
+use nmt_agent::session::{AgentKind, PromptRequest, RecoveryIdentity};
 use nmt_agent::team::attempt::DispatchIntent;
 use nmt_agent::team::model::{AttemptId, InteractionId};
 
@@ -87,6 +87,13 @@ impl MemberHost {
                 return SendOutcome::NotReady;
             }
 
+            // The member's conversation is named after the user's request,
+            // as an ordinary conversation is named after its first prompt.
+            // The text actually sent opens with the member's role and the
+            // stage instruction, and a title taken from that would show the
+            // scaffolding wherever the provider lists the conversation.
+            let title = state.title_request(&intent.input.text, |_| None);
+
             let result = state.submit(
                 intent.prepared_text.clone(),
                 |backend, text| {
@@ -96,11 +103,21 @@ impl MemberHost {
                         skill: None,
                         images: &[],
                         image_paths: &[],
-                        title: None,
+                        title: title.as_ref(),
                     })
                 },
                 || None,
             );
+
+            // Both providers generate the final title asynchronously; the
+            // first accepted request claims the name so a failed generation
+            // cannot let a later stage's request name the conversation.
+            if matches!(session.kind, AgentKind::Codex | AgentKind::Claude)
+                && title.is_some()
+                && matches!(result, Ok(SendOutcome::StartedTurn | SendOutcome::Steered))
+            {
+                state.claim_title();
+            }
 
             cx.notify();
 

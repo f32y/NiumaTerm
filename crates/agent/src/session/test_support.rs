@@ -34,6 +34,10 @@ pub struct TestBackend {
     pub team_recovered_turns: Vec<RecoveredTeamTurn>,
     pub approval_selection: SettingsOutcome,
     pub approval_selections: Vec<String>,
+
+    /// The description of every prompt that asked to name the conversation.
+    pub title_requests: Vec<String>,
+
     pub(super) send_outcomes: VecDeque<SendOutcome>,
     pub(super) slash_outcome: SlashCommandOutcome,
     pub(super) commands: Vec<SlashCommandInfo>,
@@ -70,6 +74,7 @@ impl TestBackend {
             team_recovered_turns: Vec::new(),
             approval_selection: SettingsOutcome::RidesNextSubmission,
             approval_selections: Vec::new(),
+            title_requests: Vec::new(),
             send_outcomes: send_outcomes.into_iter().collect(),
             slash_outcome,
             commands,

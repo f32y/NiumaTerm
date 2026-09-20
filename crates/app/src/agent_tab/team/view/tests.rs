@@ -944,3 +944,142 @@ async fn member_question_shows_in_team_composer_and_blocks_new_requests(cx: &mut
         "the question sits inside the member's card"
     );
 }
+
+#[gpui::test]
+async fn member_conversation_is_named_after_the_request_once(cx: &mut TestAppContext) {
+    let directory = tempdir().unwrap();
+
+    let (runtime, pane, host, window) = cx.update(|cx| {
+        gpui_component::init(cx);
+
+        cx.set_global(AgentSettings::default());
+
+        cx.set_global(AgentThreadDefaults::default());
+
+        let mut session =
+            TeamSession::create(directory.path(), Room::new(AgentWorkspace::default())).unwrap();
+
+        let member = session
+            .add_member(MemberConfig {
+                name: "Alice".into(),
+                profile: ProfileReference {
+                    kind: AgentKind::Codex,
+                    name: "test".into(),
+                },
+                roots: AgentWorkspace::default(),
+                settings: ThreadSettings::default(),
+                role: "Explain clearly".into(),
+            })
+            .unwrap();
+
+        let runtime = cx.new(|cx| TeamRuntime::new(session, cx.background_executor().clone()));
+
+        let owner = AgentSession::create(
+            AgentProfile {
+                name: "test".into(),
+                kind: AgentKind::Codex,
+                ..AgentProfile::default()
+            },
+            AgentWorkspace::default(),
+            None,
+            cx,
+        );
+
+        let host = owner.session().clone();
+
+        runtime.update(cx, |runtime, cx| {
+            runtime.attach_member_owner(member, owner, cx)
+        });
+
+        let mut pane = None;
+
+        let window = cx
+            .open_window(Default::default(), |window, cx| {
+                let view = cx.new(|cx| TeamPane::new(runtime.clone(), window, cx));
+
+                pane = Some(view.clone());
+
+                cx.new(|cx| Root::new(view, window, cx))
+            })
+            .unwrap();
+
+        (runtime, pane.unwrap(), host, window)
+    });
+
+    let mut cx = VisualTestContext::from_window(window.into(), cx);
+
+    let epoch = host.update(&mut cx, |session, cx| {
+        let backend = TestBackend::new(
+            [SendOutcome::StartedTurn, SendOutcome::StartedTurn],
+            SlashCommandOutcome::NotReady,
+            vec![],
+        )
+        .with_recovery(AgentKind::Codex, "named-team-thread");
+
+        let epoch = session.controller.borrow_mut().starting(None);
+
+        session.install(Ok(Backend::Test(backend)), epoch, "test", cx);
+
+        session.on_event(epoch, Event::Ready(ThreadSettings::default()), cx);
+
+        epoch
+    });
+
+    cx.run_until_parked();
+
+    for (turn, text) in [
+        ("first-turn", "Compare the two caches"),
+        ("second-turn", "Now pick one"),
+    ] {
+        cx.update(|window, cx| {
+            pane.update(cx, |pane, cx| {
+                pane.input
+                    .update(cx, |input, cx| input.set_value(text, window, cx));
+
+                pane.focus(window, cx);
+            })
+        });
+
+        cx.simulate_keystrokes("enter");
+
+        cx.run_until_parked();
+
+        host.update(&mut cx, |session, cx| {
+            session.on_event(epoch, Event::ProviderTurnAccepted { id: turn.into() }, cx);
+
+            session.on_event(epoch, Event::TurnStarted, cx);
+
+            session.on_event(
+                epoch,
+                Event::ItemCompleted(Item::AgentMessage {
+                    id: turn.into(),
+                    text: Some("Done".into()),
+                    questions: None,
+                }),
+                cx,
+            );
+
+            session.on_event(epoch, Event::TurnCompleted { error: None }, cx);
+        });
+
+        cx.run_until_parked();
+    }
+
+    runtime.update(&mut cx, |runtime, _| {
+        assert_eq!(runtime.room().attempts().len(), 2);
+    });
+
+    host.update(&mut cx, |session, _| {
+        let state = session.controller.borrow();
+
+        let Some(Backend::Test(backend)) = state.runtime().backend() else {
+            panic!("the test backend must still be installed");
+        };
+
+        assert_eq!(
+            backend.title_requests,
+            vec!["Compare the two caches".to_string()],
+            "the first request names the conversation from the user's text alone"
+        );
+    });
+}
