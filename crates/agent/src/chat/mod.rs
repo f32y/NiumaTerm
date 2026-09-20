@@ -126,6 +126,14 @@ pub enum Item {
     Error {
         text: String,
     },
+    /// The agent's task list as it stood when a task was completed. The list
+    /// itself lives outside the transcript and changes in place; a snapshot
+    /// in the stream is what lets the reply that closes the work be read
+    /// next to the state of the plan it delivered.
+    TaskList {
+        id: String,
+        tasks: TaskList,
+    },
 }
 
 impl Item {
@@ -138,7 +146,8 @@ impl Item {
             | Self::CommandExecution { id, .. }
             | Self::FileChange { id, .. }
             | Self::Compaction { id, .. }
-            | Self::Other { id, .. } => Some(id),
+            | Self::Other { id, .. }
+            | Self::TaskList { id, .. } => Some(id),
             Self::UserMessage { .. } | Self::Error { .. } => None,
         }
     }
@@ -284,6 +293,12 @@ impl Item {
                     detail: completed, ..
                 },
             ) => *detail = completed.clone(),
+            (
+                Self::TaskList { tasks, .. },
+                Self::TaskList {
+                    tasks: completed, ..
+                },
+            ) => *tasks = completed.clone(),
             _ => return false,
         }
 

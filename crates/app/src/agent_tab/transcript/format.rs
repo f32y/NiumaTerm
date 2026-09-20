@@ -5,6 +5,7 @@ use std::time::{Duration, Instant, SystemTime};
 use gpui::{Pixels, px};
 use gpui_component::IconName;
 use nmt_agent::chat::{Compaction, CompactionTrigger, Item as SessionItem};
+use nmt_agent::progress::{TaskList, TaskStatus};
 use rust_i18n::t;
 
 use crate::agent_tab::composer::visible_prompt;
@@ -365,7 +366,30 @@ pub(crate) fn entry_copy_text(item: &SessionItem) -> String {
                 None => head,
             }
         }
+        SessionItem::TaskList { tasks, .. } => task_list_text(tasks),
     }
+}
+
+/// A task list as a markdown checklist, the explanation first when the
+/// provider gave one.
+pub(crate) fn task_list_text(tasks: &TaskList) -> String {
+    let rows = tasks.items.iter().map(|task| {
+        let mark = match task.status {
+            TaskStatus::Completed => "x",
+            TaskStatus::InProgress => "~",
+            TaskStatus::Pending => " ",
+        };
+
+        format!("- [{mark}] {}", task.title)
+    });
+
+    tasks
+        .explanation
+        .iter()
+        .cloned()
+        .chain(rows)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Heading of a compaction row. An unprompted compaction is named as such

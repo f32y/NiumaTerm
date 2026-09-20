@@ -293,6 +293,12 @@ impl RowSource<'_> {
             SessionItem::AgentMessage {
                 questions: Some(_), ..
             } => true,
+            // The plan as the turn left it stays with the reply that closed
+            // the work; the earlier states it passed through are work.
+            SessionItem::TaskList { .. } => !items[index + 1..]
+                .iter()
+                .take_while(|later| later.turn == entry.turn)
+                .any(|later| matches!(later.item, SessionItem::TaskList { .. })),
             SessionItem::AgentMessage { .. } => {
                 !hidden(&entry.item)
                     && items[index + 1..]

@@ -74,6 +74,10 @@ pub struct SessionController {
     /// An explicit empty snapshot prevents older transcript tasks resurfacing.
     task_list: Option<TaskList>,
 
+    /// Snapshots of the task list written into the transcript so far, which
+    /// numbers the next one.
+    task_snapshots: u64,
+
     plan_mode: bool,
     command_catalog: Option<Vec<SlashCommandInfo>>,
     skill_catalog: Option<SkillCatalog>,
@@ -98,6 +102,7 @@ impl SessionController {
             ready_defaults: ReadyDefaults::default(),
             goal: None,
             task_list: None,
+            task_snapshots: 0,
             plan_mode: false,
             command_catalog: None,
             skill_catalog: None,
@@ -1086,6 +1091,25 @@ impl SessionController {
                 SessionEffect::Changed
             }
             Event::TaskListUpdated(tasks) => {
+                // A snapshot goes into the stream each time a task is
+                // completed, so the transcript shows the plan advancing and
+                // the final reply sits under the list it finished. Other
+                // changes only move the panel. The first list seen has
+                // nothing to complete beyond, which also keeps a restored
+                // list from writing a row the conversation never showed.
+                if self
+                    .task_list
+                    .as_ref()
+                    .is_some_and(|previous| tasks.completes_beyond(previous))
+                {
+                    self.task_snapshots += 1;
+
+                    self.push_item(Item::TaskList {
+                        id: format!("task-list-{}", self.task_snapshots),
+                        tasks: tasks.clone(),
+                    });
+                }
+
                 self.task_list = Some(tasks);
 
                 SessionEffect::Changed

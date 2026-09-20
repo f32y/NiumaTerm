@@ -8,6 +8,26 @@ pub struct TaskList {
 }
 
 impl TaskList {
+    /// Whether every task is done. An empty list has nothing to finish, so
+    /// it is never complete.
+    pub fn all_completed(&self) -> bool {
+        self.tally().is_some_and(|(done, total)| done == total)
+    }
+
+    /// Whether `self` completes a task that `previous` did not: a task the
+    /// earlier list held in another state, or one it did not hold at all.
+    pub fn completes_beyond(&self, previous: &TaskList) -> bool {
+        self.items
+            .iter()
+            .filter(|task| task.status == TaskStatus::Completed)
+            .any(|task| {
+                !previous
+                    .items
+                    .iter()
+                    .any(|earlier| earlier.id == task.id && earlier.status == TaskStatus::Completed)
+            })
+    }
+
     pub fn tally(&self) -> Option<(u32, u32)> {
         if self.items.is_empty() {
             return None;

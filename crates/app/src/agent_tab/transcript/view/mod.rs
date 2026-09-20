@@ -43,7 +43,7 @@ use crate::agent_tab::transcript::render::work_card::{work_card, work_step};
 use crate::agent_tab::transcript::render::{
     TRANSCRIPT_LINE_HEIGHT, TRANSCRIPT_RUN_RULE, TRANSCRIPT_TEXT_INSET, bounded_scroll,
     compaction_row, gap_px, render_interrupted_row, render_run_toggle, render_turn_fold,
-    render_turn_summary, transcript_column,
+    render_turn_summary, task_list_row, transcript_column,
 };
 use crate::agent_tab::transcript::reveal::{Disclosures, RevealKey, revealed_block, revealed_part};
 use crate::agent_tab::transcript::row_structure::{RowGeometry, RowSource};
@@ -583,6 +583,9 @@ impl TranscriptView {
                 text: Some(text), ..
             } => self.render_agent_row(index, self.shown_reply(index, text).to_string(), cx),
             SessionItem::Error { text } => error_row(index, text.clone(), cx),
+            SessionItem::TaskList { tasks, .. } => {
+                task_list_row::render_task_list_row(index, tasks, cx)
+            }
             SessionItem::Compaction { detail, .. } => {
                 let detail = detail.clone();
 

@@ -259,6 +259,16 @@ pub(crate) fn entry_fingerprint(
             compaction_accounting(detail).len(),
             detail.user_context.as_ref().map_or(0, String::len) as u64,
         ),
+        SessionItem::TaskList { tasks, .. } => (
+            tasks.explanation.as_ref().map_or(0, String::len)
+                + tasks
+                    .items
+                    .iter()
+                    .map(|task| task.title.len() + task.description.as_ref().map_or(0, String::len))
+                    .sum::<usize>(),
+            tasks.items.len(),
+            tasks.tally().map_or(0, |(done, _)| u64::from(done)),
+        ),
     };
 
     (content_len as u64)

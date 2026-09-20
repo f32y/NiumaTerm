@@ -52,7 +52,12 @@ impl ProgressPanel {
         cx: &mut Context<AgentPane>,
     ) -> Option<AnyElement> {
         let empty = TaskList::default();
-        let tasks = tasks.unwrap_or(&empty);
+
+        // A finished list has nothing left to steer by, and the transcript
+        // already shows it under the reply that finished it.
+        let tasks = tasks
+            .filter(|tasks| !tasks.all_completed())
+            .unwrap_or(&empty);
 
         if goal.is_none() && tasks.items.is_empty() && !plan_mode {
             return None;
@@ -290,7 +295,9 @@ fn goal_details(goal: &GoalStatus, cx: &Context<AgentPane>) -> AnyElement {
         .into_any_element()
 }
 
-fn task_row(task: &Task, cx: &Context<AgentPane>) -> AnyElement {
+/// One task as a checklist line: its state as an icon, then the title and
+/// whatever else the provider said about it.
+pub(crate) fn task_row(task: &Task, cx: &App) -> AnyElement {
     let (icon, color) = match task.status {
         TaskStatus::Pending => (IconName::Minus, cx.theme().muted_foreground),
         TaskStatus::InProgress => (IconName::LoaderCircle, cx.theme().primary),

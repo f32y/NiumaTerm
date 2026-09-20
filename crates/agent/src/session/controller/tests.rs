@@ -172,6 +172,72 @@ fn progress_survives_turns_but_clears_with_the_conversation_for_every_provider()
     }
 }
 
+#[test]
+fn completing_a_task_writes_the_list_into_the_transcript_once_per_completion() {
+    let mut session = started(AgentKind::Codex, "task-snapshots", vec![]);
+
+    let epoch = session.runtime.epoch();
+
+    let task = |id: &str, status: TaskStatus| Task {
+        id: id.into(),
+        title: format!("Task {id}"),
+        status,
+        description: None,
+        owner: None,
+        blocked_by: Vec::new(),
+    };
+
+    let list = |statuses: [TaskStatus; 2]| TaskList {
+        items: vec![task("one", statuses[0]), task("two", statuses[1])],
+        explanation: None,
+    };
+
+    let snapshots = |session: &SessionController| {
+        session
+            .conversation
+            .borrow()
+            .content
+            .entries()
+            .iter()
+            .filter(|entry| matches!(entry.item, Item::TaskList { .. }))
+            .count()
+    };
+
+    // A list that arrives complete on resume, or is merely rearranged, is
+    // panel state alone.
+    session.apply_event(
+        epoch,
+        Event::TaskListUpdated(list([TaskStatus::Completed, TaskStatus::Pending])),
+    );
+
+    session.apply_event(
+        epoch,
+        Event::TaskListUpdated(list([TaskStatus::Completed, TaskStatus::InProgress])),
+    );
+
+    assert_eq!(snapshots(&session), 0);
+
+    session.apply_event(
+        epoch,
+        Event::TaskListUpdated(list([TaskStatus::Completed, TaskStatus::Completed])),
+    );
+
+    assert_eq!(snapshots(&session), 1);
+
+    assert!(matches!(
+        session.conversation.borrow().content.entries().last().map(|entry| &entry.item),
+        Some(Item::TaskList { tasks, .. }) if tasks.all_completed()
+    ));
+
+    // Restating the finished list completes nothing further.
+    session.apply_event(
+        epoch,
+        Event::TaskListUpdated(list([TaskStatus::Completed, TaskStatus::Completed])),
+    );
+
+    assert_eq!(snapshots(&session), 1);
+}
+
 fn started(kind: AgentKind, id: &str, outcomes: Vec<SendOutcome>) -> SessionController {
     let mut session = SessionController::new(kind);
 

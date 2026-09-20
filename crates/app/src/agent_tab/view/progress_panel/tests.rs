@@ -160,3 +160,106 @@ fn progress_panel_is_narrower_and_expands_above_the_composer(cx: &mut TestAppCon
 
     assert!(cx.debug_bounds("agent-progress-details").is_none());
 }
+
+#[gpui::test]
+fn a_finished_task_list_leaves_the_composer(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+
+        cx.set_global(AgentSettings {
+            reduce_motion: true,
+            ..AgentSettings::default()
+        });
+
+        cx.set_global(AgentThreadDefaults::default());
+    });
+
+    let mut pane: Option<Entity<AgentPane>> = None;
+
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let agent = cx.new(|cx| {
+            AgentPane::new(
+                AgentProfile {
+                    name: "Progress Test".into(),
+                    kind: AgentKind::Codex,
+                    executable: "missing-progress-agent.exe".into(),
+                    ..AgentProfile::default()
+                },
+                AgentWorkspace::default(),
+                window,
+                cx,
+            )
+        });
+
+        pane = Some(agent.clone());
+
+        Root::new(agent, window, cx)
+    });
+
+    let pane = pane.unwrap();
+    let cx: &mut VisualTestContext = cx;
+
+    pane.update(cx, |pane, cx| {
+        let mut session = pane.session.borrow_mut();
+
+        let epoch = session.starting(None);
+
+        let backend = TestBackend::new([], SlashCommandOutcome::Accepted, vec![])
+            .with_recovery(AgentKind::Codex, "progress");
+
+        session.install(epoch, Ok(Backend::Test(backend)));
+        session.runtime_mut().ready();
+
+        pane.history_ui.mode = RecentSessionsMode::Hidden;
+
+        cx.notify();
+    });
+
+    let list = |status: TaskStatus| TaskList {
+        explanation: None,
+        items: vec![Task {
+            id: "one".into(),
+            title: "Verify build output".into(),
+            description: None,
+            status,
+            owner: None,
+            blocked_by: vec![],
+        }],
+    };
+
+    deliver_session_event(
+        &pane,
+        Event::TaskListUpdated(list(TaskStatus::InProgress)),
+        cx,
+    );
+
+    cx.run_until_parked();
+
+    cx.update(|window, cx| {
+        let _ = window.draw(cx);
+    });
+
+    assert!(cx.debug_bounds("agent-progress-panel").is_some());
+    assert!(cx.debug_bounds("agent-task-list").is_none());
+
+    deliver_session_event(
+        &pane,
+        Event::TaskListUpdated(list(TaskStatus::Completed)),
+        cx,
+    );
+
+    cx.run_until_parked();
+
+    cx.update(|window, cx| {
+        let _ = window.draw(cx);
+    });
+
+    assert!(
+        cx.debug_bounds("agent-progress-panel").is_none(),
+        "a finished list has nothing left to show above the composer"
+    );
+    assert!(
+        cx.debug_bounds("agent-task-list").is_some(),
+        "the finished list is read in the transcript instead"
+    );
+}
