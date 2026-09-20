@@ -126,7 +126,7 @@ use crate::agent_tab::view::blocking_overlay::{
 use crate::agent_tab::view::cache_expiry::cache_expiry_dialog;
 use crate::agent_tab::view::composer_layout::{
     COMPOSER_PANEL_TUCK, ComposerEnterBehavior, composer_card, composer_controls_row,
-    composer_enter_behavior, composer_input_row, send_button,
+    composer_enter_behavior, composer_input_row, composer_notice_panel, send_button,
 };
 use crate::agent_tab::view::composer_notices::{
     last_response_mark, multi_root_notice, multi_root_strip, queued_prompts,
@@ -3780,11 +3780,18 @@ impl Render for AgentPane {
             self.palette.render(model, hover_selects, cx)
         });
 
-        let command_feedback = self
-            .palette
-            .render_feedback(self.session.borrow().commands(), cx);
-
-        let queued_message = queued_prompts(self.session.borrow().queued_prompts(), cx);
+        let notices = composer_notice_panel(
+            self.palette
+                .render_feedback(self.session.borrow().commands(), cx)
+                .map(IntoElement::into_any_element)
+                .into_iter()
+                .chain(
+                    queued_prompts(self.session.borrow().queued_prompts(), cx)
+                        .map(IntoElement::into_any_element),
+                )
+                .collect(),
+            cx,
+        );
 
         let approval = self.render_approval_panel(cx);
         let composer_free = !self.branch_flow_holds_composer();
@@ -3934,6 +3941,11 @@ impl Render for AgentPane {
                                 div().w_full().mb(px(-COMPOSER_PANEL_TUCK)).child(panel)
                             }),
                         )
+                        .children(
+                            notices.map(|panel| {
+                                div().w_full().mb(px(-COMPOSER_PANEL_TUCK)).child(panel)
+                            }),
+                        )
                         .child(
                             div()
                                 .w_full()
@@ -3955,8 +3967,6 @@ impl Render for AgentPane {
                                         .debug_selector(|| "agent-progress-composer".into())
                                         .children(approval)
                                         .children(questions)
-                                        .children(command_feedback)
-                                        .children(queued_message)
                                         .children(self.attachments.render(cx))
                                         .child(
                                             composer_input_row()

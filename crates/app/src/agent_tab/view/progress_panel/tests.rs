@@ -1,7 +1,7 @@
 use gpui::{AppContext as _, Entity, TestAppContext, VisualTestContext, px};
 use gpui_component::Root;
 use nmt_agent::AgentWorkspace;
-use nmt_agent::chat::{Event, SlashCommandOutcome};
+use nmt_agent::chat::{Event, QueuedPrompt, SlashCommandOutcome};
 use nmt_agent::progress::{GoalStatus, Task, TaskList, TaskStatus};
 use nmt_agent::session::test_support::TestBackend;
 use nmt_agent::session::{AgentKind, Backend};
@@ -261,5 +261,92 @@ fn a_finished_task_list_leaves_the_composer(cx: &mut TestAppContext) {
     assert!(
         cx.debug_bounds("agent-task-list").is_some(),
         "the finished list is read in the transcript instead"
+    );
+}
+
+#[gpui::test]
+fn queued_prompts_sit_in_a_strip_above_the_composer(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+
+        cx.set_global(AgentSettings {
+            reduce_motion: true,
+            ..AgentSettings::default()
+        });
+
+        cx.set_global(AgentThreadDefaults::default());
+    });
+
+    let mut pane: Option<Entity<AgentPane>> = None;
+
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let agent = cx.new(|cx| {
+            AgentPane::new(
+                AgentProfile {
+                    name: "Queue Test".into(),
+                    kind: AgentKind::Codex,
+                    executable: "missing-queue-agent.exe".into(),
+                    ..AgentProfile::default()
+                },
+                AgentWorkspace::default(),
+                window,
+                cx,
+            )
+        });
+
+        pane = Some(agent.clone());
+
+        Root::new(agent, window, cx)
+    });
+
+    let pane = pane.unwrap();
+    let cx: &mut VisualTestContext = cx;
+
+    pane.update(cx, |pane, cx| {
+        let mut session = pane.session.borrow_mut();
+
+        let epoch = session.starting(None);
+
+        let backend = TestBackend::new([], SlashCommandOutcome::Accepted, vec![])
+            .with_recovery(AgentKind::Codex, "queue");
+
+        session.install(epoch, Ok(Backend::Test(backend)));
+        session.runtime_mut().ready();
+
+        pane.history_ui.mode = RecentSessionsMode::Hidden;
+
+        cx.notify();
+    });
+
+    cx.update(|window, cx| {
+        let _ = window.draw(cx);
+    });
+
+    assert!(cx.debug_bounds("agent-notice-panel").is_none());
+
+    deliver_session_event(
+        &pane,
+        Event::QueuedPrompts(vec![QueuedPrompt {
+            id: Some("queued-1".into()),
+            text: "Then run the tests".into(),
+        }]),
+        cx,
+    );
+
+    cx.run_until_parked();
+
+    cx.update(|window, cx| {
+        let _ = window.draw(cx);
+    });
+
+    let composer = cx.debug_bounds("agent-progress-composer").unwrap();
+    let strip = cx.debug_bounds("agent-notice-panel").unwrap();
+
+    assert!((strip.size.width - composer.size.width * 0.95).abs() < px(1.));
+    assert!((strip.center().x - composer.center().x).abs() < px(1.));
+    assert!(strip.top() < composer.top());
+    assert!(
+        strip.bottom() > composer.top(),
+        "the strip's lower edge tucks behind the card"
     );
 }

@@ -34,8 +34,8 @@ use crate::agent_tab::team::{TeamCommand, TeamRuntime};
 use crate::agent_tab::thread_controls::{harness_settings, harness_submenus, settings_pill};
 use crate::agent_tab::transcript::{TranscriptView, transcript_column};
 use crate::agent_tab::view::composer_layout::{
-    ComposerEnterBehavior, composer_card, composer_controls_row, composer_enter_behavior,
-    composer_input_row, send_button,
+    COMPOSER_PANEL_TUCK, ComposerEnterBehavior, composer_card, composer_controls_row,
+    composer_enter_behavior, composer_input_row, composer_notice_panel, send_button,
 };
 use crate::agent_tab::{AgentPane, AgentPaneEvent};
 
@@ -967,6 +967,22 @@ impl Render for TeamPane {
 
         let status = self.status_text(cx);
         let interactions = self.render_member_interactions(window, cx);
+
+        let notices = composer_notice_panel(
+            failure
+                .map(|failure| {
+                    div()
+                        .px_3()
+                        .py_1p5()
+                        .text_color(cx.theme().danger)
+                        .child(failure)
+                        .into_any_element()
+                })
+                .into_iter()
+                .collect(),
+            cx,
+        );
+
         let controls = self.render_controls(window, cx);
 
         let send = send_button(
@@ -1005,20 +1021,15 @@ impl Render for TeamPane {
                                 ),
                             )
                         })
+                        .children(
+                            notices.map(|panel| {
+                                div().w_full().mb(px(-COMPOSER_PANEL_TUCK)).child(panel)
+                            }),
+                        )
                         .child(
                             composer_card(cx)
                                 .debug_selector(|| "team-composer".into())
                                 .children(interactions)
-                                .when_some(failure, |view, failure| {
-                                    view.child(
-                                        div()
-                                            .px_3()
-                                            .pt_2()
-                                            .text_sm()
-                                            .text_color(cx.theme().danger)
-                                            .child(failure),
-                                    )
-                                })
                                 .child(
                                     composer_input_row()
                                         .text_size(px(font_size + 2.))

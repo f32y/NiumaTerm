@@ -260,8 +260,7 @@ impl SlashPalette {
                 .w_full()
                 .gap_2()
                 .px_3()
-                .pb_2()
-                .text_xs()
+                .py_1p5()
                 .child(
                     div()
                         .font_weight(FontWeight::SEMIBOLD)

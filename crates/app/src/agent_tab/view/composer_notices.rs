@@ -94,11 +94,6 @@ pub(crate) fn queued_prompts(
             .px_3()
             .py_1p5()
             .gap_0p5()
-            .border_b_1()
-            .border_color(cx.theme().border.opacity(0.6))
-            .bg(cx.theme().muted.opacity(0.3))
-            .text_xs()
-            .text_color(cx.theme().muted_foreground)
             .children(pending.iter().enumerate().map(|(index, prompt)| {
                 h_flex()
                     .w_full()

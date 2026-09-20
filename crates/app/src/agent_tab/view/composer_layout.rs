@@ -1,5 +1,5 @@
 use gpui::prelude::*;
-use gpui::{App, Div, ElementId, SharedString, px, relative};
+use gpui::{AnyElement, App, Div, ElementId, SharedString, div, px, relative};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::Enter;
 use gpui_component::{ActiveTheme as _, Disableable as _, IconName, IconNamed, h_flex, v_flex};
@@ -22,6 +22,33 @@ pub(crate) fn composer_panel(cx: &App) -> Div {
         .border_color(cx.theme().border.opacity(0.6))
         .bg(cx.theme().popover)
         .pb(px(COMPOSER_PANEL_TUCK))
+}
+
+/// The strip above the input that carries what the composer has to say
+/// beside the message: command acknowledgements, errors, and the prompts
+/// queued behind a running turn. Drawn as its own panel rather than inside
+/// the card, so the card stays the message and its controls, and the strip
+/// comes and goes without moving the input. `None` when there is nothing to
+/// say, so the card sits flush against what is above it.
+pub(crate) fn composer_notice_panel(notices: Vec<AnyElement>, cx: &App) -> Option<AnyElement> {
+    if notices.is_empty() {
+        return None;
+    }
+
+    Some(
+        div()
+            .w_full()
+            .flex()
+            .justify_center()
+            .child(
+                composer_panel(cx)
+                    .debug_selector(|| "agent-notice-panel".into())
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .children(notices),
+            )
+            .into_any_element(),
+    )
 }
 
 /// Ordinary and Team conversations share the input card so font and spacing
