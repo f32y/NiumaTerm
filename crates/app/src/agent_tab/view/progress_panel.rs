@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use gpui::prelude::*;
 use gpui::{AnyElement, App, Bounds, Context, FontWeight, Pixels, ScrollHandle, Window, div, px};
 use gpui_component::button::{Button, ButtonVariants as _};
+use gpui_component::spinner::Spinner;
 use gpui_component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, v_flex};
 use nmt_agent::progress::{GoalStatus, Task, TaskList, TaskStatus};
 use rust_i18n::t;
@@ -169,7 +170,7 @@ impl ProgressPanel {
                         .as_ref()
                         .map(|text| div().child(text.clone())),
                 )
-                .children(tasks.items.iter().map(|task| task_row(task, cx)));
+                .children(tasks.items.iter().map(|task| task_row(task, true, cx)));
 
             let recorded = Rc::clone(&self.details_height);
 
@@ -295,26 +296,39 @@ fn goal_details(goal: &GoalStatus, cx: &Context<AgentPane>) -> AnyElement {
         .into_any_element()
 }
 
-/// One task as a checklist line: its state as an icon, then the title and
-/// whatever else the provider said about it.
-pub(crate) fn task_row(task: &Task, cx: &App) -> AnyElement {
-    let (icon, color) = match task.status {
-        TaskStatus::Pending => (IconName::Minus, cx.theme().muted_foreground),
-        TaskStatus::InProgress => (IconName::LoaderCircle, cx.theme().primary),
-        TaskStatus::Completed => (IconName::Check, cx.theme().success),
+/// Edge of a task's state mark, matching the small icon size.
+const TASK_MARK: f32 = 12.0;
+
+/// One task as a checklist line: its state as a mark, then the title and
+/// whatever else the provider said about it. A `live` list is the one the
+/// agent is working through, so its running task turns; a list recorded in
+/// the transcript shows the state it captured and stays still.
+pub(crate) fn task_row(task: &Task, live: bool, cx: &App) -> AnyElement {
+    let mark = match task.status {
+        TaskStatus::InProgress if live => Spinner::new()
+            .icon(IconName::LoaderCircle)
+            .with_size(px(TASK_MARK))
+            .color(cx.theme().primary)
+            .into_any_element(),
+        TaskStatus::InProgress => Icon::new(IconName::LoaderCircle)
+            .size(px(TASK_MARK))
+            .text_color(cx.theme().primary)
+            .into_any_element(),
+        TaskStatus::Pending => Icon::new(IconName::Minus)
+            .size(px(TASK_MARK))
+            .text_color(cx.theme().muted_foreground)
+            .into_any_element(),
+        TaskStatus::Completed => Icon::new(IconName::Check)
+            .size(px(TASK_MARK))
+            .text_color(cx.theme().success)
+            .into_any_element(),
     };
 
     h_flex()
         .w_full()
         .items_start()
         .gap_2()
-        .child(
-            Icon::new(icon)
-                .size_3()
-                .flex_none()
-                .text_color(color)
-                .mt_0p5(),
-        )
+        .child(div().flex_none().mt_0p5().child(mark))
         .child(
             v_flex()
                 .flex_1()

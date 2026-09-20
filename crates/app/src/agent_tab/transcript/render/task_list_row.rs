@@ -48,7 +48,7 @@ pub(crate) fn render_task_list_row(
                 .as_ref()
                 .map(|text| div().whitespace_normal().child(text.clone())),
         )
-        .children(tasks.items.iter().map(|task| task_row(task, cx)));
+        .children(tasks.items.iter().map(|task| task_row(task, false, cx)));
 
     v_flex()
         .id(("entry", index))
