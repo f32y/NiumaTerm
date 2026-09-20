@@ -11,7 +11,7 @@ on:
         required: true
 
 jobs:
-  package:
+  package-windows:
     uses: ./.github/workflows/windows-package.yml
     with:
       # A tag push leaves github.ref_name as the tag itself; a manual run has to
@@ -28,36 +28,38 @@ jobs:
     # secrets, which a called workflow does not inherit on its own.
     secrets: inherit
 
-  release:
-    needs: [package, package-macos]
-    runs-on: ubuntu-latest
+  release-windows:
+    needs: package-windows
+    uses: ./.github/workflows/publish-package.yml
     permissions:
       contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: NiumaTerm-windows-x86_64-${{ inputs.tag || github.ref_name }}
-          path: dist
-      - uses: actions/download-artifact@v4
-        with:
-          name: ${{ needs.package-macos.outputs.artifact }}
-          path: dist
-      # The tag already exists on the remote, so the release just attaches to
-      # it; --repo stands in for a checkout this job has no other use for.
-      - env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag || github.ref_name }}
-        run: >-
-          gh release create "$TAG" dist/*
-          --repo "$GITHUB_REPOSITORY"
-          --title "$TAG"
-          --generate-notes
+    with:
+      tag: ${{ inputs.tag || github.ref_name }}
+      artifact: NiumaTerm-windows-x86_64-${{ inputs.tag || github.ref_name }}
+
+  release-macos:
+    needs: package-macos
+    uses: ./.github/workflows/publish-package.yml
+    permissions:
+      contents: write
+    with:
+      tag: ${{ inputs.tag || github.ref_name }}
+      artifact: ${{ needs.package-macos.outputs.artifact }}
+
+  updates-windows:
+    needs: release-windows
+    uses: ./.github/workflows/updates.yml
+    with:
+      label: ${{ inputs.tag || github.ref_name }}
+      channel: ''
+    secrets:
+      cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
   # After the release, because the metadata points at assets that have to be
   # downloadable by the time an updater reads it. A release carries no channel
   # name: the default channel is the one every installation sees.
-  updates:
-    needs: [package-macos, release]
+  updates-macos:
+    needs: [package-macos, release-macos]
     uses: ./.github/workflows/updates.yml
     with:
       label: ${{ inputs.tag || github.ref_name }}

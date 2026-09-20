@@ -19,7 +19,7 @@ jobs:
           commit=$(git rev-parse --short=7 "$GITHUB_SHA")
           echo "tag=nightly-$date-$commit" >> "$GITHUB_OUTPUT"
 
-  package:
+  package-windows:
     needs: name
     uses: ./.github/workflows/windows-package.yml
     with:
@@ -36,56 +36,39 @@ jobs:
     # secrets, which a called workflow does not inherit on its own.
     secrets: inherit
 
-  # Tagging runs after the build so a nightly tag only ever marks a revision
-  # that actually produced a package.
-  tag:
-    needs: [name, package, package-macos]
-    runs-on: ubuntu-latest
+  release-windows:
+    needs: [name, package-windows]
+    uses: ./.github/workflows/publish-package.yml
     permissions:
       contents: write
-    steps:
-      - uses: actions/checkout@v5
-      # The tag names the revision, so it collides only when the same revision
-      # is built twice; forcing keeps that run from failing and leaves the tag
-      # on the revision it already marked.
-      - run: |
-          git tag -f "$TAG" "$GITHUB_SHA"
-          git push -f origin "refs/tags/$TAG"
-        env:
-          TAG: ${{ needs.name.outputs.tag }}
+    with:
+      tag: ${{ needs.name.outputs.tag }}
+      artifact: NiumaTerm-windows-x86_64-${{ needs.name.outputs.tag }}
+      prerelease: true
 
-  release:
-    needs: [name, tag, package-macos]
-    runs-on: ubuntu-latest
+  release-macos:
+    needs: [name, package-macos]
+    uses: ./.github/workflows/publish-package.yml
     permissions:
       contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: NiumaTerm-windows-x86_64-${{ needs.name.outputs.tag }}
-          path: dist
-      - uses: actions/download-artifact@v4
-        with:
-          name: ${{ needs.package-macos.outputs.artifact }}
-          path: dist
-      # A second run on the same revision reuses the tag, and gh refuses to
-      # create a release for a tag that already has one; dropping the old
-      # release republishes the newer package against that tag.
-      - env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.name.outputs.tag }}
-        run: |
-          gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes || true
-          gh release create "$TAG" dist/* \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "$TAG" \
-            --prerelease \
-            --notes "Automated nightly build of $GITHUB_SHA."
+    with:
+      tag: ${{ needs.name.outputs.tag }}
+      artifact: ${{ needs.package-macos.outputs.artifact }}
+      prerelease: true
+
+  updates-windows:
+    needs: [name, release-windows]
+    uses: ./.github/workflows/updates.yml
+    with:
+      label: ${{ needs.name.outputs.tag }}
+      channel: nightly
+    secrets:
+      cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
   # After the release, because the metadata points at assets that have to be
   # downloadable by the time an updater reads it.
-  updates:
-    needs: [name, package-macos, release]
+  updates-macos:
+    needs: [name, package-macos, release-macos]
     uses: ./.github/workflows/updates.yml
     with:
       label: ${{ needs.name.outputs.tag }}

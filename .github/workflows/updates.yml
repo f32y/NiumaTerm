@@ -10,23 +10,23 @@ on:
       bundle-version:
         description: The CFBundleVersion the published build carries
         type: string
-        required: true
+        default: ''
       channel:
         description: Sparkle channel; empty for stable
         type: string
         required: true
       asset:
-        description: File name of the published macOS archive
+        description: Published macOS archive; empty to preserve the appcast
         type: string
-        required: true
+        default: ''
       length:
         description: Size of that archive in bytes
         type: string
-        required: true
+        default: ''
       signature:
         description: Its EdDSA signature
         type: string
-        required: true
+        default: ''
     secrets:
       cloudflare-api-token:
         description: Token with Workers Scripts edit rights on the account
@@ -38,11 +38,16 @@ on:
 # that ships and an installation only ever asks the one it was built with, so
 # neither can move once a build carrying it is out.
 #
-# One job renders both, because a Workers assets deploy replaces the whole set:
-# separate jobs would each publish their own half and drop the other's.
+# Each publish retains the appcast and renders the Windows list, because a
+# Workers assets deploy replaces the whole set. Serialization prevents
+# concurrent deployments from dropping each other's feed updates.
 jobs:
   publish:
     runs-on: ubuntu-latest
+    concurrency:
+      group: update-metadata
+      queue: max
+      cancel-in-progress: false
     env:
       ASSETS: updates/public
       FEED_URL: https://niumaterm-updates.f32.io/appcast.xml
@@ -62,7 +67,10 @@ jobs:
           # a new document from it. Any other status is a real failure: taking
           # one for "absent" would silently drop the published history and ship
           # a feed holding only the release this run adds.
-          status=$(curl -sS -o "$FEED_PATH" -w '%{http_code}' "$FEED_URL")
+          # A platform may have published moments ago; a unique query avoids
+          # reading the cached feed from before that deployment.
+          status=$(curl -sS -o "$FEED_PATH" -w '%{http_code}' \
+            "$FEED_URL?run=$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$RANDOM")
           case "$status" in
             200) ;;
             404) rm -f "$FEED_PATH" ;;
@@ -73,6 +81,7 @@ jobs:
           esac
 
       - name: Render the appcast
+        if: inputs.asset != ''
         run: |
           python3 scripts/update-appcast.py \
             --appcast "$FEED_PATH" \
@@ -106,7 +115,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           ENTRY: |
-            . as $release
+            ("NiumaTerm-windows-x86_64-" + .tag_name + ".zip") as $archive
+            | select(any(.assets[]; .name == $archive and .state == "uploaded"))
+            | select(any(.assets[]; .name == ($archive + ".sha256") and .state == "uploaded"))
+            | . as $release
             | {
                 tag_name, html_url, draft, prerelease, published_at,
                 assets: [
@@ -116,11 +128,17 @@ jobs:
               }
         run: |
           mkdir -p "$ASSETS/windows"
-          gh api "repos/$GITHUB_REPOSITORY/releases/latest" \
-            | jq --arg base "$DOWNLOAD_BASE" "$ENTRY" > "$ASSETS/windows/stable.json"
-          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=30" \
-            | jq --arg base "$DOWNLOAD_BASE" "[.[] | select(.draft | not) | $ENTRY]" \
-              > "$ASSETS/windows/nightly.json"
+          # A macOS-only release cannot be installed on Windows. Read beyond
+          # the first page so nightlies cannot hide the last usable stable
+          # build, and require both the archive and its completed checksum.
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            | jq --arg base "$DOWNLOAD_BASE" "[.[][] | select(.draft | not) | $ENTRY]" \
+              > "$RUNNER_TEMP/windows-releases.json"
+          # An empty label is ignored by installed clients when no Windows
+          # stable build has been published yet.
+          jq 'map(select(.prerelease | not)) | .[0] // {tag_name: "", html_url: "", assets: []}' \
+            "$RUNNER_TEMP/windows-releases.json" > "$ASSETS/windows/stable.json"
+          jq '.[0:30]' "$RUNNER_TEMP/windows-releases.json" > "$ASSETS/windows/nightly.json"
 
       - uses: actions/setup-node@v5
         with:

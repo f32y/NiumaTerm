@@ -1,0 +1,59 @@
+name: Publish package
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag shared by the platform builds
+        type: string
+        required: true
+      artifact:
+        description: Uploaded package to attach to the release
+        type: string
+        required: true
+      prerelease:
+        description: Create a nightly release at the triggering commit
+        type: boolean
+        default: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # Both platforms can finish together. Serialize creation and replacement
+    # for this tag while allowing other tags to publish independently.
+    concurrency:
+      group: release-${{ inputs.tag }}
+      queue: max
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact }}
+          path: dist
+      - name: Publish this platform
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            # Rebuilding one platform must retain the other platform's files.
+            gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+          elif [ "$PRERELEASE" = true ]; then
+            # A nightly tag is created only after a package exists, and points
+            # at the built commit even if the default branch has moved on.
+            gh release create "$TAG" dist/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "$TAG" \
+              --prerelease \
+              --notes "Automated nightly build of $GITHUB_SHA."
+          else
+            gh release create "$TAG" dist/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --title "$TAG" \
+              --generate-notes
+          fi
