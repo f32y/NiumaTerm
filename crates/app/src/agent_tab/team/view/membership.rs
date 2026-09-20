@@ -9,6 +9,7 @@ use gpui_component::{
     ActiveTheme as _, Disableable as _, IconNamed, Size, WindowExt as _, h_flex, v_flex,
 };
 use nmt_agent::AgentWorkspace;
+use nmt_agent::chat::ThreadSettings;
 use nmt_agent::team::member::{MemberConfig, ProfileReference};
 use nmt_config::profile::AgentProfile;
 use rand::seq::SliceRandom as _;
@@ -17,7 +18,7 @@ use rust_i18n::t;
 use crate::agent_tab::settings::AgentSettings;
 use crate::agent_tab::team::TeamRuntime;
 use crate::agent_tab::team::view::TeamPane;
-use crate::agent_tab::thread_controls::{launch_effort, launch_model, stored_thread_settings};
+use crate::agent_tab::thread_controls::{launch_effort, launch_model};
 
 struct DiceIcon;
 
@@ -68,12 +69,13 @@ impl MemberDraft {
 
         let kind = profile.kind;
 
-        let mut settings = stored_thread_settings(kind, &profile, cx)
-            .cloned()
-            .unwrap_or_default();
-
-        settings.model = launch_model(kind, &profile).or(settings.model);
-        settings.effort = launch_effort(&profile).or(settings.effort);
+        // A member joins on its profile's values; its own picks afterwards
+        // are the room's to keep.
+        let settings = ThreadSettings {
+            model: launch_model(kind, &profile),
+            effort: launch_effort(&profile),
+            ..ThreadSettings::default()
+        };
 
         let config = MemberConfig {
             name: self.member_name.read(cx).text().to_string(),

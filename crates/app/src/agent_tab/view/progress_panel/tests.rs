@@ -9,7 +9,7 @@ use nmt_config::profile::AgentProfile;
 
 use crate::agent_tab::settings::AgentSettings;
 use crate::agent_tab::tests::deliver_session_event;
-use crate::agent_tab::{AgentPane, AgentThreadDefaults, RecentSessionsMode};
+use crate::agent_tab::{AgentPane, RecentSessionsMode};
 
 #[gpui::test]
 fn progress_panel_is_narrower_and_expands_above_the_composer(cx: &mut TestAppContext) {
@@ -22,8 +22,6 @@ fn progress_panel_is_narrower_and_expands_above_the_composer(cx: &mut TestAppCon
             reduce_motion: true,
             ..AgentSettings::default()
         });
-
-        cx.set_global(AgentThreadDefaults::default());
     });
 
     let mut pane: Option<Entity<AgentPane>> = None;
@@ -176,8 +174,6 @@ fn a_finished_task_list_leaves_the_composer(cx: &mut TestAppContext) {
             reduce_motion: true,
             ..AgentSettings::default()
         });
-
-        cx.set_global(AgentThreadDefaults::default());
     });
 
     let mut pane: Option<Entity<AgentPane>> = None;
@@ -279,8 +275,6 @@ fn queued_prompts_sit_in_a_strip_above_the_composer(cx: &mut TestAppContext) {
             reduce_motion: true,
             ..AgentSettings::default()
         });
-
-        cx.set_global(AgentThreadDefaults::default());
     });
 
     let mut pane: Option<Entity<AgentPane>> = None;

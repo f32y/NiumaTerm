@@ -331,7 +331,7 @@ mod conversation_title_tests {
     use crate::agent_tab::session::{Backend, RecoveryIdentity, Status, TestBackend};
     use crate::agent_tab::settings::AgentSettings;
     use crate::agent_tab::tests::deliver_session_event;
-    use crate::agent_tab::{AgentPane, AgentPaneEvent, AgentThreadDefaults};
+    use crate::agent_tab::{AgentPane, AgentPaneEvent};
 
     fn open_pane(
         cx: &mut TestAppContext,
@@ -352,8 +352,6 @@ mod conversation_title_tests {
             gpui_component::init(cx);
 
             cx.set_global(AgentSettings::default());
-
-            cx.set_global(AgentThreadDefaults::default());
 
             cx.open_window(Default::default(), |window, cx| {
                 let agent = cx.new(|cx| {
@@ -843,10 +841,10 @@ mod queued_prompt_placement_tests {
     use nmt_agent::session::lifecycle::StartOutcome;
     use nmt_config::profile::{AgentKind, AgentProfile};
 
+    use crate::agent_tab::AgentPane;
     use crate::agent_tab::session::{Backend, Status, TestBackend};
     use crate::agent_tab::settings::AgentSettings;
     use crate::agent_tab::tests::deliver_session_event;
-    use crate::agent_tab::{AgentPane, AgentThreadDefaults};
 
     fn open_pane(
         cx: &mut TestAppContext,
@@ -866,8 +864,6 @@ mod queued_prompt_placement_tests {
             gpui_component::init(cx);
 
             cx.set_global(AgentSettings::default());
-
-            cx.set_global(AgentThreadDefaults::default());
 
             cx.open_window(Default::default(), |window, cx| {
                 let agent =
@@ -1144,9 +1140,9 @@ mod turn_error_tests {
     use nmt_agent::chat::{Event as SessionEvent, Item as SessionItem};
     use nmt_config::profile::{AgentKind, AgentProfile};
 
+    use crate::agent_tab::AgentPane;
     use crate::agent_tab::settings::AgentSettings;
     use crate::agent_tab::tests::deliver_session_event;
-    use crate::agent_tab::{AgentPane, AgentThreadDefaults};
 
     fn open_pane(
         cx: &mut TestAppContext,
@@ -1164,8 +1160,6 @@ mod turn_error_tests {
             gpui_component::init(cx);
 
             cx.set_global(AgentSettings::default());
-
-            cx.set_global(AgentThreadDefaults::default());
 
             cx.open_window(Default::default(), |window, cx| {
                 let agent =
@@ -1250,9 +1244,9 @@ mod session_replacement_tests {
     use nmt_agent::session::lifecycle::StartOutcome;
     use nmt_config::profile::{AgentKind, AgentProfile};
 
+    use crate::agent_tab::AgentPane;
     use crate::agent_tab::session::{Backend, TestBackend};
     use crate::agent_tab::settings::AgentSettings;
-    use crate::agent_tab::{AgentPane, AgentThreadDefaults};
 
     #[gpui::test]
     fn a_reset_holds_its_old_session_until_the_replacement_is_installed(cx: &mut TestAppContext) {
@@ -1271,8 +1265,6 @@ mod session_replacement_tests {
             gpui_component::init(cx);
 
             cx.set_global(AgentSettings::default());
-
-            cx.set_global(AgentThreadDefaults::default());
 
             cx.open_window(Default::default(), |window, cx| {
                 let agent =
@@ -1334,10 +1326,10 @@ mod shared_host_recovery_tests {
     use nmt_agent::session::lifecycle::StartOutcome;
     use nmt_config::profile::{AgentKind, AgentProfile};
 
+    use crate::agent_tab::AgentPane;
     use crate::agent_tab::session::{Backend, Status, TestBackend, UpdateSuspension};
     use crate::agent_tab::settings::AgentSettings;
     use crate::agent_tab::tests::deliver_session_event;
-    use crate::agent_tab::{AgentPane, AgentThreadDefaults};
 
     #[gpui::test]
     fn a_host_exit_retains_the_thread_for_retry(cx: &mut TestAppContext) {
@@ -1354,8 +1346,6 @@ mod shared_host_recovery_tests {
             gpui_component::init(cx);
 
             cx.set_global(AgentSettings::default());
-
-            cx.set_global(AgentThreadDefaults::default());
 
             cx.open_window(Default::default(), |window, cx| {
                 let agent =
@@ -1445,10 +1435,10 @@ mod command_catalog_cache_tests {
     use nmt_agent::session::lifecycle::StartOutcome;
     use nmt_config::profile::{AgentKind, AgentProfile};
 
+    use crate::agent_tab::AgentPane;
     use crate::agent_tab::session::{Backend, TestBackend};
     use crate::agent_tab::settings::AgentSettings;
     use crate::agent_tab::tests::deliver_session_event;
-    use crate::agent_tab::{AgentPane, AgentThreadDefaults};
 
     fn open_pane(
         cx: &mut TestAppContext,
@@ -1467,8 +1457,6 @@ mod command_catalog_cache_tests {
             gpui_component::init(cx);
 
             cx.set_global(AgentSettings::default());
-
-            cx.set_global(AgentThreadDefaults::default());
 
             cx.open_window(Default::default(), |window, cx| {
                 let agent =

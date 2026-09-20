@@ -14,19 +14,6 @@ fn save_load_roundtrip_and_legacy_file_defaults() {
     assert_eq!(try_load_from(&path).unwrap(), LocalState::default());
 
     let state = LocalState {
-        agent_defaults: [(
-            "claude".to_string(),
-            AgentDefaults {
-                model: Some("opus".to_string()),
-                approval: Some("acceptEdits".to_string()),
-                approvals_reviewer: None,
-                sandbox: None,
-                effort: Some("high".to_string()),
-                tier: None,
-                agent_preset: None,
-            },
-        )]
-        .into(),
         windows: vec![
             WindowLocalState {
                 window: Some(WindowState {
@@ -55,8 +42,20 @@ fn save_load_roundtrip_and_legacy_file_defaults() {
                                 agent_profile: None,
                                 team_room: None,
                                 git_cwd: None,
+                                agent_settings: None,
                                 panes: None,
                                 grid_size: Some((132, 43)),
+                            },
+                            TabState {
+                                agent: Some("claude".into()),
+                                agent_profile: Some("reviewer".into()),
+                                agent_settings: Some(AgentTabSettings {
+                                    model: Some("opus".into()),
+                                    approval: Some("acceptEdits".into()),
+                                    effort: Some("high".into()),
+                                    ..AgentTabSettings::default()
+                                }),
+                                ..TabState::default()
                             },
                             TabState {
                                 team_room: Some("40000000-0000-4000-8000-000000000000".into()),
@@ -122,112 +121,26 @@ fn try_load_defaults_when_missing_and_errors_on_bad_toml() {
 }
 
 #[test]
-fn save_agent_defaults_updates_only_agent_defaults() {
-    let dir = env::temp_dir().join("NiumaTerm-local-state-agent-defaults-test");
-    let _ = fs::remove_dir_all(&dir);
-    let path = dir.join("local_state.toml");
-
-    let initial = LocalState {
-        windows: vec![WindowLocalState {
-            window: Some(WindowState {
-                x: 10.0,
-                y: 20.0,
-                width: 900.0,
-                height: 600.0,
-                maximized: false,
-            }),
-            session: None,
-            sidebar_width: Some(240.0),
-        }],
-        agent_defaults: [(
-            "claude".to_string(),
-            AgentDefaults {
-                model: Some("sonnet".to_string()),
-                ..AgentDefaults::default()
-            },
-        )]
-        .into(),
-    };
-
-    save_to(&path, &initial).unwrap();
-
-    let defaults: BTreeMap<_, _> = [
-        (
-            "claude".to_string(),
-            AgentDefaults {
-                model: Some("opus".to_string()),
-                approval: Some("acceptEdits".to_string()),
-                ..AgentDefaults::default()
-            },
-        ),
-        (
-            "codex".to_string(),
-            AgentDefaults {
-                model: Some("gpt-5.6-codex".to_string()),
-                approvals_reviewer: Some("auto_review".to_string()),
-                effort: Some("high".to_string()),
-                ..AgentDefaults::default()
-            },
-        ),
-    ]
-    .into();
-
-    save_agent_defaults_to(&path, &defaults).unwrap();
-
-    let saved = try_load_from(&path).unwrap();
-
-    assert_eq!(saved.windows, initial.windows);
-    assert_eq!(saved.agent_defaults, defaults);
-
-    let _ = fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn windows_and_profile_updates_preserve_other_writers() {
+fn globally_stored_agent_defaults_are_ignored() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("local_state.toml");
 
-    let first: BTreeMap<_, _> = [(
-        "first".to_string(),
-        AgentDefaults {
-            model: Some("model-a".to_string()),
-            ..AgentDefaults::default()
-        },
-    )]
-    .into();
+    // Written by a build that kept one set of thread controls per profile
+    // instead of per tab. The tabs now carry their own, so the old table is
+    // read as an unknown key and dropped on the next save.
+    let legacy = "[agent_defaults.claude]\nmodel = \"opus\"\n";
 
-    let second: BTreeMap<_, _> = [(
-        "second".to_string(),
-        AgentDefaults {
-            model: Some("model-b".to_string()),
-            ..AgentDefaults::default()
-        },
-    )]
-    .into();
+    fs::write(&path, legacy).unwrap();
 
-    save_agent_defaults_to(&path, &first).unwrap();
-
-    let windows = vec![WindowLocalState {
-        sidebar_width: Some(320.0),
-        ..WindowLocalState::default()
-    }];
-
-    save_windows_to(&path, &windows).unwrap();
-
-    save_agent_defaults_to(&path, &second).unwrap();
-
-    let state = try_load_from(&path).unwrap();
-
-    assert_eq!(state.windows, windows);
-    assert_eq!(state.agent_defaults["first"], first["first"]);
-    assert_eq!(state.agent_defaults["second"], second["second"]);
+    assert_eq!(try_load_from(&path).unwrap(), LocalState::default());
 
     save_windows_to(&path, &[]).unwrap();
 
-    let cleared = try_load_from(&path).unwrap();
-
-    assert!(cleared.windows.is_empty());
-    assert_eq!(cleared.agent_defaults, state.agent_defaults);
+    assert!(
+        !fs::read_to_string(&path)
+            .unwrap()
+            .contains("agent_defaults")
+    );
 }
 
 #[test]
@@ -242,7 +155,6 @@ fn local_state_read_errors_are_reported_and_preserved() {
         io::ErrorKind::InvalidData
     );
     assert!(save_windows_to(&path, &[]).is_err());
-    assert!(save_agent_defaults_to(&path, &BTreeMap::new()).is_err());
     assert_eq!(fs::read(&path).unwrap(), [0xff]);
 }
 
@@ -264,6 +176,7 @@ fn pane_layout_roundtrips_and_old_snapshots_load_without_it() {
         team_room: None,
         grid_size: Some((80, 36)),
         git_cwd: None,
+        agent_settings: None,
         panes: Some(PaneNodeState::Split {
             axis: PaneSplitAxis::Horizontal,
             ratios: vec![0.6, 0.4],
@@ -297,7 +210,6 @@ fn pane_layout_roundtrips_and_old_snapshots_load_without_it() {
     };
 
     let state = LocalState {
-        agent_defaults: Default::default(),
         windows: vec![WindowLocalState {
             window: None,
             session: Some(SessionState {
@@ -321,7 +233,6 @@ fn pane_layout_roundtrips_and_old_snapshots_load_without_it() {
 
     // A single-pane tab serializes without any `panes` key at all.
     let flat = LocalState {
-        agent_defaults: Default::default(),
         windows: vec![WindowLocalState {
             window: None,
             session: Some(SessionState {
@@ -408,7 +319,6 @@ active_tab = 0
     // A workspace without additions writes no key at all, so an older
     // build reads back exactly what it wrote.
     let single = LocalState {
-        agent_defaults: Default::default(),
         windows: vec![WindowLocalState {
             window: None,
             session: Some(SessionState {

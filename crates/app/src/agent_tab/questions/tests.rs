@@ -12,10 +12,10 @@ use nmt_agent::session::test_support::TestBackend;
 use nmt_agent::session::{AgentKind, Backend};
 use nmt_config::profile::AgentProfile;
 
+use crate::agent_tab::AgentPane;
 use crate::agent_tab::questions::{QuestionEditorState, QuestionPresentation};
 use crate::agent_tab::settings::AgentSettings;
 use crate::agent_tab::tests::deliver_session_event;
-use crate::agent_tab::{AgentPane, AgentThreadDefaults};
 
 fn open_pane(cx: &mut TestAppContext) -> (Entity<AgentPane>, WindowHandle<Root>) {
     let profile = AgentProfile {
@@ -31,8 +31,6 @@ fn open_pane(cx: &mut TestAppContext) -> (Entity<AgentPane>, WindowHandle<Root>)
         gpui_component::init(cx);
 
         cx.set_global(AgentSettings::default());
-
-        cx.set_global(AgentThreadDefaults::default());
 
         cx.open_window(Default::default(), |window, cx| {
             let agent = cx.new(|cx| AgentPane::new(profile, AgentWorkspace::default(), window, cx));

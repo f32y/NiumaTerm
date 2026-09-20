@@ -10,7 +10,7 @@ mod tests;
 
 use app::agent_tab::execution::AgentSession;
 use app::agent_tab::team::{TeamPane, TeamRuntime};
-use app::agent_tab::{AgentKind, AgentPane};
+use app::agent_tab::{AgentKind, AgentPane, thread_settings_from_saved};
 use app::terminal_tab::view::TerminalPane;
 use dirs::home_dir;
 use gpui::{App, AppContext, Axis, Context, Entity, Window};
@@ -301,6 +301,18 @@ pub(super) fn materialize_active_tab(
             );
 
             let owner = AgentSession::create(profile, workspace, None, cx);
+
+            // The tab reopens on the controls it was left set to; a tab the
+            // user never adjusted saved none and starts from its profile.
+            if let Some(saved) = state.agent_settings.as_ref() {
+                let settings = thread_settings_from_saved(saved);
+
+                owner
+                    .session()
+                    .clone()
+                    .update(cx, |session, _| session.remember_settings(settings));
+            }
+
             let pane = cx.new(|cx| AgentPane::attach(&owner, window, cx));
 
             AppWindow::watch_agent_tab(&pane, cx);

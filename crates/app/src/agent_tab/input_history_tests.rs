@@ -23,8 +23,7 @@ use crate::agent_tab::session::{Backend, TestBackend};
 use crate::agent_tab::settings::AgentSettings;
 use crate::agent_tab::tests::deliver_session_event;
 use crate::agent_tab::{
-    AgentKind, AgentPane, AgentThreadDefaults, PaletteControl, RecentSessionsMode,
-    replace_input_with_history,
+    AgentKind, AgentPane, PaletteControl, RecentSessionsMode, replace_input_with_history,
 };
 
 static NEXT_TEST_DIRECTORY: AtomicU64 = AtomicU64::new(1);
@@ -103,8 +102,6 @@ fn open_test_pane(
         gpui_component::init(cx);
 
         cx.set_global(AgentSettings::default());
-
-        cx.set_global(AgentThreadDefaults::default());
 
         cx.set_global(AgentInputHistory(InputHistoryService::open(history_path)));
 

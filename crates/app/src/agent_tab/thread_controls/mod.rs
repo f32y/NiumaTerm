@@ -1,5 +1,5 @@
 pub(super) use crate::agent_tab::thread_controls::defaults::{
-    launch_effort, launch_model, remember_defaults, stored_thread_settings,
+    launch_effort, launch_model, remember_defaults,
 };
 
 pub(super) mod effort;

@@ -10,7 +10,7 @@ use crate::session::history::{CountPublication, SessionHistory};
 use crate::session::lifecycle::{SessionRuntime, Status};
 use crate::session::naming::ConversationNaming;
 use crate::session::restore::SettingsSeed;
-use crate::session::settings::{ConversationSettings, RememberedSettings};
+use crate::session::settings::ConversationSettings;
 use crate::session::test_support::TestBackend;
 use crate::session::update_readiness::{ConversationWork, Readiness};
 use crate::session::workflows::WorkflowData;
@@ -116,47 +116,6 @@ fn ready_priority_keeps_profile_then_current_then_branch_settings() {
 
     assert_eq!(settings.settings.model.as_deref(), Some("branch"));
     assert!(settings.restore_on_ready.is_none());
-}
-
-#[test]
-fn remembered_profiles_fall_back_to_legacy_provider_without_crossing_named_profiles() {
-    let mut settings = RememberedSettings::default();
-
-    settings.remember(
-        AgentKind::Codex,
-        "",
-        ThreadSettings {
-            model: Some("legacy".into()),
-            ..Default::default()
-        },
-    );
-
-    settings.remember(
-        AgentKind::Codex,
-        "work",
-        ThreadSettings {
-            model: Some("work-model".into()),
-            ..Default::default()
-        },
-    );
-
-    assert_eq!(
-        settings
-            .get(AgentKind::Codex, "work")
-            .unwrap()
-            .model
-            .as_deref(),
-        Some("work-model")
-    );
-    assert_eq!(
-        settings
-            .get(AgentKind::Codex, "personal")
-            .unwrap()
-            .model
-            .as_deref(),
-        Some("legacy")
-    );
-    assert!(settings.get(AgentKind::Claude, "personal").is_none());
 }
 
 fn summary(id: &str) -> SessionSummary {

@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::mem::take;
 
 use crate::chat::{AgentPreset, ApprovalPreset, ModelInfo, ThreadSettings};
@@ -222,45 +221,5 @@ impl ConversationSettings {
         }
 
         self.settings.model = Some(model);
-    }
-}
-
-#[derive(Default)]
-pub struct RememberedSettings(HashMap<String, ThreadSettings>);
-
-impl RememberedSettings {
-    pub fn from_entries(entries: impl IntoIterator<Item = (String, ThreadSettings)>) -> Self {
-        Self(entries.into_iter().collect())
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = (&String, &ThreadSettings)> {
-        self.0.iter()
-    }
-
-    pub fn get(&self, kind: AgentKind, profile_name: &str) -> Option<&ThreadSettings> {
-        self.0
-            .get(Self::key(kind, profile_name))
-            .or_else(|| self.0.get(kind.into()))
-    }
-
-    pub fn remember(
-        &mut self,
-        kind: AgentKind,
-        profile_name: &str,
-        settings: ThreadSettings,
-    ) -> String {
-        let key = Self::key(kind, profile_name).to_owned();
-
-        self.0.insert(key.clone(), settings);
-
-        key
-    }
-
-    fn key(kind: AgentKind, profile_name: &str) -> &str {
-        if profile_name.trim().is_empty() {
-            kind.into()
-        } else {
-            profile_name
-        }
     }
 }

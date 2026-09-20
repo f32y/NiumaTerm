@@ -50,14 +50,18 @@ impl MemberHost {
         });
     }
 
-    /// Make `settings` the settings the member's next turn runs with.
+    /// Make `settings` the settings the member's next turn runs with. The
+    /// session also keeps them as its own, so a conversation it opens later
+    /// starts on the room's values rather than back on the profile's.
     pub(super) fn apply_settings(&self, settings: ThreadSettings, cx: &mut App) {
         self.owner.session().update(cx, |session, cx| {
             session
                 .controller
                 .borrow_mut()
                 .controls
-                .set_settings(settings);
+                .set_settings(settings.clone());
+
+            session.remember_settings(settings);
 
             cx.notify();
         });

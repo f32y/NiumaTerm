@@ -22,7 +22,7 @@ use std::future::Future;
 use std::rc::Rc;
 use std::{env, path, process, time};
 
-use app::agent_tab::{AgentThreadDefaults, input_history, thread_settings_from_defaults};
+use app::agent_tab::input_history;
 use app::assets::AppAssets;
 use app::{syntax, utils};
 use clap::{Arg, ArgAction, Command as ClapCommand};
@@ -402,10 +402,6 @@ fn on_finish_launching(
 
     cx.set_global(WindowRegistry::default());
     cx.set_global(LastActiveWindow(None));
-
-    cx.set_global::<AgentThreadDefaults>(thread_settings_from_defaults(
-        &remembered_state.agent_defaults,
-    ));
 
     // The callback needs the service globals and window registry. Applying
     // settings before opening windows also configures their first frame.

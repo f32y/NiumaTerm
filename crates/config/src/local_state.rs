@@ -8,7 +8,6 @@
 #[path = "local_state_tests.rs"]
 mod local_state_tests;
 
-use std::collections::BTreeMap;
 #[cfg(test)]
 use std::fs;
 use std::io;
@@ -27,18 +26,13 @@ fn is_false(value: &bool) -> bool {
 pub struct LocalState {
     #[serde(default)]
     pub windows: Vec<WindowLocalState>,
-
-    /// Last-chosen agent thread settings per agent profile name (older
-    /// snapshots keyed by agent ID, which still reads as a fallback);
-    /// newly opened agent tabs seed their dropdowns from these.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub agent_defaults: BTreeMap<String, AgentDefaults>,
 }
 
-/// The thread-settings picks worth carrying into the next conversation from
-/// the same agent profile. All optional: `None` leaves the CLI's own default.
+/// The thread-settings picks one agent tab is running under, carried into the
+/// conversations that tab opens later. All optional: `None` leaves the value
+/// the launch profile and the CLI resolve between them.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct AgentDefaults {
+pub struct AgentTabSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -154,6 +148,13 @@ pub struct TabState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git_cwd: Option<String>,
 
+    /// Thread controls this agent tab was last running under. Absent for a
+    /// tab the user never adjusted, which reopens on its profile's defaults.
+    /// Declared with `panes` below the scalars: TOML requires tables after
+    /// plain values.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_settings: Option<AgentTabSettings>,
+
     /// Split-pane layout for a multi-pane tab. Absent for single-pane tabs,
     /// which keep the flat fields above as their whole format (so snapshots
     /// without splits stay readable by older builds). Declared last: TOML
@@ -220,35 +221,18 @@ fn decode(content: Option<&str>) -> io::Result<LocalState> {
     )
 }
 
-/// Update only the supplied profiles, preserving windows and other profiles
-/// that may have been written by another application instance.
-pub fn save_agent_defaults(agent_defaults: &BTreeMap<String, AgentDefaults>) -> io::Result<()> {
-    save_agent_defaults_to(&local_state_file_path(), agent_defaults)
-}
-
-fn save_agent_defaults_to(
-    path: &Path,
-    agent_defaults: &BTreeMap<String, AgentDefaults>,
-) -> io::Result<()> {
-    update_state(path, |state| {
-        state.agent_defaults.extend(agent_defaults.clone());
-    })
-}
-
-/// Save window state without replacing newer profile choices on disk.
+/// Save window state. The read-modify-replace cycle runs under the lock in
+/// `persistence::update`, and a file that fails to decode is left untouched
+/// rather than overwritten with what this instance happens to hold.
 pub fn save_windows(windows: &[WindowLocalState]) -> io::Result<()> {
     save_windows_to(&local_state_file_path(), windows)
 }
 
 fn save_windows_to(path: &Path, windows: &[WindowLocalState]) -> io::Result<()> {
-    update_state(path, |state| state.windows = windows.to_vec())
-}
-
-fn update_state(path: &Path, edit: impl FnOnce(&mut LocalState)) -> io::Result<()> {
     persistence::update(path, |content| {
         let mut state = decode(content)?;
 
-        edit(&mut state);
+        state.windows = windows.to_vec();
 
         serialize_toml(&state).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
     })

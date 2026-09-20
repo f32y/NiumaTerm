@@ -23,7 +23,6 @@ use nmt_agent::team::session::{AttemptEventKey, TeamError, TeamSession};
 use nmt_config::profile::{AgentProfile, EnvVar};
 use tempfile::tempdir;
 
-use crate::agent_tab::AgentThreadDefaults;
 use crate::agent_tab::execution::AgentSession;
 use crate::agent_tab::settings::AgentSettings;
 use crate::agent_tab::team::dispatch::CONTEXT_LIMITS;
@@ -46,8 +45,6 @@ async fn claude_member_startup_retains_native_permission_selection(cx: &mut Test
         gpui_component::init(cx);
 
         cx.set_global(AgentSettings::default());
-
-        cx.set_global(AgentThreadDefaults::default());
 
         let runtime = TeamRuntime::create(directory.path(), AgentWorkspace::default(), cx);
 
@@ -206,8 +203,6 @@ async fn reopened_request(cx: &mut TestAppContext, completed: bool) {
 
         cx.set_global(AgentSettings::default());
 
-        cx.set_global(AgentThreadDefaults::default());
-
         let runtime = cx.new(|cx| TeamRuntime::new(saved, cx.background_executor().clone()));
 
         let owner = AgentSession::create(
@@ -365,8 +360,6 @@ async fn sent_team_request_displays_stream_before_completion(cx: &mut TestAppCon
         gpui_component::init(cx);
 
         cx.set_global(AgentSettings::default());
-
-        cx.set_global(AgentThreadDefaults::default());
 
         let mut session =
             TeamSession::create(directory.path(), Room::new(AgentWorkspace::default())).unwrap();
@@ -634,7 +627,6 @@ async fn completed_reply_waits_for_background_work_before_advancing(cx: &mut Tes
 
     let (runtime, host, member, epoch) = cx.update(|cx| {
         cx.set_global(AgentSettings::default());
-        cx.set_global(AgentThreadDefaults::default());
 
         let mut room = Room::new(AgentWorkspace::default());
 
@@ -789,8 +781,6 @@ async fn member_question_shows_in_team_composer_and_blocks_new_requests(cx: &mut
         gpui_component::init(cx);
 
         cx.set_global(AgentSettings::default());
-
-        cx.set_global(AgentThreadDefaults::default());
 
         let mut session =
             TeamSession::create(directory.path(), Room::new(AgentWorkspace::default())).unwrap();
@@ -954,8 +944,6 @@ async fn member_conversation_is_named_after_the_request_once(cx: &mut TestAppCon
 
         cx.set_global(AgentSettings::default());
 
-        cx.set_global(AgentThreadDefaults::default());
-
         let mut session =
             TeamSession::create(directory.path(), Room::new(AgentWorkspace::default())).unwrap();
 
@@ -1092,8 +1080,6 @@ async fn a_message_written_in_the_member_view_is_a_team_request(cx: &mut TestApp
         gpui_component::init(cx);
 
         cx.set_global(AgentSettings::default());
-
-        cx.set_global(AgentThreadDefaults::default());
 
         let mut session =
             TeamSession::create(directory.path(), Room::new(AgentWorkspace::default())).unwrap();

@@ -19,9 +19,7 @@ use crate::agent_tab::composer::attachments::scratch_dir;
 use crate::agent_tab::execution::{AgentSession, SessionRegistry};
 use crate::agent_tab::settings::AgentSettings;
 use crate::agent_tab::transcript::TranscriptView;
-use crate::agent_tab::{
-    AgentKind, AgentPane, AgentPaneEvent, AgentThreadDefaults, RecoveryReadiness,
-};
+use crate::agent_tab::{AgentKind, AgentPane, AgentPaneEvent, RecoveryReadiness};
 
 #[gpui::test]
 async fn detached_session_retains_output_and_interaction_until_owner_close(
@@ -31,8 +29,6 @@ async fn detached_session_retains_output_and_interaction_until_owner_close(
         gpui_component::init(cx);
 
         cx.set_global(AgentSettings::default());
-
-        cx.set_global(AgentThreadDefaults::default());
 
         let owner = AgentSession::create(
             AgentProfile {

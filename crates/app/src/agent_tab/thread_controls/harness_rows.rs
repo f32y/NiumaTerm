@@ -314,9 +314,6 @@ fn update_settings(
         return false;
     };
 
-    let kind = host.read(cx).kind;
-    let profile = host.read(cx).profile.clone();
-
     update(&mut pane.session.borrow_mut().controls);
 
     // A Team member's settings belong to its room, which persists them from
@@ -330,7 +327,7 @@ fn update_settings(
         return true;
     }
 
-    remember_defaults(&pane.session.borrow().controls, kind, &profile, cx);
+    remember_defaults(pane, cx);
 
     true
 }

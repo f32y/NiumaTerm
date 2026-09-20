@@ -4,6 +4,7 @@
 #[path = "snapshot_tests.rs"]
 mod tests;
 
+use app::agent_tab::saved_settings_from_thread;
 use app::terminal_tab::view::TerminalPane;
 use gpui::{App, Axis, Entity};
 use nmt_config::local_state::{
@@ -151,14 +152,19 @@ pub(crate) fn session_state(
                         }
                         // Agent conversations are not persisted (the
                         // agent process and its thread die with the app);
-                        // the saved kind reopens a fresh agent tab.
+                        // the saved kind reopens a fresh agent tab, running
+                        // on the thread controls this one was left set to.
                         TabSurface::Agent(tab) => {
-                            let profile = tab.owner.session().read(cx).profile();
+                            let session = tab.owner.session().read(cx);
+                            let profile = session.profile();
                             let agent: &str = profile.kind.into();
 
                             TabState {
                                 agent: Some(agent.into()),
                                 agent_profile: Some(profile.name.clone()),
+                                agent_settings: session
+                                    .remembered_settings()
+                                    .map(saved_settings_from_thread),
                                 ..TabState::default()
                             }
                         }

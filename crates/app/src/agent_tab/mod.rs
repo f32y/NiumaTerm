@@ -8,7 +8,7 @@
 //! coordinator drives across a backend replacement.
 
 pub use crate::agent_tab::profile::{
-    AgentKind, AgentKindExt, AgentThreadDefaults, agent_launch, thread_settings_from_defaults,
+    AgentKind, AgentKindExt, agent_launch, saved_settings_from_thread, thread_settings_from_saved,
 };
 pub use crate::agent_tab::session::{
     RecoveryIdentity, RecoveryReadiness, RecoverySnapshot, RestorationReadiness,
@@ -1477,7 +1477,6 @@ impl AgentPane {
         };
 
         let session_kind = session_host.read(cx).kind;
-        let session_profile = session_host.read(cx).profile.clone();
 
         if !self.binding.is_current() {
             return false;
@@ -1508,12 +1507,7 @@ impl AgentPane {
             SlashRoute::Model(value) => {
                 self.session.borrow_mut().controls.set_model(value.clone());
 
-                remember_defaults(
-                    &self.session.borrow().controls,
-                    session_kind,
-                    &session_profile,
-                    cx,
-                );
+                remember_defaults(self, cx);
 
                 self.palette.set_feedback(
                     CommandFeedbackKind::Notice,
@@ -1532,12 +1526,7 @@ impl AgentPane {
             SlashRoute::Permissions(value) => {
                 self.session.borrow_mut().controls.settings.approval = Some(value.clone());
 
-                remember_defaults(
-                    &self.session.borrow().controls,
-                    session_kind,
-                    &session_profile,
-                    cx,
-                );
+                remember_defaults(self, cx);
 
                 self.palette.set_feedback(
                     CommandFeedbackKind::Notice,
@@ -1668,16 +1657,9 @@ impl AgentPane {
                 // conversation it opens, so a switch it accepted is remembered
                 // for the next one, whether it was picked or typed.
                 if let Some(preset) = approval {
-                    let session_profile = session_host.read(cx).profile.clone();
-
                     self.session.borrow_mut().controls.settings.approval = Some(preset);
 
-                    remember_defaults(
-                        &self.session.borrow().controls,
-                        session_kind,
-                        &session_profile,
-                        cx,
-                    );
+                    remember_defaults(self, cx);
                 }
 
                 self.palette.set_feedback(
@@ -2193,12 +2175,10 @@ impl AgentPane {
     }
 
     pub(super) fn present_session_effect(&mut self, effect: SessionEffect, cx: &mut Context<Self>) {
-        let Some(session_host) = self.host.upgrade() else {
+        // A pane outliving its session has no effect left to present.
+        if self.host.upgrade().is_none() {
             return;
-        };
-
-        let session_kind = session_host.read(cx).kind;
-        let session_profile = session_host.read(cx).profile.clone();
+        }
 
         self.transcript
             .update(cx, |transcript, _| transcript.sync_content());
@@ -2244,12 +2224,7 @@ impl AgentPane {
                 failure,
             } => self.on_error(message, fatal, failure, cx),
             SessionEffect::EffortRejected { message } => {
-                remember_defaults(
-                    &self.session.borrow().controls,
-                    session_kind,
-                    &session_profile,
-                    cx,
-                );
+                remember_defaults(self, cx);
 
                 self.palette
                     .set_feedback(CommandFeedbackKind::Error, message, cx);
@@ -2347,16 +2322,9 @@ impl AgentPane {
                 // accepted permission switch here, and it is remembered for
                 // the next conversation the same way an immediate answer is.
                 if let Some(preset) = approval {
-                    let session_profile = session_host.read(cx).profile.clone();
-
                     self.session.borrow_mut().controls.settings.approval = Some(preset);
 
-                    remember_defaults(
-                        &self.session.borrow().controls,
-                        session_kind,
-                        &session_profile,
-                        cx,
-                    );
+                    remember_defaults(self, cx);
                 }
 
                 self.palette.set_feedback(
@@ -3447,21 +3415,9 @@ impl AgentPane {
             SettingsOutcome::Effective
             | SettingsOutcome::Requested
             | SettingsOutcome::RidesNextSubmission => {
-                let Some(session_host) = self.host.upgrade() else {
-                    return;
-                };
-
-                let session_kind = session_host.read(cx).kind;
-                let session_profile = session_host.read(cx).profile.clone();
-
                 // The harness composes an agent only when a conversation is
                 // created, so the pick is remembered for the next creation.
-                remember_defaults(
-                    &self.session.borrow().controls,
-                    session_kind,
-                    &session_profile,
-                    cx,
-                );
+                remember_defaults(self, cx);
 
                 cx.notify()
             }

@@ -1,9 +1,9 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
+use app::agent_tab::AgentPane;
 use app::agent_tab::execution::AgentSession;
 use app::agent_tab::settings::AgentSettings;
-use app::agent_tab::{AgentPane, AgentThreadDefaults};
 use gpui::{AppContext as _, TestAppContext};
 use nmt_agent::AgentWorkspace;
 use nmt_config::profile::AgentProfile;
@@ -23,8 +23,6 @@ fn empty_tabs_clear_panel_targets_and_close_background_tasks(cx: &mut TestAppCon
         cx.set_global(AppSettings::default());
 
         cx.set_global(AgentSettings::default());
-
-        cx.set_global(AgentThreadDefaults::default());
     });
 
     let cx = cx.add_empty_window();

@@ -22,7 +22,9 @@ use futures::channel::mpsc::UnboundedReceiver;
 use futures::stream::ReadyChunks;
 use gpui::{App, AppContext as _, AsyncApp, Context, Entity, EventEmitter, Task, WeakEntity};
 use nmt_agent::background_task::BackgroundTaskKey;
-use nmt_agent::chat::{Event, Item, QuestionMode, SlashCommandOutcome, TeamDecisionRequest};
+use nmt_agent::chat::{
+    Event, Item, QuestionMode, SlashCommandOutcome, TeamDecisionRequest, ThreadSettings,
+};
 use nmt_agent::launcher::AgentCli;
 use nmt_agent::session::branch::{BranchUpdate, CheckpointRead};
 use nmt_agent::session::capabilities::AgentCapabilities as _;
@@ -55,7 +57,7 @@ use crate::agent_tab::execution::inbox::{
 use crate::agent_tab::profile::{AgentKind, agent_launch};
 use crate::agent_tab::session::RestorationReadiness;
 use crate::agent_tab::settings::AgentSettings;
-use crate::agent_tab::thread_controls::{launch_effort, launch_model, stored_thread_settings};
+use crate::agent_tab::thread_controls::{launch_effort, launch_model};
 use crate::agent_tab::{AgentPaneEvent, RecoveryReadiness};
 use crate::utils::on_runtime;
 
@@ -88,6 +90,12 @@ pub struct AgentSession {
     /// apart from `workspace` so an edit never changes what a process already
     /// running was granted.
     pub(super) active_workspace: AgentWorkspace,
+
+    /// The thread controls this tab runs under, carried from one conversation
+    /// to the next one it opens. It is the tab's own state: a tab created now
+    /// starts from its launch profile, and the session snapshot saves this
+    /// alongside the tab so a restored one reopens on what the user picked.
+    remembered: Option<ThreadSettings>,
 
     pub(super) route: AgentRoute,
     pub(super) kind: AgentKind,
@@ -241,6 +249,7 @@ impl AgentSession {
             profile,
             active_workspace: workspace.clone(),
             workspace,
+            remembered: None,
             route: agent_process().allocate_route(),
             kind,
             id: SessionId(Uuid::new_v4()),
@@ -299,6 +308,16 @@ impl AgentSession {
 
     pub fn profile(&self) -> &AgentProfile {
         &self.profile
+    }
+
+    /// What this tab has been left set to, `None` while it still runs on its
+    /// launch profile's values.
+    pub fn remembered_settings(&self) -> Option<&ThreadSettings> {
+        self.remembered.as_ref()
+    }
+
+    pub fn remember_settings(&mut self, settings: ThreadSettings) {
+        self.remembered = Some(settings);
     }
 
     pub fn downgrade(owner: &SessionOwner) -> WeakEntity<Self> {
@@ -551,7 +570,7 @@ impl AgentSession {
             return;
         }
 
-        self.prepare_defaults(cx);
+        self.prepare_defaults();
 
         let event = match event {
             Event::HostExited { message } => {
@@ -1159,7 +1178,8 @@ impl AgentSession {
 
             if kind.caps().model_baked_into_launch {
                 launch.model = session.controls.settings.model.clone().or_else(|| {
-                    stored_thread_settings(kind, &self.profile, cx)
+                    self.remembered
+                        .as_ref()
                         .and_then(|stored| stored.model.clone())
                 });
             }
@@ -1171,7 +1191,8 @@ impl AgentSession {
             launch.agent_preset = if preserve_settings {
                 session.controls.settings.agent_preset.clone()
             } else {
-                stored_thread_settings(kind, &self.profile, cx)
+                self.remembered
+                    .as_ref()
                     .and_then(|stored| stored.agent_preset.clone())
             };
 
@@ -1180,7 +1201,7 @@ impl AgentSession {
 
         cx.emit(AgentPaneEvent::Interrupted);
 
-        self.prepare_defaults(cx);
+        self.prepare_defaults();
 
         let workspace = self.active_workspace.clone();
 
@@ -1365,17 +1386,17 @@ impl AgentSession {
         });
     }
 
-    pub(crate) fn prepare_defaults(&self, cx: &Context<Self>) {
+    pub(crate) fn prepare_defaults(&self) {
         let seed = self.controller.borrow().controls.seed;
 
         let defaults = match seed {
             SettingsSeed::Defaults => ReadyDefaults {
-                stored: stored_thread_settings(self.kind, &self.profile, cx).cloned(),
+                stored: self.remembered.clone(),
                 model: launch_model(self.kind, &self.profile),
                 effort: launch_effort(&self.profile),
             },
             SettingsSeed::Reviewer => ReadyDefaults {
-                stored: stored_thread_settings(self.kind, &self.profile, cx).cloned(),
+                stored: self.remembered.clone(),
                 ..ReadyDefaults::default()
             },
             SettingsSeed::None => ReadyDefaults::default(),
