@@ -66,8 +66,8 @@ fn shutting_runs_the_same_ramp_backwards() {
     reveals.close(RevealKey::Row(1), start);
 
     let closing = reveals.progress(RevealKey::Row(1), start);
-    let middle = reveals.progress(RevealKey::Row(1), start + REVEAL_DURATION / 2);
-    let gone = reveals.progress(RevealKey::Row(1), start + REVEAL_DURATION);
+    let middle = reveals.progress(RevealKey::Row(1), start + DISMISS_DURATION / 2);
+    let gone = reveals.progress(RevealKey::Row(1), start + DISMISS_DURATION);
 
     assert_eq!(closing, 1.0, "leaves from where it was sitting");
     assert!(
@@ -88,7 +88,7 @@ fn reversing_resumes_from_what_is_on_screen() {
 
     reveals.close(RevealKey::Row(1), start);
 
-    let turn = start + REVEAL_DURATION / 10;
+    let turn = start + DISMISS_DURATION / 10;
     let leaving = reveals.progress(RevealKey::Row(1), turn);
 
     reveals.open(RevealKey::Row(1), turn);
@@ -137,7 +137,52 @@ fn only_a_finished_exit_asks_to_be_taken_down() {
 
     assert!(reveals.shut(start).is_empty());
     assert_eq!(
-        reveals.shut(start + REVEAL_DURATION),
+        reveals.shut(start + DISMISS_DURATION),
         vec![RevealKey::Group(0)]
     );
+}
+
+/// The exit runs over a span of its own, short enough that the space comes
+/// back before an entrance would be half over. Content that leaves by fading
+/// rather than by height holds its full height for the whole exit, so an exit
+/// as long as an entrance leaves the reader watching nothing move: what they
+/// clicked for is the space closing up, and that only happens here.
+#[test]
+fn an_exit_hands_the_space_back_inside_an_entrance() {
+    let mut reveals = Reveals::default();
+
+    let start = Instant::now();
+
+    reveals.close(RevealKey::Annotation(4), start);
+
+    assert!(reveals.shut(start).is_empty());
+    assert_eq!(
+        reveals.shut(start + REVEAL_DURATION / 2),
+        vec![RevealKey::Annotation(4)]
+    );
+}
+
+/// Reversing between the two spans still picks up from what is on screen. The
+/// entrance and the exit cover the same distance over different times, so the
+/// resumed start has to be expressed in the span it is resuming into.
+#[test]
+fn reversing_into_the_shorter_exit_keeps_the_screen_still() {
+    let mut reveals = Reveals::default();
+
+    let start = Instant::now();
+
+    reveals.open(RevealKey::Row(1), start);
+
+    let turn = start + REVEAL_DURATION / 10;
+    let arriving = reveals.progress(RevealKey::Row(1), turn);
+
+    reveals.close(RevealKey::Row(1), turn);
+
+    let leaving = reveals.progress(RevealKey::Row(1), turn);
+
+    assert!(
+        (0.05..0.95).contains(&arriving),
+        "the entrance had actually moved, got {arriving}"
+    );
+    assert!((arriving - leaving).abs() < 0.01, "{arriving} vs {leaving}");
 }

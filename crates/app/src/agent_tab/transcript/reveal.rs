@@ -64,7 +64,7 @@ pub(crate) fn revealed_part(spec: &RowSpec) -> Option<RevealedPart> {
 /// and lifts back the same way as it shuts.
 const REVEAL_RISE: f32 = 4.0;
 
-/// How long any disclosure takes to arrive, and to leave again.
+/// How long any disclosure takes to arrive.
 ///
 /// One duration for every kind of content, so a run of steps and a block of
 /// output opened moments apart read as one gesture rather than as two
@@ -75,6 +75,20 @@ const REVEAL_RISE: f32 = 4.0;
 /// each other they arrive as a cascade, which is a second gesture on top of
 /// the one the reader asked for.
 const REVEAL_DURATION: Duration = Duration::from_millis(300);
+
+/// How long it takes to leave, which is also how long its content is held on
+/// screen after the click that shut it.
+///
+/// The exit runs the entrance's ramp backwards, and that ramp front-loads its
+/// distance: an exit is down to a few percent within its first fifth whatever
+/// span it is given. The rest of the span is the reader waiting for space they
+/// were already shown is going, and the wait is the whole of it for content
+/// that leaves by fading rather than by height — a folded prompt's text swaps
+/// back in one step, and an annotation card fades in place because a
+/// rectangular clip would square off the bubble it is drawn as. Both hold
+/// their full height until the exit ends, so this span is what the reader
+/// waits out before the transcript closes up.
+const DISMISS_DURATION: Duration = Duration::from_millis(120);
 
 /// Which way a disclosure is moving.
 ///
@@ -89,9 +103,30 @@ enum Direction {
     Closing,
 }
 
+impl Direction {
+    /// The span this half of the interaction runs over. Progress is read
+    /// against it, so an exit resumed into an entrance picks up its own span
+    /// from the same reading and the two meet at whatever is on screen.
+    fn span(self) -> Duration {
+        match self {
+            Direction::Opening => REVEAL_DURATION,
+            Direction::Closing => DISMISS_DURATION,
+        }
+    }
+}
+
 struct Reveal {
     started: Instant,
     direction: Direction,
+}
+
+impl Reveal {
+    /// Whether this motion has run its course. The entrance and the exit run
+    /// over spans of their own, so the span is read from the entry rather than
+    /// from whichever one the caller had in mind.
+    fn finished(&self, now: Instant) -> bool {
+        now.saturating_duration_since(self.started) >= self.direction.span()
+    }
 }
 
 /// Every disclosure currently moving, and which way.
@@ -133,7 +168,7 @@ impl Reveals {
                     Direction::Closing => 1.0 - progress,
                 };
 
-                REVEAL_DURATION.mul_f32(ease_out_inverse(covered))
+                direction.span().mul_f32(ease_out_inverse(covered))
             }
             _ => Duration::ZERO,
         };
@@ -167,7 +202,7 @@ impl Reveals {
         };
 
         let elapsed = now.saturating_duration_since(reveal.started);
-        let ramp = ease_out(elapsed.as_secs_f32() / REVEAL_DURATION.as_secs_f32());
+        let ramp = ease_out(elapsed.as_secs_f32() / reveal.direction.span().as_secs_f32());
 
         match reveal.direction {
             Direction::Opening => ramp,
@@ -178,9 +213,7 @@ impl Reveals {
     /// Whether every moving disclosure has finished, which is what decides if
     /// the transcript still needs frames of its own.
     pub(crate) fn settled(&self, now: Instant) -> bool {
-        self.active
-            .values()
-            .all(|reveal| now.saturating_duration_since(reveal.started) >= REVEAL_DURATION)
+        self.active.values().all(|reveal| reveal.finished(now))
     }
 
     /// Disclosures that have finished shutting, which is when the content they
@@ -189,7 +222,7 @@ impl Reveals {
         self.active
             .iter()
             .filter(|(_, reveal)| reveal.direction == Direction::Closing)
-            .filter(|(_, reveal)| now.saturating_duration_since(reveal.started) >= REVEAL_DURATION)
+            .filter(|(_, reveal)| reveal.finished(now))
             .map(|(key, _)| *key)
             .collect()
     }
@@ -208,7 +241,7 @@ impl Reveals {
     pub(crate) fn moving(&self, key: RevealKey, now: Instant) -> bool {
         self.active
             .get(&key)
-            .is_some_and(|reveal| now.saturating_duration_since(reveal.started) < REVEAL_DURATION)
+            .is_some_and(|reveal| !reveal.finished(now))
     }
 
     /// Every disclosure currently shutting, whatever stage it has reached.
