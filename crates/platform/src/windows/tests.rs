@@ -5,12 +5,12 @@ fn command_line_quotes_shell_path_and_args() {
     let args = vec![
         "-NoExit".to_string(),
         "-Command".to_string(),
-        r". 'C:\Program Files\NiumaTerm\assets\pwsh-integration.ps1'".to_string(),
+        r". 'C:\Program Files\NiumaTerm\assets\shell-integrations\nmt-integration.ps1'".to_string(),
     ];
 
     assert_eq!(
         command_line(r"C:\Program Files\PowerShell\7\pwsh.exe", &args),
-        r#""C:\Program Files\PowerShell\7\pwsh.exe" -NoExit -Command ". 'C:\Program Files\NiumaTerm\assets\pwsh-integration.ps1'""#
+        r#""C:\Program Files\PowerShell\7\pwsh.exe" -NoExit -Command ". 'C:\Program Files\NiumaTerm\assets\shell-integrations\nmt-integration.ps1'""#
     );
 }
 

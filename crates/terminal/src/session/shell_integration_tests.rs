@@ -30,7 +30,7 @@ fn integration_config() -> TerminalSessionConfig {
     // The test binary has no exe-relative assets dir; point at the repo script.
     // No canonicalize: its `\\?\` prefix breaks PowerShell dot-sourcing.
     let script = path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..\\..\\assets\\windows\\pwsh-integration.ps1");
+        .join("..\\..\\assets\\shell-integrations\\nmt-integration.ps1");
 
     assert!(script.exists(), "missing {}", script.display());
 
@@ -400,8 +400,8 @@ fn output_after_ris_survives_into_the_block() {
 // ---------------------------------------------------------------------------
 
 fn list_view_session(editor_setup: &str) -> (TerminalSession, Vec<HostEvent>) {
-    let script =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/windows/pwsh-integration.ps1");
+    let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../assets/shell-integrations/nmt-integration.ps1");
 
     let startup = format!(
         "Import-Module PSReadLine -ErrorAction Stop; \

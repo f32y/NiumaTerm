@@ -118,14 +118,14 @@ const ZSH_HOOKS: &str = "nmt-integration.zsh";
 
 const ZSH_FILES: [(&str, &str); 1] = [(
     ZSH_HOOKS,
-    include_str!("../../../../assets/unix/zsh/nmt-integration.zsh"),
+    include_str!("../../../../assets/shell-integrations/nmt-integration.zsh"),
 )];
 
 const BASH_HOOKS: &str = "nmt-integration.bash";
 
 const BASH_FILES: [(&str, &str); 1] = [(
     BASH_HOOKS,
-    include_str!("../../../../assets/unix/bash/nmt-integration.bash"),
+    include_str!("../../../../assets/shell-integrations/nmt-integration.bash"),
 )];
 
 fn zsh_directory() -> Option<&'static Path> {

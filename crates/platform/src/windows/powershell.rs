@@ -13,7 +13,7 @@ pub const DEFAULT_SHELL: &str = "powershell.exe";
 pub const LEGACY_SHELL: &str = r"C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe";
 
 pub const INTEGRATION_SCRIPT: &str =
-    include_str!("../../../../assets/windows/pwsh-integration.ps1");
+    include_str!("../../../../assets/shell-integrations/nmt-integration.ps1");
 
 pub const DEFAULT_CONFIG_SHELL: &str = "powershell";
 

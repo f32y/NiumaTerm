@@ -155,7 +155,7 @@ fn boundary_trust_follows_ordered_prompt_command_output_cycle() {
 
 #[test]
 fn startup_synthetic_cycle_grants_trust_at_first_prompt() {
-    // pwsh-integration.ps1 emits an empty ;A;B;C cycle at dot-source time
+    // nmt-integration.ps1 emits an empty ;A;B;C cycle at dot-source time
     // so the first real prompt's leading ;D completes an ordered lifecycle:
     // trust engages before the first Enter.
     let stream = b"banner\r\n\x1b]133;A\x07\x1b]133;B\x07\x1b]133;C\x07\x1b]133;D\x07\x1b]133;A\x07PS> \x1b]133;B\x07";
