@@ -108,4 +108,21 @@ impl PlatformStyle for MacOs {
     fn agent_usage_row(row: Button) -> Button {
         row.pl_0().pr_1().border_0()
     }
+
+    /// The content column starts under the close button's inner edge, so the
+    /// heading reaches back into the gutter to stand under the button itself.
+    fn sidebar_heading(heading: Div) -> Div {
+        heading.ml(px(-SIDEBAR_ROW_GUTTER))
+    }
+
+    /// The area stays on the content column; only the quota row reaches into
+    /// the gutter.
+    fn sidebar_status(status: Stateful<Div>) -> Stateful<Div> {
+        status
+    }
+
+    /// Symmetric padding keeps the usage text off both edges of the row fill.
+    fn token_usage_row(row: Button) -> Button {
+        row.px_1()
+    }
 }

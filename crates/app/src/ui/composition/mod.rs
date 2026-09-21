@@ -5,7 +5,7 @@ pub(crate) use crate::ui::composition::hover_action::{
 };
 pub(crate) use crate::ui::composition::metrics::{
     FLOATING_SURFACE_BOTTOM_INSET, FLOATING_SURFACE_SIDE_INSET, FLOATING_SURFACE_TOP_INSET,
-    TOOLBAR_BUTTON_SIZE,
+    TOOLBAR_BUTTON_SIZE, TOOLBAR_ICON_SIZE,
 };
 pub(crate) use crate::ui::composition::progress_edge::progress_edge;
 pub(crate) use crate::ui::composition::status_mark::{StatusMark, StatusMarkTone};

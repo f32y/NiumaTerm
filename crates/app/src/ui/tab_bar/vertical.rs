@@ -92,6 +92,16 @@ const TAB_ROW_GAP: f32 = 6.0;
 /// Edge of a tab row's type icon, and the size its label is set at.
 const TAB_ROW_ICON: f32 = 14.0;
 
+/// Edge of the glyph an `xsmall` icon draws inside the slot above.
+const TAB_ROW_GLYPH: f32 = 12.0;
+
+/// Where a glyph's ink starts inside its own box. Every icon in the slot,
+/// Lucide and the app's own assets alike, keeps a 2-of-24 margin inside its
+/// viewBox, so a status dot drawn without such a margin takes the same inset
+/// explicitly; centering it instead would put its edge 1.5px to the right of
+/// the icons' and make the glyph column look ragged.
+const TAB_ROW_GLYPH_INSET: f32 = TAB_ROW_GLYPH * 2.0 / 24.0;
+
 const TAB_ROW_TEXT: f32 = 13.0;
 
 impl VerticalTabList {
@@ -320,16 +330,26 @@ impl VerticalTabList {
             // claiming a lane of its own ahead of it. What a session is doing
             // is what the eye scans the list for, and its kind only matters
             // once the row is found; sharing the slot also keeps the label
-            // from shifting sideways the moment a tab starts working.
+            // from shifting sideways the moment a tab starts working. The
+            // glyph starts on the slot's leading edge, which is the content
+            // column, so its ink lines up with the heading text and the
+            // status icons; centering it in the wider slot would push it a
+            // pixel past them.
             .child(
                 div()
                     .flex_none()
                     .size(px(TAB_ROW_ICON))
                     .flex()
                     .items_center()
-                    .justify_center()
+                    .justify_start()
                     .child(match (status_mark, tab.pending) {
-                        (Some(mark), _) => mark,
+                        (Some(mark), _) => div()
+                            .size(px(TAB_ROW_GLYPH))
+                            .flex()
+                            .items_center()
+                            .pl(px(TAB_ROW_GLYPH_INSET))
+                            .child(mark)
+                            .into_any_element(),
                         (None, true) => {
                             pending_tab_icon(("sidebar-tab-pending", key)).into_any_element()
                         }

@@ -13,7 +13,7 @@ use rust_i18n::t;
 use crate::agent_usage::AgentUsageView;
 use crate::ui::composition::{
     FLOATING_SURFACE_BOTTOM_INSET, FLOATING_SURFACE_SIDE_INSET, FLOATING_SURFACE_TOP_INSET,
-    toolbar_button,
+    TOOLBAR_BUTTON_SIZE, TOOLBAR_ICON_SIZE, toolbar_button,
 };
 use crate::ui::fluent::SELECTION_BAR_WIDTH;
 use crate::ui::platform_style::{Host, PlatformStyle as _};
@@ -133,7 +133,7 @@ impl Sidebar {
                     .justify_between()
                     .child(
                         div()
-                            .ml(px(-SIDEBAR_ROW_GUTTER))
+                            .map(Host::sidebar_heading)
                             .text_size(px(SIDEBAR_SECTION_TEXT))
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(cx.theme().sidebar_foreground.opacity(0.5))
@@ -171,6 +171,7 @@ impl Sidebar {
             .children((show_daily_token_usage || show_agent_usage).then(|| {
                 v_flex()
                     .id("workspace-sidebar-status")
+                    .map(Host::sidebar_status)
                     .w_full()
                     .flex_none()
                     .gap(px(SIDEBAR_STATUS_ROW_GAP))
@@ -264,11 +265,12 @@ const SIDEBAR_PADDING_X: f32 = 12.0;
 
 /// Where the host draws its window buttons over the title bar, the visible
 /// row fill starts directly below the close button: the outer panel offset
-/// comes off and the row's negative margin is restored. Elsewhere the panel's
-/// own inset applies.
+/// comes off and the row's negative margin is restored. Elsewhere the content
+/// column starts where the app menu button's icon does, so the heading, the
+/// tab glyphs and the status icons stand under that icon's edge.
 const SIDEBAR_PADDING_LEFT: f32 = match Host::WINDOW_CONTROLS_INSET {
     Some(inset) => inset - FLOATING_SURFACE_SIDE_INSET + SIDEBAR_ROW_GUTTER,
-    None => SIDEBAR_PADDING_X,
+    None => Host::TITLE_BAR_LEADING_INSET + (TOOLBAR_BUTTON_SIZE - TOOLBAR_ICON_SIZE) / 2.0,
 };
 
 const SIDEBAR_GROUP_GAP: f32 = 8.0;

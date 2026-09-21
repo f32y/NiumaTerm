@@ -102,6 +102,15 @@ pub trait PlatformStyle {
 
     /// The button that forms the agent quota row.
     fn agent_usage_row(row: Button) -> Button;
+
+    /// The caps label heading the sidebar's workspace list.
+    fn sidebar_heading(heading: Div) -> Div;
+
+    /// The area under the workspace list holding the usage status rows.
+    fn sidebar_status(status: Stateful<Div>) -> Stateful<Div>;
+
+    /// The button that forms the daily token usage row.
+    fn token_usage_row(row: Button) -> Button;
 }
 
 /// The conventions this build targets. Linux draws its window controls inside

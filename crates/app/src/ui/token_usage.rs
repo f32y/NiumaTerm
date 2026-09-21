@@ -29,6 +29,7 @@ use tracing::warn;
 use crate::daily_usage::{DailyTokenUsage, TokenCounts};
 use crate::ui::AppSettings;
 use crate::ui::composition::{framed_region, table_header as table_header_style};
+use crate::ui::platform_style::{Host, PlatformStyle as _};
 use crate::usage_refresh::{Completion, Refresh, UsageSource};
 
 /// Shown before the first successful fetch and retained after fetch errors.
@@ -188,7 +189,7 @@ impl Render for TokenUsageView {
             .small()
             .w_full()
             .h(px(STATUS_ROW_HEIGHT))
-            .px_1()
+            .map(Host::token_usage_row)
             .justify_start()
             .accessibility_label(self.accessibility_label())
             .loading(self.user_requested)

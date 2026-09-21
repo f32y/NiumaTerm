@@ -4,6 +4,7 @@ use gpui_component::button::Button;
 use gpui_component::input::Input;
 use gpui_component::tab::Tab;
 
+use crate::design::SIDEBAR_ROW_GUTTER;
 use crate::platform_style::{PlatformStyle, TabDensity};
 
 /// The caption controls are part of the title bar at its trailing edge, so
@@ -66,13 +67,35 @@ impl PlatformStyle for Windows {
         slot.items_center()
     }
 
-    /// The quota row stays on the sidebar's content column.
+    /// The status area already reaches into the gutter, so the row keeps its
+    /// place in it.
     fn sidebar_agent_usage(usage: AnyElement) -> AnyElement {
         usage
     }
 
-    /// Symmetric padding keeps the quota text off both edges of the row fill.
+    /// The status area offsets the row into its gutter, so the row pads its
+    /// icon back onto the content column and keeps the text off the trailing
+    /// edge.
     fn agent_usage_row(row: Button) -> Button {
-        row.px_1()
+        row.pl(px(SIDEBAR_ROW_GUTTER)).pr_1()
+    }
+
+    /// The content column starts under the app menu button's icon, so the
+    /// heading stays on it.
+    fn sidebar_heading(heading: Div) -> Div {
+        heading
+    }
+
+    /// Both status rows reach back into the gutter the workspace row fills
+    /// use, so their hover fills start on the same edge as those fills; each
+    /// row pads its icon back onto the content column.
+    fn sidebar_status(status: Stateful<Div>) -> Stateful<Div> {
+        status.ml(px(-SIDEBAR_ROW_GUTTER))
+    }
+
+    /// Matches the quota row under it, so the two icons share the content
+    /// column.
+    fn token_usage_row(row: Button) -> Button {
+        Self::agent_usage_row(row)
     }
 }
