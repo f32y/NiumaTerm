@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 
 use gpui::prelude::*;
 use gpui::{AnyElement, App, Bounds, Context, FontWeight, Pixels, ScrollHandle, Window, div, px};
-use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::spinner::Spinner;
+use gpui_component::tooltip::Tooltip;
 use gpui_component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, v_flex};
 use nmt_agent::progress::{GoalStatus, Task, TaskList, TaskStatus};
 use rust_i18n::t;
@@ -105,38 +105,46 @@ impl ProgressPanel {
         let expanded = self.expanded;
 
         let header = h_flex()
+            .id("agent-progress-toggle")
             .debug_selector(|| "agent-progress-header".into())
             .w_full()
             .px_3()
             .py_1()
             .gap_2()
             .items_center()
+            .cursor_pointer()
+            .tooltip(move |window, cx| {
+                Tooltip::new(
+                    t!(if expanded {
+                        "agent-progress-collapse"
+                    } else {
+                        "agent-progress-expand"
+                    })
+                    .into_owned(),
+                )
+                .build(window, cx)
+            })
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.progress_panel.expanded = !this.progress_panel.expanded;
+
+                cx.notify();
+            }))
             .child(Icon::new(IconName::Map).size_3().flex_none())
             .child(div().flex_1().min_w_0().truncate().child(summary))
             .children(tally.map(|tally| div().flex_none().child(tally)))
             .child(
-                div()
+                h_flex()
                     .debug_selector(|| "agent-progress-toggle".into())
                     .flex_none()
+                    .size_5()
+                    .justify_center()
                     .child(
-                        Button::new("agent-progress-toggle")
-                            .ghost()
-                            .xsmall()
-                            .icon(if expanded {
-                                IconName::ChevronDown
-                            } else {
-                                IconName::ChevronUp
-                            })
-                            .tooltip(t!(if expanded {
-                                "agent-progress-collapse"
-                            } else {
-                                "agent-progress-expand"
-                            }))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.progress_panel.expanded = !this.progress_panel.expanded;
-
-                                cx.notify();
-                            })),
+                        Icon::new(if expanded {
+                            IconName::ChevronDown
+                        } else {
+                            IconName::ChevronUp
+                        })
+                        .size_3(),
                     ),
             );
 

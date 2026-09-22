@@ -1,4 +1,4 @@
-use gpui::{AppContext as _, Entity, TestAppContext, VisualTestContext, px};
+use gpui::{AppContext as _, Entity, TestAppContext, VisualTestContext, point, px};
 use gpui_component::Root;
 use nmt_agent::AgentWorkspace;
 use nmt_agent::chat::{Event, QueuedPrompt, SlashCommandOutcome};
@@ -118,7 +118,7 @@ fn progress_panel_is_narrower_and_expands_above_the_composer(cx: &mut TestAppCon
 
     assert!(toggle.center().x > collapsed.center().x);
 
-    cx.simulate_click(toggle.center(), Default::default());
+    cx.simulate_click(header.center(), Default::default());
     cx.run_until_parked();
 
     cx.update(|window, cx| {
@@ -163,6 +163,25 @@ fn progress_panel_is_narrower_and_expands_above_the_composer(cx: &mut TestAppCon
     });
 
     assert!(cx.debug_bounds("agent-progress-details").is_none());
+
+    let padding = point(header.left() + px(2.), header.center().y);
+
+    for position in [padding, header.center(), toggle.center(), padding] {
+        let was_expanded = pane.read_with(cx, |pane, _| pane.progress_panel.expanded);
+
+        cx.simulate_click(position, Default::default());
+        cx.run_until_parked();
+
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+
+        assert_eq!(
+            cx.debug_bounds("agent-progress-details").is_some(),
+            !was_expanded,
+            "each click on the summary, padding, or arrow toggles the details once"
+        );
+    }
 }
 
 #[gpui::test]
