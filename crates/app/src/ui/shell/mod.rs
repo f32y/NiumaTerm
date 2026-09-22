@@ -99,7 +99,6 @@ use crate::ui::shell::updates_layer::UpdateNotificationLayer;
 use crate::ui::shell::workspace_dirs::{
     RootAvailability, open_new_workspace_dialog, open_workspace_dirs_dialog,
 };
-use crate::ui::tab_bar::menu::refresh_saved_rooms;
 use crate::ui::tab_bar::{TabStrip, VerticalTabList, WorkspaceTabs};
 use crate::ui::title_bar::{PanelToggle, TitleBarInputs, TitleCenter, WindowTitleBar};
 use crate::ui::token_usage::TokenUsageView;
@@ -422,10 +421,6 @@ impl AppWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        if cx.global::<AppSettings>().config().agent.enable_agent_team {
-            refresh_saved_rooms(cx);
-        }
-
         cx.observe_global_in::<AppSettings>(window, |this, window, cx| {
             this.sync_team_setting(window, cx);
 
@@ -1750,17 +1745,6 @@ impl AppWindow {
                 cx,
             ),
         };
-
-        let mut refreshed = false;
-
-        cx.observe(&runtime, move |_, runtime, cx| {
-            if !refreshed && !runtime.read(cx).loading() {
-                refreshed = true;
-
-                refresh_saved_rooms(cx);
-            }
-        })
-        .detach();
 
         let surface = TabSurface::Team(cx.new(|cx| TeamPane::new(runtime, window, cx)));
 

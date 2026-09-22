@@ -1,3 +1,5 @@
+pub mod history;
+
 mod validation;
 
 #[cfg(test)]
@@ -151,6 +153,13 @@ impl RoomStore {
 
     pub fn room(&self) -> &Room {
         &self.room
+    }
+
+    pub fn data_directory(&self) -> &Path {
+        self.directory
+            .parent()
+            .and_then(Path::parent)
+            .expect("room directories are nested beneath the data directory")
     }
 
     pub fn revision(&self) -> u64 {

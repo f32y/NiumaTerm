@@ -1,7 +1,10 @@
+mod history;
 mod membership;
 mod targeting;
 mod timeline;
 
+#[cfg(test)]
+mod history_tests;
 #[cfg(test)]
 mod tests;
 
@@ -13,7 +16,7 @@ use gpui::{
     Window, div, px,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::input::{Enter, Escape, Textarea, TextareaState};
+use gpui_component::input::{Enter, Escape, InputEvent, MoveDown, MoveUp, Textarea, TextareaState};
 use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_component::{
     ActiveTheme as _, Disableable as _, IconName, Sizable as _, WindowExt as _, h_flex, v_flex,
@@ -27,6 +30,7 @@ use rust_i18n::t;
 
 use crate::agent_tab::settings::{AgentSettings, UI_RADIUS};
 use crate::agent_tab::team::dispatch::work_status;
+use crate::agent_tab::team::view::history::TeamHistory;
 use crate::agent_tab::team::view::membership::MemberDraft;
 use crate::agent_tab::team::view::targeting::{DiscussionTargeting, MissingAuthor};
 use crate::agent_tab::team::view::timeline::TimelineMirror;
@@ -37,6 +41,7 @@ use crate::agent_tab::view::composer_layout::{
     ComposerEnterBehavior, composer_card, composer_controls_row, composer_enter_behavior,
     composer_input_row, composer_notice_panel, send_button,
 };
+use crate::agent_tab::view::recent_sessions::RecentSessionsMode;
 use crate::agent_tab::{AgentPane, AgentPaneEvent};
 
 pub struct TeamPane {
@@ -60,12 +65,33 @@ pub struct TeamPane {
     submitting: bool,
     adding_member: bool,
     abandoning: bool,
+    history: TeamHistory,
+    runtime_observer: Subscription,
+    _input_observer: Subscription,
     _observers: Vec<Subscription>,
+}
+
+fn observe_runtime(runtime: &Entity<TeamRuntime>, cx: &mut Context<TeamPane>) -> Subscription {
+    cx.observe(runtime, |this, _, cx| {
+        if !this.loaded && !this.runtime.read(cx).loading() {
+            this.targeting = DiscussionTargeting::from_room(this.runtime.read(cx).room());
+            this.loaded = true;
+        }
+
+        this.timeline
+            .sync_timeline(&this.runtime, &this.transcript, cx);
+
+        cx.notify();
+    })
 }
 
 impl TeamPane {
     pub fn new(runtime: Entity<TeamRuntime>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         cx.on_release(|this, cx| {
+            if let Some((runtime, _)) = this.history.pending.take() {
+                runtime.update(cx, |runtime, cx| runtime.close(cx)).detach();
+            }
+
             this.runtime
                 .update(cx, |runtime, cx| runtime.close(cx))
                 .detach();
@@ -83,21 +109,18 @@ impl TeamPane {
 
         let transcript = cx.new(|_| TranscriptView::new(AgentKind::Codex, None));
 
-        let changed = cx.observe(&runtime, |this, _, cx| {
-            if !this.loaded && !this.runtime.read(cx).loading() {
-                this.targeting = DiscussionTargeting::from_room(this.runtime.read(cx).room());
-                this.loaded = true;
+        let changed = observe_runtime(&runtime, cx);
+
+        let input_changed = cx.subscribe(&input, |_, _, event, cx| {
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
             }
-
-            this.timeline
-                .sync_timeline(&this.runtime, &this.transcript, cx);
-
-            cx.notify();
         });
 
         let targeting = DiscussionTargeting::from_room(runtime.read(cx).room());
 
         let loaded = !runtime.read(cx).loading();
+        let history = TeamHistory::new(runtime.read(cx).directory.clone());
 
         let mut pane = Self {
             runtime,
@@ -114,13 +137,118 @@ impl TeamPane {
             submitting: false,
             adding_member: false,
             abandoning: false,
-            _observers: vec![changed],
+            history,
+            runtime_observer: changed,
+            _input_observer: input_changed,
+            _observers: Vec::new(),
         };
 
         pane.timeline
             .sync_timeline(&pane.runtime, &pane.transcript, cx);
 
+        pane.history.refresh(cx);
+
         pane
+    }
+
+    fn toggle_history(&mut self, cx: &mut Context<Self>) {
+        if self.history.visible(self, cx) {
+            self.history.mode = RecentSessionsMode::Hidden;
+        } else {
+            self.history.mode = RecentSessionsMode::Open;
+
+            self.history.refresh(cx);
+        }
+
+        cx.notify();
+    }
+
+    fn navigate_history(&mut self, next: bool, cx: &mut Context<Self>) {
+        if self.history.visible(self, cx) && self.input.read(cx).text().len() == 0 {
+            self.history
+                .move_selection(self.history.rows(self, cx).len(), next);
+
+            cx.stop_propagation();
+
+            cx.notify();
+        }
+    }
+
+    fn resume_room(&mut self, id: RoomId, window: &mut Window, cx: &mut Context<Self>) {
+        if self.history.pending.is_some() || id == self.room_id(cx) {
+            return;
+        }
+
+        if self.submitting
+            || self.adding_member
+            || self.abandoning
+            || self.runtime.read(cx).loading()
+            || self
+                .runtime
+                .read(cx)
+                .hosts
+                .values()
+                .any(|host| host.active.is_some())
+        {
+            self.error = Some(t!("team-history-busy").into_owned());
+
+            cx.notify();
+
+            return;
+        }
+
+        let runtime = TeamRuntime::open(&self.history.directory, id, cx);
+
+        let observer = cx.observe_in(&runtime, window, |this, runtime, window, cx| {
+            if runtime.read(cx).loading() {
+                return;
+            }
+
+            this.history.pending = None;
+
+            if runtime.read(cx).load_failed {
+                this.error = runtime.read(cx).error().map(str::to_owned);
+
+                runtime.update(cx, |runtime, cx| runtime.close(cx)).detach();
+
+                cx.notify();
+
+                return;
+            }
+
+            this.runtime
+                .update(cx, |runtime, cx| runtime.close(cx))
+                .detach();
+
+            this.member_panes.clear();
+            this._observers.clear();
+
+            this.runtime = runtime.clone();
+            this.runtime_observer = observe_runtime(&runtime, cx);
+            this.targeting = DiscussionTargeting::from_room(runtime.read(cx).room());
+            this.loaded = true;
+            this.inspected = None;
+            this.member_draft = MemberDraft::new(window, cx);
+            this.timeline = TimelineMirror::default();
+            this.transcript = cx.new(|_| TranscriptView::new(AgentKind::Codex, None));
+
+            this.timeline
+                .sync_timeline(&this.runtime, &this.transcript, cx);
+
+            this.input
+                .update(cx, |input, cx| input.set_value("", window, cx));
+
+            this.history.mode = RecentSessionsMode::Hidden;
+            this.error = None;
+
+            this.focus(window, cx);
+
+            cx.notify();
+        });
+
+        self.history.pending = Some((runtime, observer));
+
+        cx.notify();
     }
 
     pub fn room_id(&self, cx: &App) -> RoomId {
@@ -172,7 +300,7 @@ impl TeamPane {
     }
 
     fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.submitting || self.runtime.read(cx).loading() {
+        if self.submitting || self.runtime.read(cx).loading() || self.history.pending.is_some() {
             return;
         }
 
@@ -565,6 +693,14 @@ impl TeamPane {
             .child(recipients)
             .child(mode)
             .child(settings)
+            .child(
+                Button::new("team-history-toggle")
+                    .ghost()
+                    .small()
+                    .label(t!("team-history-button"))
+                    .disabled(self.history.pending.is_some())
+                    .on_click(cx.listener(|this, _, _, cx| this.toggle_history(cx))),
+            )
             .when(!pending_recovery.is_empty(), |view| {
                 let pane = cx.entity();
 
@@ -958,12 +1094,17 @@ impl Render for TeamPane {
         let runtime = self.runtime.read(cx);
         let empty = runtime.room().members().is_empty();
         let running = runtime.hosts.values().any(|host| host.active.is_some());
-        let loading = runtime.loading();
+        let loading = runtime.loading() || self.history.pending.is_some();
 
         let failure = self
             .error
             .clone()
             .or_else(|| runtime.error().map(str::to_owned));
+
+        let history = self
+            .history
+            .visible(self, cx)
+            .then(|| self.history.render(self.history.rows(self, cx), cx));
 
         let status = self.status_text(cx);
         let interactions = self.render_member_interactions(window, cx);
@@ -999,7 +1140,15 @@ impl Render for TeamPane {
         }));
 
         surface
-            .on_action(cx.listener(|this, _: &Escape, _, cx| this.stop(cx)))
+            .on_action(cx.listener(|this, _: &Escape, _, cx| {
+                if this.history.visible(this, cx) {
+                    this.history.mode = RecentSessionsMode::Hidden;
+
+                    cx.notify();
+                } else {
+                    this.stop(cx);
+                }
+            }))
             .child(
                 div()
                     .debug_selector(|| "team-messages".into())
@@ -1022,6 +1171,17 @@ impl Render for TeamPane {
                             )
                         })
                         .children(notices)
+                        .when(self.history.pending.is_some(), |view| {
+                            view.child(
+                                div()
+                                    .px_3()
+                                    .py_2()
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(t!("team-history-loading")),
+                            )
+                        })
+                        .children(history)
                         .child(
                             composer_card(cx)
                                 .debug_selector(|| "team-composer".into())
@@ -1029,6 +1189,12 @@ impl Render for TeamPane {
                                 .child(
                                     composer_input_row()
                                         .text_size(px(font_size + 2.))
+                                        .capture_action(cx.listener(|this, _: &MoveUp, _, cx| {
+                                            this.navigate_history(false, cx)
+                                        }))
+                                        .capture_action(cx.listener(|this, _: &MoveDown, _, cx| {
+                                            this.navigate_history(true, cx)
+                                        }))
                                         .capture_action(cx.listener(
                                             |this, action: &Enter, window, cx| {
                                                 match composer_enter_behavior(
@@ -1042,20 +1208,33 @@ impl Render for TeamPane {
                                                     }
                                                     ComposerEnterBehavior::Submit
                                                     | ComposerEnterBehavior::ActivateOrSubmit => {
-                                                        this.submit(window, cx)
+                                                        if this.history.visible(this, cx)
+                                                            && this.input.read(cx).text().len() == 0
+                                                        {
+                                                            if let Some(row) = this
+                                                                .history
+                                                                .rows(this, cx)
+                                                                .get(this.history.selected)
+                                                            {
+                                                                this.resume_room(
+                                                                    row.id, window, cx,
+                                                                );
+                                                            }
+                                                        } else {
+                                                            this.submit(window, cx)
+                                                        }
                                                     }
                                                 }
 
                                                 cx.stop_propagation();
                                             },
                                         ))
-                                        .child(
-                                            div().flex_1().min_w_0().child(
-                                                Textarea::new(&self.input)
-                                                    .appearance(false)
-                                                    .disabled(empty),
+                                        .child(div().flex_1().min_w_0().child(
+                                            Textarea::new(&self.input).appearance(false).disabled(
+                                                loading
+                                                    || (empty && !self.history.visible(self, cx)),
                                             ),
-                                        ),
+                                        )),
                                 )
                                 .child(
                                     composer_controls_row()

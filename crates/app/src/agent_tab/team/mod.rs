@@ -12,7 +12,7 @@ mod view;
 mod tests;
 
 use std::collections::{BTreeMap, VecDeque};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use futures::channel::oneshot;
 use gpui::{App, AppContext as _, BackgroundExecutor, Context, Entity, Task};
@@ -37,6 +37,7 @@ type Operation = Box<dyn FnOnce(&mut TeamRuntime, &mut Context<TeamRuntime>)>;
 /// The UI observes the last saved room. One operation owns the session on a
 /// background thread until its complete storage update has finished.
 pub struct TeamRuntime {
+    directory: PathBuf,
     session: Option<TeamSession>,
     room: Room,
     id: RoomId,
@@ -74,6 +75,7 @@ impl TeamRuntime {
         let initial = room.clone();
 
         Self::load(
+            directory.clone(),
             room.id(),
             room,
             move || TeamSession::create(&directory, initial),
@@ -85,6 +87,7 @@ impl TeamRuntime {
         let directory = directory.to_owned();
 
         Self::load(
+            directory.clone(),
             id,
             Room::new(AgentWorkspace::default()),
             move || TeamSession::open(&directory, id),
@@ -93,6 +96,7 @@ impl TeamRuntime {
     }
 
     fn load(
+        directory: PathBuf,
         id: RoomId,
         room: Room,
         load: impl FnOnce() -> Result<TeamSession, TeamError> + Send + 'static,
@@ -101,6 +105,7 @@ impl TeamRuntime {
         let task = cx.background_executor().spawn(async move { load() });
 
         let entity = cx.new(|cx| Self {
+            directory,
             session: None,
             room,
             id,
@@ -208,6 +213,7 @@ impl TeamRuntime {
         let room = session.store().room().clone();
 
         Self {
+            directory: session.store().data_directory().to_owned(),
             id: room.id(),
             room,
             recovery: session.pending_recovery().cloned().collect(),
