@@ -722,6 +722,72 @@ fn the_child_catalog_becomes_rows_that_can_be_opened() {
 }
 
 #[test]
+fn background_jobs_become_rows_beside_the_child_catalog() {
+    use std::time::{Duration, UNIX_EPOCH};
+
+    use crate::background_task::{BackgroundTaskKind, BackgroundTaskState};
+    use crate::dsh::catalogs;
+
+    // Trimmed from a `jobs` frame on the host's `session/control` stream.
+    let jobs = json!([
+        {
+            "id": "bash-3",
+            "kind": "bash",
+            "label": "python capture.py --time 30",
+            "status": "running",
+            "startedAt": 1_790_077_300_000_u64,
+        },
+        {
+            "id": "bash-2",
+            "kind": "bash",
+            "label": "cargo build",
+            "status": "failed",
+            "detail": "exit code: 3",
+            "startedAt": 1_790_077_200_000_u64,
+            "finishedAt": 1_790_077_260_000_u64,
+        },
+        // A delegated child is already a row from the child catalog.
+        {
+            "id": "subagent-1",
+            "kind": "subagent",
+            "label": "Review the diff",
+            "status": "running",
+            "startedAt": 1_790_077_100_000_u64,
+        },
+    ]);
+
+    let rows = catalogs::job_rows(&jobs, SESSION, 4);
+
+    assert_eq!(rows.len(), 2);
+
+    let running = &rows[0];
+
+    assert_eq!(running.key.id, "bash-3");
+    assert_eq!(running.kind, BackgroundTaskKind::Shell);
+    assert_eq!(
+        running.display_name.as_deref(),
+        Some("python capture.py --time 30")
+    );
+    assert_eq!(running.state, BackgroundTaskState::Working);
+    assert_eq!(
+        running.started_at,
+        Some(UNIX_EPOCH + Duration::from_millis(1_790_077_300_000))
+    );
+
+    // The harness offers other clients no way to stop a job.
+    assert!(!running.can_stop);
+
+    let failed = &rows[1];
+
+    assert_eq!(failed.state, BackgroundTaskState::Failed);
+    assert_eq!(failed.status.as_deref(), Some("exit code: 3"));
+    assert_eq!(
+        failed.completed_at,
+        Some(UNIX_EPOCH + Duration::from_millis(1_790_077_260_000))
+    );
+}
+
+#[test]
 fn the_command_registry_fills_the_palette() {
     use crate::chat::{SlashCommandArguments, SlashCommandRunPolicy, SlashCommandSource};
     use crate::dsh::catalogs;

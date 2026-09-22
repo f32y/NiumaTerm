@@ -435,10 +435,20 @@ impl Streams {
                     self.projection(key, value, &projections["asOfSeq"], deliver);
                 }
 
+                // A host that keeps no job registry sends no jobs map, and an
+                // empty list from here would read as every job having ended.
+                // With the map present, a missing entry means none are held.
+                if baseline["jobs"].is_object() {
+                    self.jobs(&baseline["jobs"][&self.session_id], deliver);
+                }
+
                 self.control_ready = true;
             }
             Some("queue") if value["sessionId"] == self.session_id => {
                 self.queue(&value["items"], deliver)
+            }
+            Some("jobs") if value["sessionId"] == self.session_id => {
+                self.jobs(&value["jobs"], deliver)
             }
             Some("projection") if value["sessionId"] == self.session_id => {
                 if let Some(key) = value["key"].as_str() {
@@ -452,6 +462,12 @@ impl Streams {
     fn queue(&self, items: &Value, deliver: &dyn Fn(Value)) {
         deliver(json!({ "payload": {
             "type": "session/queue", "sessionId": self.session_id, "items": items,
+        } }));
+    }
+
+    fn jobs(&self, jobs: &Value, deliver: &dyn Fn(Value)) {
+        deliver(json!({ "payload": {
+            "type": "session/jobs", "sessionId": self.session_id, "jobs": jobs,
         } }));
     }
 

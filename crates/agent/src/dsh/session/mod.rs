@@ -26,7 +26,8 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 
 use crate::background_task::{
-    BackgroundTaskKey, BackgroundTaskRefs, BackgroundTaskTranscriptUpdate,
+    BackgroundTaskKey, BackgroundTaskLoadState, BackgroundTaskRefs, BackgroundTaskSnapshot,
+    BackgroundTaskSummary, BackgroundTaskTranscriptUpdate,
 };
 use crate::chat::{
     Event, Item, Question, QuestionMode, QuestionRequest as ChatQuestionRequest,
@@ -126,6 +127,17 @@ pub struct Session {
     /// reports it, so the answer is kept from the catalog that named the child.
     subagent_modes: HashMap<String, bool>,
 
+    /// Rows from the newest child catalog and from the newest job list. The
+    /// panel takes one whole snapshot per conversation while the two sources
+    /// update independently, so each keeps the other's last answer.
+    subagent_rows: Vec<BackgroundTaskSummary>,
+
+    job_rows: Vec<BackgroundTaskSummary>,
+
+    /// Counts job list changes. Added to the catalog counter so the snapshot
+    /// ordinal still advances when only a job starts or settles.
+    job_activity: u64,
+
     /// Workflow runs accumulated from the log. Each event carries only its own
     /// increment, so the run is what they add up to rather than a value any one
     /// of them reports.
@@ -152,9 +164,13 @@ const WORKFLOW_TRANSCRIPT_FRAME: &str = "nmt/workflow-transcript";
 const FORK_CHECKPOINTS_FRAME: &str = "nmt/fork-checkpoints";
 const SETTLED_FRAME: &str = "nmt/command-settled";
 
-/// The pending-inbox snapshot is the one frame type the harness itself
-/// publishes under its own name rather than through the nmt bridge.
+/// The pending-inbox snapshot and the job list are the frame types the
+/// harness itself publishes under its own names rather than through the nmt
+/// bridge.
 const QUEUE_FRAME: &str = "session/queue";
+
+/// One conversation's background jobs, relayed from the control stream.
+const JOBS_FRAME: &str = "session/jobs";
 
 /// How much of a resumed conversation is rebuilt. The harness pages history at
 /// whole-message boundaries, so this is a count of messages rather than of
@@ -418,6 +434,9 @@ impl Session {
             models: ModelDirectory::default(),
             subagent_activity: 0,
             subagent_modes: HashMap::new(),
+            subagent_rows: Vec::new(),
+            job_rows: Vec::new(),
+            job_activity: 0,
             workflows: WorkflowTracker::default(),
         })
     }
@@ -482,6 +501,10 @@ impl Session {
         self.subagent_activity = 0;
 
         self.subagent_modes.clear();
+        self.subagent_rows.clear();
+        self.job_rows.clear();
+
+        self.job_activity = 0;
 
         self.workflows = WorkflowTracker::default();
 
@@ -564,6 +587,7 @@ impl Session {
                 return self.on_host_exited();
             }
             Some(SUBAGENTS_FRAME) => return self.on_subagents(payload),
+            Some(JOBS_FRAME) => return self.on_jobs(payload),
             Some(SUBAGENT_TRANSCRIPT_FRAME) => return self.on_subagent_transcript(payload),
             Some(WORKFLOW_TRANSCRIPT_FRAME) => return workflow_transcript_events(payload),
             Some(SKILLS_FRAME) => return self.on_skills(payload),
@@ -749,7 +773,43 @@ impl Session {
             })
             .collect();
 
-        vec![Event::BackgroundTasks(snapshot)]
+        self.subagent_rows = snapshot.tasks;
+
+        vec![self.background_tasks()]
+    }
+
+    fn on_jobs(&mut self, payload: &Value) -> Vec<Event> {
+        let Some(frame) = frames::parse::<frames::JobsFrame>(JOBS_FRAME, payload) else {
+            return Vec::new();
+        };
+
+        if frame.session_id != self.session_id {
+            return Vec::new();
+        }
+
+        self.job_activity += 1;
+
+        self.job_rows = catalogs::job_rows(
+            &frame.jobs,
+            &self.session_id,
+            self.subagent_activity + self.job_activity,
+        );
+
+        vec![self.background_tasks()]
+    }
+
+    fn background_tasks(&self) -> Event {
+        Event::BackgroundTasks(BackgroundTaskSnapshot {
+            parent_session: BackgroundTaskKey::deepseek(&self.session_id),
+            tasks: self
+                .subagent_rows
+                .iter()
+                .chain(&self.job_rows)
+                .cloned()
+                .collect(),
+            discovery: BackgroundTaskLoadState::Ready,
+            activity: self.subagent_activity + self.job_activity,
+        })
     }
 
     fn on_subagent_transcript(&self, payload: &Value) -> Vec<Event> {

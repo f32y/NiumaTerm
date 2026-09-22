@@ -8,7 +8,12 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-use crate::chat::{ForkAnchor, MessageImage, QuestionResponse, SendOutcome, SlashCommandOutcome};
+use crate::background_task::{
+    BackgroundTaskKey, BackgroundTaskLoadState, BackgroundTaskTranscriptUpdate,
+};
+use crate::chat::{
+    Event, ForkAnchor, MessageImage, QuestionResponse, SendOutcome, SlashCommandOutcome,
+};
 use crate::dsh::api::ApiClient;
 use crate::dsh::catalogs;
 use crate::dsh::session::controls::{Operation, question_id};
@@ -123,9 +128,24 @@ impl Session {
     /// A child this session's catalog never named cannot be addressed: the read
     /// selects a transport by the child's kind, and only the catalog reports
     /// which kind a child is.
-    pub fn load_background_task_transcript(&mut self, child: &str) {
+    ///
+    /// A background job has no conversation, and the harness keeps its output
+    /// behind the agent's own job tools, so its detail view is answered at once
+    /// as unreadable instead of waiting on a read that never starts.
+    pub fn load_background_task_transcript(&mut self, child: &str) -> Vec<Event> {
+        if self.job_rows.iter().any(|row| row.key.id == child) {
+            return vec![Event::BackgroundTaskTranscript {
+                key: BackgroundTaskKey::deepseek(child),
+                update: BackgroundTaskTranscriptUpdate::state(
+                    BackgroundTaskLoadState::Unavailable {
+                        message: "DeepSeek Harness shares job output only with the agent that started the job.".to_string(),
+                    },
+                ),
+            }];
+        }
+
         let Some(continuable) = self.subagent_modes.get(child).copied() else {
-            return;
+            return Vec::new();
         };
 
         load_subagent_transcript(
@@ -135,6 +155,8 @@ impl Session {
             continuable,
             Arc::clone(&self.deliver),
         );
+
+        Vec::new()
     }
 
     /// Stop a continuable child's current turn.

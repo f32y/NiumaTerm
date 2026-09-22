@@ -242,6 +242,65 @@ fn control_updates_do_not_cross_sessions_and_keep_their_cursor() {
 }
 
 #[test]
+fn job_lists_reach_only_their_own_conversation() {
+    let frames = RefCell::new(Vec::new());
+    let deliver = |frame| frames.borrow_mut().push(frame);
+
+    let mut streams = Streams::new("session-1");
+
+    let job = json!({ "id": "bash-1", "kind": "bash", "label": "sleep 60", "status": "running", "startedAt": 1 });
+
+    streams
+        .process(
+            item(
+                "control",
+                json!({ "type": "baseline", "value": {
+                    "queues": {}, "projections": {},
+                    "jobs": { "session-1": [job.clone()], "session-2": [] },
+                } }),
+            ),
+            &deliver,
+        )
+        .unwrap();
+
+    streams
+        .process(
+            item(
+                "control",
+                json!({ "type": "jobs", "sessionId": "session-2", "jobs": [job.clone()] }),
+            ),
+            &deliver,
+        )
+        .unwrap();
+
+    // Each later frame replaces the whole list, so an empty one is news too.
+    streams
+        .process(
+            item(
+                "control",
+                json!({ "type": "jobs", "sessionId": "session-1", "jobs": [] }),
+            ),
+            &deliver,
+        )
+        .unwrap();
+
+    let jobs: Vec<Value> = frames
+        .borrow()
+        .iter()
+        .map(|frame| frame["payload"].clone())
+        .filter(|payload| payload["type"] == "session/jobs")
+        .collect();
+
+    assert_eq!(
+        jobs,
+        vec![
+            json!({ "type": "session/jobs", "sessionId": "session-1", "jobs": [job] }),
+            json!({ "type": "session/jobs", "sessionId": "session-1", "jobs": [] }),
+        ]
+    );
+}
+
+#[test]
 fn interactions_retain_the_generation_and_cancel_the_matching_card() {
     let frames = RefCell::new(Vec::new());
     let deliver = |frame| frames.borrow_mut().push(frame);

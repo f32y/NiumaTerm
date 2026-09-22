@@ -37,6 +37,14 @@ pub(crate) struct SubagentsFrame {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct JobsFrame {
+    pub(crate) session_id: String,
+    #[serde(default)]
+    pub(crate) jobs: Value,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct SubagentTranscriptFrame {
     pub(crate) session_id: String,
     pub(crate) child_session_id: String,

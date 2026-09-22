@@ -482,13 +482,9 @@ impl Backend {
         match self {
             Backend::Codex(session) => session.load_background_task_transcript(&key.id),
             Backend::Claude(session) => session.load_background_task_transcript(&key.id, cwd),
-            // The harness answers this one asynchronously, so the read starts
-            // here and its result reaches the pane as an ordinary event.
-            Backend::DeepSeek(session) => {
-                session.load_background_task_transcript(&key.id);
-
-                Vec::new()
-            }
+            // A child's conversation is answered asynchronously and reaches
+            // the pane as an ordinary event; a job row is answered here.
+            Backend::DeepSeek(session) => session.load_background_task_transcript(&key.id),
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(_) => Vec::new(),
         }

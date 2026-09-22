@@ -8,6 +8,8 @@
 //! the deployment rather than to this application, which is why it is read
 //! rather than written here.
 
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
 use serde_json::{Value, json};
 
 use crate::background_task::{
@@ -146,6 +148,71 @@ fn task_summary(
         // stop between its start and its result.
         can_stop: continuable && running,
     })
+}
+
+/// Read one session's background jobs into panel rows.
+///
+/// A delegated subagent job is skipped: the child it runs is already a row
+/// from the child catalog, and a second row would show the same work twice.
+/// The harness reports each job's lifecycle but offers other clients no way to
+/// stop one or read its output, so no row offers a Stop control.
+pub(crate) fn job_rows(
+    value: &Value,
+    parent_session_id: &str,
+    activity: u64,
+) -> Vec<BackgroundTaskSummary> {
+    let parent_session = BackgroundTaskKey::deepseek(parent_session_id);
+
+    value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|job| job["kind"].as_str() != Some("subagent"))
+        .filter_map(|job| {
+            let id = job["id"].as_str()?;
+
+            let state = match job["status"].as_str()? {
+                "running" | "stopping" => BackgroundTaskState::Working,
+                "completed" => BackgroundTaskState::Done,
+                "killed" => BackgroundTaskState::Stopped,
+                "failed" => BackgroundTaskState::Failed,
+                _ => return None,
+            };
+
+            let kind = job["kind"].as_str();
+
+            Some(BackgroundTaskSummary {
+                key: BackgroundTaskKey::deepseek(id),
+                parent_session: parent_session.clone(),
+                refs: BackgroundTaskRefs::DeepSeek {
+                    parent_session_id: parent_session_id.to_string(),
+                    continuable: false,
+                },
+                kind: if kind == Some("bash") {
+                    BackgroundTaskKind::Shell
+                } else {
+                    BackgroundTaskKind::Agent
+                },
+                display_name: job["label"].as_str().map(str::to_string),
+                agent_type: kind.filter(|kind| *kind != "bash").map(str::to_string),
+                objective: None,
+                status: job["detail"].as_str().map(str::to_string),
+                state,
+                sequence: activity,
+                started_at: job["startedAt"].as_u64().map(epoch_millis),
+                updated_at: None,
+                completed_at: job["finishedAt"].as_u64().map(epoch_millis),
+                model: None,
+                depth: Some(1),
+                last_preview: None,
+                can_stop: false,
+            })
+        })
+        .collect()
+}
+
+fn epoch_millis(millis: u64) -> SystemTime {
+    UNIX_EPOCH + Duration::from_millis(millis)
 }
 
 // The harness's own slash commands.
