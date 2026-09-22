@@ -1,5 +1,6 @@
 use futures::StreamExt as _;
 use futures::channel::mpsc;
+use gpui::prelude::FluentBuilder as _;
 use gpui::{Context, Entity, IntoElement, Render, Window};
 use gpui_component::v_flex;
 use nmt_platform::macos_notifications::{
