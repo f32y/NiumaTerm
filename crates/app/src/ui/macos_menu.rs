@@ -61,7 +61,7 @@ pub(crate) fn install(cx: &mut App) {
 
             cx.spawn(async move |cx| {
                 if saved.await {
-                    let _ = cx.update(|cx| cx.quit());
+                    cx.update(|cx| cx.quit());
                 }
             })
             .detach();
