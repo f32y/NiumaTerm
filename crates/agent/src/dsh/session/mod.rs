@@ -600,6 +600,23 @@ impl Session {
 
         let mut events = mapping::map_frame(&frame, &self.session_id, &mut self.tools);
 
+        // The harness raises an agent error only on its way out of the turn
+        // driver, so the agent is idle once one is reported. When the failure
+        // is the turn-end record itself being rejected, the log never closes
+        // the turn and this frame is the only sign it stopped. The error and
+        // the log travel on separate streams, so a log close that arrives
+        // after the error is dropped: completing twice would settle whatever
+        // turn the tab starts next.
+        match payload["type"].as_str() {
+            Some("host/agent-error") if self.running && self.is_current_session(payload) => {
+                events.push(Event::TurnCompleted { error: None });
+            }
+            _ if !self.running => {
+                events.retain(|event| !matches!(event, Event::TurnCompleted { .. }));
+            }
+            _ => {}
+        }
+
         // Workflow rows are folded from the log rather than mapped one event to
         // one row, so they are published beside whatever else the frame
         // produced instead of through the transcript vocabulary.
