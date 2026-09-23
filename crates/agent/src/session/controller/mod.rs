@@ -45,8 +45,8 @@ use crate::session::settings::ConversationSettings;
 use crate::session::update_readiness::{ConversationWork, Readiness, prepare_stop};
 use crate::session::workflows::{RefreshPlan, WorkflowData, WorkflowReader};
 use crate::session::{
-    AgentKind, Backend, ConversationTitleRequest, OperationError, RecoveryIdentity,
-    SettingsOutcome, TaskHistory, TaskHistoryRead, TranscriptLoad,
+    AgentKind, Backend, ConversationTitleRequest, OperationError, RecoveryIdentity, RenameOutcome,
+    SettingsOutcome, TaskHistory, TaskHistoryRead, TranscriptLoad, UnsupportedOperation,
 };
 use crate::transcript::TextField;
 use crate::transcript::conversation::{ConversationImage, ConversationState, hidden};
@@ -458,7 +458,17 @@ impl SessionController {
 
     /// `None` means no session is running to ask.
     pub fn rename_conversation(&mut self, title: &str) -> Option<Result<String, OperationError>> {
-        Some(self.runtime.backend_mut()?.rename_conversation(title))
+        let outcome = match self.runtime.backend_mut()?.rename_session(title) {
+            RenameOutcome::Accepted => Ok(title.to_owned()),
+            RenameOutcome::Rejected => Err(OperationError::Failed(
+                "the rename could not be sent to the conversation".into(),
+            )),
+            RenameOutcome::Unsupported => {
+                Err(OperationError::Unsupported(UnsupportedOperation::Rename))
+            }
+        };
+
+        Some(outcome)
     }
 
     /// Answers whether a session was running to take the search.

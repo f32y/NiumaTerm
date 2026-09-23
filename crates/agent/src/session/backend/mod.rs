@@ -355,25 +355,6 @@ impl Backend {
         }
     }
 
-    /// Ask the backend to pin a title on the conversation, answering with the
-    /// title that was requested. The backend normalizes what it stores and
-    /// publishes the result as a title update, and reports a refusal in the
-    /// transcript.
-    pub fn rename_conversation(&mut self, title: &str) -> Result<String, OperationError> {
-        match self {
-            Backend::DeepSeek(session) => {
-                session.rename(title);
-
-                Ok(title.to_owned())
-            }
-            Backend::Codex(_) | Backend::Claude(_) => {
-                Err(OperationError::Unsupported(UnsupportedOperation::Rename))
-            }
-            #[cfg(any(test, feature = "test-support"))]
-            Backend::Test(_) => Err(OperationError::Unsupported(UnsupportedOperation::Rename)),
-        }
-    }
-
     /// Ask which prompts this conversation can be branched in front of. The
     /// answer arrives as [`Event::ForkCheckpoints`], so there is nothing to
     /// return here beyond whether the question could be put at all.
@@ -650,11 +631,18 @@ impl Backend {
 
     /// Name the conversation this backend holds when its provider stores a
     /// user-authored title of its own.
+    /// Pin `title` on the conversation's record in the harness. A harness
+    /// that normalizes what it stores publishes the result as a title update,
+    /// and DeepSeek reports a refusal in the transcript.
     pub fn rename_session(&mut self, title: &str) -> RenameOutcome {
         let accepted = match self {
             Backend::Claude(session) => session.rename_session(title),
             Backend::Codex(session) => session.rename_thread(title),
-            Backend::DeepSeek(_) => return RenameOutcome::Unsupported,
+            Backend::DeepSeek(session) => {
+                session.rename(title);
+
+                true
+            }
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(session) => return session.rename_outcome,
         };
