@@ -38,8 +38,8 @@ use crate::session::lifecycle::{
 };
 use crate::session::naming::ConversationNaming;
 use crate::session::restore::{
-    ConversationRestore, ReadyAction, ReplayAction, ReplayLoaded, ReplayRead, ResumeStart,
-    SettingsSeed,
+    ConversationRestore, LoadedReplay, ReadyAction, ReplayAction, ReplayLoaded, ReplayRead,
+    ResumeStart, SettingsSeed,
 };
 use crate::session::settings::ConversationSettings;
 use crate::session::update_readiness::{ConversationWork, Readiness, prepare_stop};
@@ -318,7 +318,7 @@ impl SessionController {
         &mut self,
         request: ReplayRead,
         cwd: Option<&str>,
-        replay: Result<Vec<ReplayTurn>, String>,
+        replay: Result<LoadedReplay, String>,
     ) -> ReplayLoaded {
         self.restore.loaded(&mut self.runtime, request, cwd, replay)
     }
@@ -1210,13 +1210,13 @@ impl SessionController {
             self.clear_conversation();
         }
 
-        let mut replay = match self.restore.ready(epoch) {
+        let (mut replay, title) = match self.restore.ready(epoch) {
             ReadyAction::Ignore => return None,
-            ReadyAction::Apply => None,
+            ReadyAction::Apply => (None, None),
             ReadyAction::Replay(replay) => {
                 self.clear_conversation();
 
-                Some(replay)
+                (Some(replay), self.restore.take_title())
             }
         };
 
@@ -1244,6 +1244,7 @@ impl SessionController {
         Some(SessionReady {
             branch,
             replaced,
+            title,
             selection,
             approval,
         })
@@ -1264,19 +1265,28 @@ impl SessionController {
             }
         };
 
-        let replace = match self.restore.replayed(epoch) {
+        let (replace, title) = match self.restore.replayed(epoch) {
             ReplayAction::Ignore => return None,
-            ReplayAction::Append => false,
+            ReplayAction::Append => (false, None),
             ReplayAction::Replace => {
                 self.clear_conversation();
 
-                true
+                // The conversation switched to already exists, so its next
+                // prompt must not name it again; a restart into one gets the
+                // same treatment in `starting`.
+                self.naming.named = true;
+
+                (true, self.restore.take_title())
             }
         };
 
         self.apply_replay(turns);
 
-        Some(SessionReplay { branch, replace })
+        Some(SessionReplay {
+            branch,
+            replace,
+            title,
+        })
     }
 
     /// Apply host-supplied defaults after any restored content has been accepted.
@@ -1527,6 +1537,11 @@ impl SessionController {
 pub struct SessionReady {
     pub branch: Option<BranchCompletion>,
     pub replaced: bool,
+
+    /// Name of the conversation a restore just switched to, when the
+    /// history list knew one.
+    pub title: Option<String>,
+
     pub selection: Option<SettingsOutcome>,
 
     /// The outcome of sending a remembered permission preset to a harness
@@ -1537,6 +1552,10 @@ pub struct SessionReady {
 pub struct SessionReplay {
     pub branch: Option<BranchCompletion>,
     pub replace: bool,
+
+    /// Name of the conversation a restore just switched to, when the
+    /// history list knew one.
+    pub title: Option<String>,
 }
 
 /// What the host must present after the conversation has applied a provider

@@ -32,7 +32,7 @@ use std::{collections, io, iter, path, time};
 
 use app::agent_tab::execution::AgentSession;
 use app::agent_tab::team::{TeamPane, TeamRuntime};
-use app::agent_tab::{AgentPane, AgentPaneEvent, RecoveryIdentity};
+use app::agent_tab::{AgentPane, AgentPaneEvent};
 use app::terminal_tab::session::HostEvent;
 use app::terminal_tab::view::{AgentInterrupted, TerminalGridResized, TerminalPane};
 use dirs::home_dir;
@@ -49,9 +49,10 @@ use gpui_component::resizable::PANEL_MIN_SIZE;
 use gpui_component::{
     ActiveTheme, Icon, IconNamed, Root, Theme as ComponentTheme, WindowExt, v_flex,
 };
+use nmt_agent::chat::SessionSummary;
 use nmt_agent::team::model::RoomId;
 use nmt_agent::{
-    AgentActivityPolicy, AgentEvent, AgentMonitor, AgentNotification, AgentRoute,
+    AgentActivityPolicy, AgentEvent, AgentEventKind, AgentMonitor, AgentNotification, AgentRoute,
     AgentRuntimeStatus, AgentWorkspace, MonitorMutation, agent_process, request_native_delivery,
 };
 use nmt_config::local_state::{WindowLocalState, WindowState};
@@ -361,7 +362,7 @@ pub(super) fn agent_workspace(roots: Option<&WorkspaceRoots>) -> AgentWorkspace 
 pub(super) struct PendingAgentResume {
     pub(super) profile: AgentProfile,
     pub(super) cwd: String,
-    pub(super) session_id: String,
+    pub(super) summary: SessionSummary,
 }
 
 pub(crate) struct AppWindow {
@@ -1869,15 +1870,15 @@ impl AppWindow {
         self.open_agent_tab_in(&profile, workspace, None, window, cx);
     }
 
-    /// Open an agent tab rooted at `cwd`, optionally continuing `resume` once
-    /// its session starts. A conversation belongs to the directory it ran in,
-    /// so one listed from another tab opens here rather than in the tab that
-    /// listed it.
+    /// Open an agent tab rooted at `cwd`, optionally continuing the
+    /// conversation `resume` lists once its session is ready. A conversation
+    /// belongs to the directory it ran in, so one listed from another tab
+    /// opens here rather than in the tab that listed it.
     pub(super) fn open_agent_tab_in(
         &mut self,
         profile: &AgentProfile,
         workspace: AgentWorkspace,
-        resume: Option<RecoveryIdentity>,
+        resume: Option<SessionSummary>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1899,7 +1900,17 @@ impl AppWindow {
 
         self.register_agent_tab(&pane, cx);
 
-        owner.start(resume, cx);
+        // The conversation is resumed through the history-list path once
+        // the fresh session is ready: a start that carries the id replays
+        // nothing for Claude Code and Codex and never names the tab.
+        if let Some(summary) = resume {
+            owner
+                .session()
+                .clone()
+                .update(cx, |session, _| session.resume_when_ready(summary));
+        }
+
+        owner.start(None, cx);
 
         self.insert_tab(
             TabId(id),
@@ -2606,7 +2617,12 @@ impl AppWindow {
                             })
                         && let Some(tabs) = self.workspaces.tabs_for_tab_mut(tab_id)
                     {
-                        chrome_changed |= tabs.set_title(tab_id, title.clone());
+                        // The saved session carries the title, so a restore
+                        // labels the tab with it before its shell runs.
+                        let changed = tabs.set_title(tab_id, title.clone());
+
+                        chrome_changed |= changed;
+                        session_changed |= changed;
                     }
                 }
                 HostEvent::Exit => {
@@ -3010,10 +3026,17 @@ impl AppWindow {
         let route = session.read(cx).agent_route().clone();
 
         let mutation = match event {
-            AgentPaneEvent::Lifecycle(event) if event.route == route => self
-                .agent_notifications
-                .agent_monitor
-                .apply(event.clone(), time::Instant::now()),
+            AgentPaneEvent::Lifecycle(event) if event.route == route => {
+                // A finished turn guarantees the conversation has content
+                // and a provider id, which is what a restore continues.
+                if event.kind == AgentEventKind::Stopped {
+                    self.sync_session_memory(cx);
+                }
+
+                self.agent_notifications
+                    .agent_monitor
+                    .apply(event.clone(), time::Instant::now())
+            }
             AgentPaneEvent::Lifecycle(_) => return,
             AgentPaneEvent::WorkflowActivity => {
                 // Sticky: a finished run stays reachable, so the control
@@ -3033,13 +3056,13 @@ impl AppWindow {
             // Addressed to the Team that owns the member's room; a member's
             // session is never a tab of its own.
             AgentPaneEvent::TeamPrompt(_) => return,
-            AgentPaneEvent::ResumeElsewhere { cwd, session_id } => {
+            AgentPaneEvent::ResumeElsewhere { cwd, summary } => {
                 // Opening a tab needs a window, which an event
                 // subscription has none of; the next render has one.
                 self.agent_notifications.pending_agent_resume = Some(PendingAgentResume {
                     profile: session.read(cx).profile().clone(),
                     cwd: cwd.clone(),
-                    session_id: session_id.clone(),
+                    summary: summary.clone(),
                 });
 
                 cx.notify();
@@ -3053,6 +3076,8 @@ impl AppWindow {
                     && let Some(tabs) = self.workspaces.tabs_for_tab_mut(tab_id)
                     && tabs.set_title(tab_id, title.clone())
                 {
+                    self.sync_session_memory(cx);
+
                     cx.notify();
                 }
 
@@ -3218,10 +3243,7 @@ impl Render for AppWindow {
             self.open_agent_tab_in(
                 &request.profile,
                 workspace,
-                Some(RecoveryIdentity::new(
-                    request.profile.kind,
-                    request.session_id,
-                )),
+                Some(request.summary),
                 window,
                 cx,
             );

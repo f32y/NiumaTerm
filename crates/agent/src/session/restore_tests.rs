@@ -3,8 +3,8 @@ use std::time::SystemTime;
 use crate::chat::{ReplayTurn, SessionSummary, SlashCommandOutcome};
 use crate::session::lifecycle::{SessionRuntime, StartOutcome, Status};
 use crate::session::restore::{
-    ConversationRestore, ReadyAction, ReplayAction, ReplayLoaded, ReplayRead, ResumeStart,
-    SettingsSeed,
+    ConversationRestore, LoadedReplay, ReadyAction, ReplayAction, ReplayLoaded, ReplayRead,
+    ResumeStart, SettingsSeed,
 };
 use crate::session::test_support::TestBackend;
 use crate::session::{AgentKind, Backend, RecoveryIdentity, ResumeOutcome};
@@ -30,6 +30,10 @@ fn read(restore: &mut ConversationRestore, runtime: &mut SessionRuntime) -> Repl
         ResumeStart::ReadReplay(request) => request,
         _ => panic!("Claude must load local history"),
     }
+}
+
+fn loaded(turns: Vec<ReplayTurn>) -> Result<LoadedReplay, String> {
+    Ok(LoadedReplay { turns, title: None })
 }
 
 fn ready_runtime() -> SessionRuntime {
@@ -137,11 +141,11 @@ fn an_old_read_cannot_replace_a_new_selection_even_for_the_same_session_id() {
     let current = read(&mut restore, &mut runtime);
 
     assert!(matches!(
-        restore.loaded(&mut runtime, old, Some("project"), Ok(Vec::new())),
+        restore.loaded(&mut runtime, old, Some("project"), loaded(Vec::new())),
         ReplayLoaded::Stale
     ));
     assert!(
-        matches!(restore.loaded(&mut runtime, current, Some("project"), Ok(Vec::new())), ReplayLoaded::Restart(identity) if identity.id == "selected")
+        matches!(restore.loaded(&mut runtime, current, Some("project"), loaded(Vec::new())), ReplayLoaded::Restart(identity) if identity.id == "selected")
     );
 }
 
@@ -157,7 +161,7 @@ fn a_read_from_an_old_epoch_cannot_restart_or_change_the_new_status() {
     runtime.turn_started();
 
     assert!(matches!(
-        restore.loaded(&mut runtime, request, Some("project"), Ok(Vec::new())),
+        restore.loaded(&mut runtime, request, Some("project"), loaded(Vec::new())),
         ReplayLoaded::Stale
     ));
     assert_eq!(runtime.status(), Status::Running);
@@ -172,7 +176,7 @@ fn changed_directory_retires_the_read_and_releases_the_old_status() {
         let request = read(&mut restore, &mut runtime);
 
         assert!(matches!(
-            restore.loaded(&mut runtime, request, cwd, Ok(Vec::new())),
+            restore.loaded(&mut runtime, request, cwd, loaded(Vec::new())),
             ReplayLoaded::Cancelled
         ));
         assert_eq!(runtime.status(), Status::Idle);
@@ -211,7 +215,7 @@ fn local_replay_moves_once_after_the_matching_restart_becomes_ready() {
     let buffer = replay.as_ptr();
 
     let ReplayLoaded::Restart(identity) =
-        restore.loaded(&mut runtime, request, Some("project"), Ok(replay))
+        restore.loaded(&mut runtime, request, Some("project"), loaded(replay))
     else {
         panic!("read must prepare a restart");
     };
@@ -256,7 +260,7 @@ fn unrelated_starts_and_startup_failures_drop_unpublished_replay() {
             &mut runtime,
             request,
             Some("project"),
-            Ok(vec![ReplayTurn::default()]),
+            loaded(vec![ReplayTurn::default()]),
         );
 
         let epoch = runtime.begin_start();
@@ -272,7 +276,7 @@ fn unrelated_starts_and_startup_failures_drop_unpublished_replay() {
     let request = read(&mut restore, &mut runtime);
 
     let ReplayLoaded::Restart(identity) =
-        restore.loaded(&mut runtime, request, Some("project"), Ok(Vec::new()))
+        restore.loaded(&mut runtime, request, Some("project"), loaded(Vec::new()))
     else {
         panic!("read must prepare a restart");
     };
@@ -337,7 +341,51 @@ fn old_backend_ready_and_replay_cannot_complete_an_in_progress_disk_read() {
     ));
     assert_eq!(restore.replayed(runtime.epoch()), ReplayAction::Ignore);
     assert!(matches!(
-        restore.loaded(&mut runtime, request, Some("project"), Ok(Vec::new())),
+        restore.loaded(&mut runtime, request, Some("project"), loaded(Vec::new())),
         ReplayLoaded::Restart(_)
     ));
+}
+
+/// Reads the history list's title first, then the name the transcript
+/// records. The list's title wins when both exist; a restore that has no list
+/// entry, such as a tab reopening on launch, uses the transcript's name.
+#[test]
+fn a_restore_without_a_listed_title_takes_the_recorded_one() {
+    for (listed, recorded, expected) in [
+        ("", Some("Recorded"), Some("Recorded")),
+        ("Listed", Some("Recorded"), Some("Listed")),
+        ("", None, None),
+    ] {
+        let mut runtime = ready_runtime();
+        let mut restore = ConversationRestore::default();
+
+        let summary = SessionSummary {
+            title: listed.into(),
+            ..summary("selected")
+        };
+
+        let ResumeStart::ReadReplay(request) =
+            restore.begin(&mut runtime, AgentKind::Claude, &summary, Some("project"))
+        else {
+            panic!("Claude must load local history");
+        };
+
+        let replay = Ok(LoadedReplay {
+            turns: Vec::new(),
+            title: recorded.map(str::to_owned),
+        });
+
+        let ReplayLoaded::Restart(identity) =
+            restore.loaded(&mut runtime, request, Some("project"), replay)
+        else {
+            panic!("read must prepare a restart");
+        };
+
+        let epoch = runtime.begin_start();
+
+        restore.starting(epoch, Some(&identity));
+
+        assert!(matches!(restore.ready(epoch), ReadyAction::Replay(_)));
+        assert_eq!(restore.take_title().as_deref(), expected);
+    }
 }

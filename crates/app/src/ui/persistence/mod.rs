@@ -8,6 +8,8 @@ mod snapshot;
 #[cfg(test)]
 mod tests;
 
+use std::time::SystemTime;
+
 use app::agent_tab::execution::AgentSession;
 use app::agent_tab::team::{TeamPane, TeamRuntime};
 use app::agent_tab::{AgentKind, AgentPane, thread_settings_from_saved};
@@ -15,6 +17,7 @@ use app::terminal_tab::view::TerminalPane;
 use dirs::home_dir;
 use gpui::{App, AppContext, Axis, Context, Entity, Window};
 use gpui_component::resizable::ResizableState;
+use nmt_agent::chat::SessionSummary;
 use nmt_agent::team::model::RoomId;
 use nmt_config::config_dir_path;
 use nmt_config::local_state::{
@@ -40,7 +43,8 @@ enum SavedTab<'a> {
     Git(&'a str),
     /// The team room with this saved id.
     Team(&'a str),
-    /// A fresh conversation of this agent kind.
+    /// A conversation of this agent kind: the saved one when the tab held
+    /// one, otherwise a fresh one.
     Agent(AgentKind),
     /// A terminal. An agent kind this build does not know (a newer snapshot)
     /// degrades to a terminal rather than losing the tab.
@@ -257,8 +261,9 @@ pub(super) fn restore_session(
 /// rebuilds the split tree (one fresh shell per leaf); an unusable layout
 /// or failed spawn degrades to a single default-profile pane so the tab
 /// the user just activated never vanishes. A tab saved with an agent kind
-/// reopens as a fresh agent conversation instead (nothing to restore —
-/// the Codex process died with the previous app instance).
+/// reopens as an agent tab instead, continuing its saved conversation once
+/// the new session is ready (the harness process died with the previous app
+/// instance, but the conversation itself persists on disk).
 pub(super) fn materialize_active_tab(
     workspaces: &mut WorkspaceManager,
     next_id: &mut u64,
@@ -311,6 +316,25 @@ pub(super) fn materialize_active_tab(
                     .session()
                     .clone()
                     .update(cx, |session, _| session.remember_settings(settings));
+            }
+
+            // A restored tab has no history-list row to name it, so the title
+            // stays empty and the resume takes the name the transcript
+            // records; only the id and title take part in a resume.
+            if let Some(id) = state.agent_conversation.clone() {
+                let summary = SessionSummary {
+                    id,
+                    title: String::new(),
+                    branch: None,
+                    cwd: None,
+                    last_active: SystemTime::UNIX_EPOCH,
+                    snippet: None,
+                };
+
+                owner
+                    .session()
+                    .clone()
+                    .update(cx, |session, _| session.resume_when_ready(summary));
             }
 
             let pane = cx.new(|cx| AgentPane::attach(&owner, window, cx));
@@ -438,30 +462,31 @@ fn restore_tabs(
                 .profile_name_for_command(tab_state.shell.as_deref(), &tab_state.args),
         };
 
+        // The title the tab's content last reported labels it until it
+        // spawns and reports its own.
+        let title = tab_state.title.clone();
+
         restored.push((
             TabSurface::Pending(Box::new(tab_state)),
             TabId(AppWindow::alloc_id(next_id)),
             name,
+            title,
             default_title,
         ));
     }
 
     let mut restored = restored.into_iter();
 
-    let (first_pane, first_id, first_name, first_default_title) = restored.next()?;
+    let (first_pane, first_id, first_name, first_title, first_default_title) = restored.next()?;
 
     let mut tab_manager = TabManager::new(first_pane, first_id, first_default_title);
 
-    if let Some(name) = first_name {
-        tab_manager.rename(first_id, name);
-    }
+    restore_titles(&mut tab_manager, first_id, first_name, first_title);
 
-    for (pane, id, name, default_title) in restored {
+    for (pane, id, name, title, default_title) in restored {
         tab_manager.new_tab(pane, id, default_title);
 
-        if let Some(name) = name {
-            tab_manager.rename(id, name);
-        }
+        restore_titles(&mut tab_manager, id, name, title);
     }
 
     let active_index = active_tab.min(tab_manager.list().len() - 1);
@@ -469,6 +494,21 @@ fn restore_tabs(
     tab_manager.list_mut().activate(active_index);
 
     Some(tab_manager)
+}
+
+fn restore_titles(
+    tab_manager: &mut TabManager<TabSurface>,
+    id: TabId,
+    name: Option<String>,
+    title: Option<String>,
+) {
+    if let Some(title) = title {
+        tab_manager.set_title(id, title);
+    }
+
+    if let Some(name) = name {
+        tab_manager.rename(id, name);
+    }
 }
 
 /// Rebuild one node of a saved pane layout, spawning a fresh shell per

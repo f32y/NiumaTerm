@@ -1,20 +1,26 @@
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::time::SystemTime;
 
-use gpui::{App, AppContext as _, Entity, TestAppContext, VisualTestContext, WindowHandle};
+use gpui::{
+    App, AppContext as _, Entity, Subscription, TestAppContext, VisualTestContext, WindowHandle,
+};
 use gpui_component::Root;
 use nmt_agent::AgentWorkspace;
 use nmt_agent::chat::{
     Event, Item, ReplayItem, ReplayTurn, SessionSummary, SlashCommandOutcome, ThreadSettings,
 };
 use nmt_agent::session::lifecycle::{StartOutcome, Status};
-use nmt_agent::session::restore::{ReadyAction, ReplayLoaded, ResumeStart, SettingsSeed};
+use nmt_agent::session::restore::{
+    LoadedReplay, ReadyAction, ReplayLoaded, ResumeStart, SettingsSeed,
+};
 use nmt_agent::session::{AgentKind, RecoveryIdentity, ResumeOutcome};
 use nmt_config::profile::AgentProfile;
 
 use crate::agent_tab::session::{Backend, TestBackend};
 use crate::agent_tab::settings::AgentSettings;
 use crate::agent_tab::tests::deliver_session_event;
-use crate::agent_tab::{AgentPane, RecentSessionsMode};
+use crate::agent_tab::{AgentPane, AgentPaneEvent, RecentSessionsMode};
 
 fn open_pane(cx: &mut TestAppContext) -> (Entity<AgentPane>, WindowHandle<Root>) {
     let profile = AgentProfile {
@@ -83,6 +89,24 @@ fn user_rows(pane: &AgentPane, cx: &App) -> Vec<String> {
         .collect()
 }
 
+fn collect_titles(
+    pane: &Entity<AgentPane>,
+    cx: &mut VisualTestContext,
+) -> (Rc<RefCell<Vec<String>>>, Subscription) {
+    let titles = Rc::new(RefCell::new(Vec::new()));
+    let observed = Rc::clone(&titles);
+
+    let subscription = cx.update(|_, cx| {
+        cx.subscribe(pane, move |_, event: &AgentPaneEvent, _| {
+            if let AgentPaneEvent::TitleSuggested(title) = event {
+                observed.borrow_mut().push(title.clone());
+            }
+        })
+    });
+
+    (titles, subscription)
+}
+
 fn install_backend(pane: &mut AgentPane) {
     let epoch = pane.session.borrow_mut().runtime_mut().begin_start();
 
@@ -129,17 +153,149 @@ fn prepare_local_replay(pane: &mut AgentPane, cx: &App) -> RecoveryIdentity {
         panic!("Claude restoration must read history");
     };
 
-    let ReplayLoaded::Restart(identity) =
-        pane.session
-            .borrow_mut()
-            .replay_loaded(request, cwd.as_deref(), Ok(replay("restored")))
-    else {
+    let ReplayLoaded::Restart(identity) = pane.session.borrow_mut().replay_loaded(
+        request,
+        cwd.as_deref(),
+        Ok(LoadedReplay {
+            turns: replay("restored"),
+            title: None,
+        }),
+    ) else {
         panic!("loaded history must prepare a restart");
     };
 
     pane.history_ui.mode = RecentSessionsMode::Loading;
 
     identity
+}
+
+#[gpui::test]
+fn restored_conversation_resumes_once_on_the_first_ready(cx: &mut TestAppContext) {
+    let (pane, window) = open_pane(cx);
+
+    let mut cx = VisualTestContext::from_window(window.into(), cx);
+
+    let (titles, _subscription) = collect_titles(&pane, &mut cx);
+
+    let host = cx.update(|_, cx| {
+        pane.update(cx, |pane, _| {
+            install_backend(pane);
+        });
+
+        let host = pane.read(cx).agent_session().expect("pane has a session");
+
+        host.update(cx, |session, _| session.resume_when_ready(summary()));
+
+        host
+    });
+
+    // Nothing has replayed yet, so a snapshot taken now must still carry the
+    // conversation the tab is about to continue.
+    cx.update(|_, cx| {
+        assert_eq!(
+            host.read(cx).saved_conversation(cx).as_deref(),
+            Some("selected")
+        );
+    });
+
+    deliver_session_event(&pane, Event::Ready(ThreadSettings::default()), &cx);
+
+    cx.update(|_, cx| {
+        assert_eq!(
+            pane.read(cx).session.borrow().runtime().status(),
+            Status::Starting
+        );
+    });
+
+    deliver_session_event(&pane, Event::Replay(replay("restored")), &cx);
+
+    deliver_session_event(&pane, Event::Ready(ThreadSettings::default()), &cx);
+
+    // The Ready that follows the replay must not start another resume.
+    cx.update(|_, cx| {
+        pane.update(cx, |pane, cx| {
+            assert_eq!(user_rows(pane, cx), ["restored"]);
+            assert_eq!(pane.session.borrow().runtime().status(), Status::Idle);
+        })
+    });
+
+    // A tab opened for a conversation listed elsewhere is named after the
+    // list's row, the same as a resume from its own list.
+    assert_eq!(*titles.borrow(), ["Selected"]);
+}
+
+#[gpui::test]
+fn in_place_resume_names_the_tab_after_the_picked_conversation(cx: &mut TestAppContext) {
+    let (pane, window) = open_pane(cx);
+
+    let mut cx = VisualTestContext::from_window(window.into(), cx);
+
+    cx.update(|_, cx| {
+        pane.update(cx, |pane, _| {
+            install_backend(pane);
+        })
+    });
+
+    let (titles, _subscription) = collect_titles(&pane, &mut cx);
+
+    cx.update(|_, cx| {
+        pane.update(cx, |pane, cx| {
+            pane.history_ui.data.sessions = vec![summary()];
+            pane.history_ui.mode = RecentSessionsMode::Open;
+
+            pane.resume_session(0, cx);
+        })
+    });
+
+    // A harness that stores no name for the thread reports none on resume,
+    // so the list's title is all that can name the tab.
+    deliver_session_event(&pane, Event::Replay(replay("restored")), &cx);
+
+    assert_eq!(*titles.borrow(), ["Selected"]);
+
+    // The next prompt continues a named conversation, so it must not rename
+    // the tab after itself.
+    cx.update(|_, cx| {
+        let request = pane
+            .read(cx)
+            .session
+            .borrow()
+            .title_request("next prompt", |_| None);
+
+        assert!(request.is_none());
+    });
+}
+
+#[gpui::test]
+fn history_read_resume_names_the_tab_after_the_picked_conversation(cx: &mut TestAppContext) {
+    let (pane, window) = open_pane(cx);
+
+    let mut cx = VisualTestContext::from_window(window.into(), cx);
+
+    cx.update(|_, cx| {
+        pane.update(cx, |pane, _| {
+            install_backend(pane);
+        })
+    });
+
+    let (titles, _subscription) = collect_titles(&pane, &mut cx);
+
+    cx.update(|_, cx| {
+        pane.update(cx, |pane, cx| {
+            let identity = prepare_local_replay(pane, cx);
+            let epoch = pane.session.borrow_mut().runtime_mut().begin_start();
+
+            pane.session
+                .borrow_mut()
+                .restore_parts()
+                .0
+                .starting(epoch, Some(&identity));
+        })
+    });
+
+    deliver_session_event(&pane, Event::Ready(ThreadSettings::default()), &cx);
+
+    assert_eq!(*titles.borrow(), ["Selected"]);
 }
 
 #[gpui::test]
@@ -407,7 +563,10 @@ fn old_backend_events_during_disk_read_leave_visible_rows_and_settings_untouched
                 pane.session.borrow_mut().replay_loaded(
                     request,
                     cwd.as_deref(),
-                    Ok(replay("restored")),
+                    Ok(LoadedReplay {
+                        turns: replay("restored"),
+                        title: None,
+                    }),
                 ),
                 ReplayLoaded::Restart(_)
             ));

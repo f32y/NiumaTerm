@@ -61,7 +61,8 @@ use crate::claude_code::sessions::task_history::{
 };
 #[cfg(test)]
 use crate::claude_code::sessions::titles::{
-    compaction_summary_text, recorded_title, resolved_session_title, user_prompt_text,
+    compaction_summary_text, recorded_title, resolved_session_title, session_title,
+    user_prompt_text,
 };
 use crate::hook_store::home_dir;
 

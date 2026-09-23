@@ -1408,3 +1408,54 @@ fn replay_divides_a_session_into_the_turns_it_recorded() {
     assert!(turns[1].interrupted);
     assert_eq!(turns[1].items.len(), 2);
 }
+
+/// A restore that has no history-list entry names the tab from the
+/// transcript alone, with the same precedence the list uses, minus the id
+/// prefix that would label the tab with nothing useful.
+#[test]
+fn a_restored_session_is_named_like_its_history_row() {
+    let dir = tempdir().unwrap();
+
+    let prompt = serde_json::json!({
+        "type": "user",
+        "message": {"role": "user", "content": "run a three step task"},
+    });
+
+    let generated = serde_json::json!({"type": "ai-title", "aiTitle": "Three step task"});
+
+    let titled = dir.path().join("titled.jsonl");
+
+    fs::write(
+        &titled,
+        format!(
+            "{prompt}
+{generated}
+"
+        ),
+    )
+    .unwrap();
+
+    assert_eq!(session_title(&titled).as_deref(), Some("Three step task"));
+
+    let prompt_only = dir.path().join("prompt-only.jsonl");
+
+    fs::write(
+        &prompt_only,
+        format!(
+            "{prompt}
+"
+        ),
+    )
+    .unwrap();
+
+    assert_eq!(
+        session_title(&prompt_only).as_deref(),
+        Some("run a three step task")
+    );
+
+    let empty = dir.path().join("empty.jsonl");
+
+    fs::write(&empty, "").unwrap();
+
+    assert_eq!(session_title(&empty), None);
+}

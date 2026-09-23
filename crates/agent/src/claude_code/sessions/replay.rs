@@ -11,24 +11,25 @@ use crate::claude_code::records::{
 };
 use crate::claude_code::sessions::index::TranscriptIndex;
 use crate::claude_code::sessions::titles::{
-    clean_prompt, compaction_summary_text, conversation_user_text, is_interruption,
+    clean_prompt, compaction_summary_text, conversation_user_text, is_interruption, session_title,
 };
 use crate::claude_code::sessions::{ClaudeCheckpoint, session_path};
 use crate::json::unix_seconds_from_rfc3339;
+use crate::session::restore::LoadedReplay;
 
 /// Opening a selected conversation must distinguish unreadable history from an
 /// empty transcript, so a failed read cannot replace the visible conversation.
-pub(crate) fn try_load_replay(
-    cwd: Option<&str>,
-    session_id: &str,
-) -> Result<Vec<ReplayTurn>, String> {
+pub(crate) fn try_load_replay(cwd: Option<&str>, session_id: &str) -> Result<LoadedReplay, String> {
     let path = session_path(cwd, session_id)
         .ok_or_else(|| format!("Claude session {session_id} has no project directory"))?;
 
-    let file = fs::File::open(path)
+    let file = fs::File::open(&path)
         .map_err(|error| format!("could not read Claude session {session_id}: {error}"))?;
 
-    Ok(parse_replay(BufReader::new(file)))
+    Ok(LoadedReplay {
+        turns: parse_replay(BufReader::new(file)),
+        title: session_title(&path),
+    })
 }
 
 /// Rewindable human prompts from the current active branch, newest first.

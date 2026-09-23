@@ -150,10 +150,10 @@ pub(crate) fn session_state(
 
                             state
                         }
-                        // Agent conversations are not persisted (the
-                        // agent process and its thread die with the app);
-                        // the saved kind reopens a fresh agent tab, running
-                        // on the thread controls this one was left set to.
+                        // The agent process dies with the app, but its
+                        // harness keeps the conversation on disk: the saved
+                        // id lets the restored tab continue it, running on
+                        // the thread controls this one was left set to.
                         TabSurface::Agent(tab) => {
                             let session = tab.owner.session().read(cx);
                             let profile = session.profile();
@@ -165,6 +165,7 @@ pub(crate) fn session_state(
                                 agent_settings: session
                                     .remembered_settings()
                                     .map(saved_settings_from_thread),
+                                agent_conversation: session.saved_conversation(cx),
                                 ..TabState::default()
                             }
                         }
@@ -188,6 +189,7 @@ pub(crate) fn session_state(
 
                     state.name = tab.user_title().map(str::to_owned);
                     state.user_named = state.name.is_some();
+                    state.title = tab.terminal_title().map(str::to_owned);
 
                     state
                 })

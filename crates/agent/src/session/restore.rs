@@ -50,9 +50,16 @@ pub struct ReplayRead {
     identity: RecoveryIdentity,
 }
 
+/// A conversation read from disk for a restore: its turns, and the name its
+/// transcript records for it.
+pub struct LoadedReplay {
+    pub turns: Vec<ReplayTurn>,
+    pub title: Option<String>,
+}
+
 impl ReplayRead {
     /// Synchronous disk work; the caller chooses its background executor.
-    pub fn load(&self) -> Result<Vec<ReplayTurn>, String> {
+    pub fn load(&self) -> Result<LoadedReplay, String> {
         sessions::try_load_replay(self.cwd.as_deref(), &self.identity.id)
     }
 }
@@ -108,6 +115,13 @@ enum PendingRestore {
 pub struct ConversationRestore {
     generation: u64,
     pending: Option<PendingRestore>,
+
+    /// Name of the conversation the latest restore switches to, as the
+    /// history list showed it. Most harnesses report no name on resume, so
+    /// this is what names the tab once the switch lands. Every successful
+    /// restore passes through `begin`, which replaces it, so a failed
+    /// restore's name never reaches a later one.
+    title: Option<String>,
 }
 
 impl ConversationRestore {
@@ -130,6 +144,10 @@ impl ConversationRestore {
         }
 
         let previous = runtime.begin_conversation_change();
+
+        self.title = Some(summary.title.trim())
+            .filter(|title| !title.is_empty())
+            .map(str::to_owned);
 
         let outcome = match runtime.backend_mut() {
             Some(backend) => backend.resume_thread(&summary.id),
@@ -178,7 +196,7 @@ impl ConversationRestore {
         runtime: &mut SessionRuntime,
         request: ReplayRead,
         cwd: Option<&str>,
-        replay: Result<Vec<ReplayTurn>, String>,
+        replay: Result<LoadedReplay, String>,
     ) -> ReplayLoaded {
         let Some(PendingRestore::Reading {
             request: active,
@@ -208,9 +226,13 @@ impl ConversationRestore {
 
         match replay {
             Ok(replay) => {
+                // A restore that names no conversation, such as a tab
+                // reopening on launch, takes the name its transcript records.
+                self.title = self.title.take().or(replay.title);
+
                 self.pending = Some(PendingRestore::Prepared {
                     identity: request.identity.clone(),
-                    replay,
+                    replay: replay.turns,
                 });
 
                 ReplayLoaded::Restart(request.identity)
@@ -294,5 +316,11 @@ impl ConversationRestore {
 
     pub(crate) fn cancel(&mut self) {
         self.pending = None;
+    }
+
+    /// The restored conversation's name, released once its replay replaced
+    /// the conversation.
+    pub(crate) fn take_title(&mut self) -> Option<String> {
+        self.title.take()
     }
 }

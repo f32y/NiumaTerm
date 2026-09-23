@@ -234,6 +234,8 @@ fn session_state() -> SessionState {
                 agent_profile: None,
                 team_room: None,
                 git_cwd: None,
+                title: None,
+                agent_conversation: None,
                 agent_settings: None,
                 panes: None,
                 grid_size: None,

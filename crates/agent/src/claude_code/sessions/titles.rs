@@ -134,6 +134,12 @@ pub(super) fn resolved_session_title(path: &Path, provisional: Option<String>, i
         .unwrap_or_else(|| id.chars().take(8).collect())
 }
 
+/// The name the history list gives a session, without the id fallback: an id
+/// prefix tells a row apart in the list but means nothing as a tab title.
+pub(super) fn session_title(path: &Path) -> Option<String> {
+    recorded_title(path).or_else(|| head_summary(path).title)
+}
+
 /// The newest user and model titles in the bounded tail window. The newest
 /// record of each kind wins, then a user-authored title outranks a model title.
 pub(super) fn recorded_title(path: &Path) -> Option<String> {

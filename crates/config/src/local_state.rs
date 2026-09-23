@@ -124,9 +124,8 @@ pub struct TabState {
     pub cwd: Option<String>,
 
     /// The agent kind ("codex") when this tab hosts an agent conversation
-    /// instead of a terminal. Conversations are not persisted; restore
-    /// reopens a fresh agent tab of the same kind, and an unknown kind
-    /// degrades to a plain terminal tab.
+    /// instead of a terminal. Restore reopens an agent tab of the same kind,
+    /// and an unknown kind degrades to a plain terminal tab.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
 
@@ -147,6 +146,19 @@ pub struct TabState {
     /// Directory reviewed by a Git tab. Older snapshots omit this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git_cwd: Option<String>,
+
+    /// The title the tab's content last reported: the shell's OSC title or
+    /// the agent conversation's name. A restored tab shows it before it is
+    /// activated, so tabs that have not spawned yet stay distinguishable
+    /// instead of all carrying their profile name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+
+    /// Provider id of the conversation an agent tab held. The harness keeps
+    /// the conversation on disk, so a restored tab continues it; absent for a
+    /// tab whose conversation never received a message.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_conversation: Option<String>,
 
     /// Thread controls this agent tab was last running under. Absent for a
     /// tab the user never adjusted, which reopens on its profile's defaults.

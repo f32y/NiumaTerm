@@ -86,6 +86,10 @@ impl<S> Tab<S> {
         self.user_title.as_deref()
     }
 
+    pub fn terminal_title(&self) -> Option<&str> {
+        self.terminal_title.as_deref()
+    }
+
     pub fn exited(&self) -> bool {
         self.exited
     }

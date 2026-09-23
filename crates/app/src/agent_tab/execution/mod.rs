@@ -23,7 +23,8 @@ use futures::stream::ReadyChunks;
 use gpui::{App, AppContext as _, AsyncApp, Context, Entity, EventEmitter, Task, WeakEntity};
 use nmt_agent::background_task::BackgroundTaskKey;
 use nmt_agent::chat::{
-    Event, Item, QuestionMode, SlashCommandOutcome, TeamDecisionRequest, ThreadSettings,
+    Event, Item, QuestionMode, SessionSummary, SlashCommandOutcome, TeamDecisionRequest,
+    ThreadSettings,
 };
 use nmt_agent::launcher::AgentCli;
 use nmt_agent::session::branch::{BranchUpdate, CheckpointRead};
@@ -31,7 +32,7 @@ use nmt_agent::session::capabilities::AgentCapabilities as _;
 use nmt_agent::session::controller::{ReadyDefaults, SessionController, SessionEffect};
 use nmt_agent::session::input::{QuestionAction, Submission};
 use nmt_agent::session::lifecycle::{RecoverySnapshot, StartOutcome};
-use nmt_agent::session::restore::{ReplayLoaded, ReplayRead, SettingsSeed};
+use nmt_agent::session::restore::{ReplayLoaded, ReplayRead, ResumeStart, SettingsSeed};
 use nmt_agent::session::team_capabilities::TeamLaunch;
 use nmt_agent::session::update_readiness::{ConversationWork, Readiness};
 use nmt_agent::session::workflows::RefreshPlan;
@@ -96,6 +97,17 @@ pub struct AgentSession {
     /// starts from its launch profile, and the session snapshot saves this
     /// alongside the tab so a restored one reopens on what the user picked.
     remembered: Option<ThreadSettings>,
+
+    /// The saved conversation a restored tab continues. Resuming needs a
+    /// ready session, and until the replay lands the live conversation is
+    /// still empty, so a session snapshot taken in between falls back to this
+    /// id instead of forgetting the conversation.
+    restored_conversation: Option<RecoveryIdentity>,
+
+    /// The history-list row of `restored_conversation` while it still waits
+    /// for the session's first Ready. Taken on that Ready, because later ones
+    /// (every in-place resume emits one) must not resume it again.
+    resume_on_ready: Option<SessionSummary>,
 
     pub(super) route: AgentRoute,
     pub(super) kind: AgentKind,
@@ -250,6 +262,8 @@ impl AgentSession {
             active_workspace: workspace.clone(),
             workspace,
             remembered: None,
+            restored_conversation: None,
+            resume_on_ready: None,
             route: agent_process().allocate_route(),
             kind,
             id: SessionId(Uuid::new_v4()),
@@ -318,6 +332,68 @@ impl AgentSession {
 
     pub fn remember_settings(&mut self, settings: ThreadSettings) {
         self.remembered = Some(settings);
+    }
+
+    /// Continue the conversation `summary` lists once this session reports
+    /// ready. The resume goes through the same path as picking the
+    /// conversation from this tab's history list, because that is the path
+    /// that replays its transcript and names the tab for every harness: Codex
+    /// and DeepSeek switch threads in place, Claude Code reads the transcript
+    /// from disk and respawns with the session id. An empty title leaves the
+    /// name to the transcript.
+    pub fn resume_when_ready(&mut self, summary: SessionSummary) {
+        self.restored_conversation = Some(RecoveryIdentity::new(self.kind, summary.id.clone()));
+
+        // The tab was opened in the directory the conversation belongs to,
+        // so the resume runs there; a recorded directory could only send it
+        // to yet another tab.
+        self.resume_on_ready = Some(SessionSummary {
+            cwd: None,
+            ..summary
+        });
+    }
+
+    /// The conversation a restore of this tab should continue: the live one
+    /// once it has content, otherwise a restored one whose resume has not
+    /// replayed yet.
+    pub fn saved_conversation(&self, cx: &App) -> Option<String> {
+        let live = self
+            .update_work(cx)
+            .identity(self.controller.borrow().runtime().backend());
+
+        match live {
+            Readiness::Ready(Some(identity)) => Some(identity.id),
+            Readiness::Ready(None)
+            | Readiness::Updating
+            | Readiness::ActiveWork
+            | Readiness::MissingIdentity => self
+                .restored_conversation
+                .as_ref()
+                .map(|identity| identity.id.clone()),
+        }
+    }
+
+    fn resume_restored_conversation(&mut self, cx: &mut Context<Self>) {
+        let Some(summary) = self.resume_on_ready.take() else {
+            return;
+        };
+
+        let outcome = self
+            .controller
+            .borrow_mut()
+            .begin_resume(&summary, self.active_workspace.primary());
+
+        match outcome {
+            ResumeStart::Requested => self
+                .controller
+                .borrow_mut()
+                .controls
+                .seed_settings(SettingsSeed::resumed(self.kind)),
+            ResumeStart::ReadReplay(request) => self.read_resume(request, cx),
+            // The tab keeps the fresh conversation it started with; the
+            // saved id stays, so the next launch tries again.
+            ResumeStart::Busy | ResumeStart::Rejected | ResumeStart::Elsewhere { .. } => {}
+        }
     }
 
     pub fn downgrade(owner: &SessionOwner) -> WeakEntity<Self> {
@@ -621,6 +697,8 @@ impl AgentSession {
                 self.restore_background_tasks(cx);
 
                 self.restore_workflows(cx);
+
+                self.resume_restored_conversation(cx);
             }
             SessionEffect::InputRequested { index } => self.expire_optional_question(*index, cx),
             SessionEffect::Workflows { .. } => self.sync_workflow_refresh(cx),
@@ -1116,6 +1194,11 @@ impl AgentSession {
         }
 
         let retiring = self.controller.borrow_mut().reset_for_restart();
+
+        // A new conversation replaces the restored one, so a restore must
+        // not bring the old one back.
+        self.restored_conversation = None;
+        self.resume_on_ready = None;
 
         cx.emit(AgentPaneEvent::TitleSuggested(String::new()));
 

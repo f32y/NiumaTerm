@@ -153,7 +153,7 @@ pub enum AgentPaneEvent {
     /// owns tabs, so opening it where it worked is left to the chrome.
     ResumeElsewhere {
         cwd: String,
-        session_id: String,
+        summary: SessionSummary,
     },
     /// A name for the conversation this pane is holding, derived from the
     /// message that opened it. The pane does not know which tab owns it, so
@@ -2245,6 +2245,10 @@ impl AgentPane {
 
                 self.transcript
                     .update(cx, |transcript, _| transcript.sync_content());
+
+                if let Some(title) = replay.title {
+                    self.emit_event(AgentPaneEvent::TitleSuggested(title), cx);
+                }
             }
         }
     }
@@ -2268,6 +2272,10 @@ impl AgentPane {
 
             self.history_ui.mode = RecentSessionsMode::Hidden;
             self.palette.feedback = None;
+        }
+
+        if let Some(title) = ready.title {
+            self.emit_event(AgentPaneEvent::TitleSuggested(title), cx);
         }
 
         let selection = ready.selection;
@@ -2538,10 +2546,14 @@ impl AgentPane {
 
         let request = match outcome {
             ResumeStart::Busy => return,
-            ResumeStart::Elsewhere { cwd, session_id } => {
+            ResumeStart::Elsewhere { cwd, .. } => {
+                // The whole row goes along, so the tab that opens the
+                // conversation is named after it like one resumed here.
+                let summary = summary.clone();
+
                 self.history_ui.selected = index;
 
-                self.emit_event(AgentPaneEvent::ResumeElsewhere { cwd, session_id }, cx);
+                self.emit_event(AgentPaneEvent::ResumeElsewhere { cwd, summary }, cx);
 
                 cx.notify();
 

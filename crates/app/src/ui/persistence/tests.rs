@@ -5,9 +5,11 @@ use nmt_config::profile::ProfilesConfig;
 
 use crate::ui::persistence::{
     legacy_generated_tab_title, resolve_restored_launch, restore_tabs, restore_team_tab,
+    session_state,
 };
 use crate::ui::settings::{AppSettings, Profile};
 use crate::ui::shell::TabSurface;
+use crate::workspace::{WorkspaceId, WorkspaceManager, WorkspaceRoots};
 
 fn settings_with_pwsh_default() -> AppSettings {
     AppSettings::from_config(Config {
@@ -41,6 +43,8 @@ fn tab(shell: Option<&str>, args: &[&str]) -> TabState {
         agent_profile: None,
         team_room: None,
         git_cwd: None,
+        title: None,
+        agent_conversation: None,
         agent_settings: None,
         panes: None,
         grid_size: None,
@@ -94,6 +98,49 @@ fn restored_team_tabs_keep_their_title(cx: &mut TestAppContext) {
 
         assert_eq!(tabs.list().items()[0].title(), rust_i18n::t!("team-title"));
         assert_eq!(tabs.list().items()[1].title(), "Review team");
+    });
+}
+
+#[gpui::test]
+fn restored_tabs_show_their_saved_title_across_launches(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        cx.set_global(settings_with_pwsh_default());
+
+        let titled = TabState {
+            title: Some("vim notes.md".into()),
+            ..tab(None, &[])
+        };
+
+        let named = TabState {
+            name: Some("editor".into()),
+            user_named: true,
+            ..titled.clone()
+        };
+
+        let tabs = restore_tabs(vec![titled, named, tab(None, &[])], 0, &mut 0, cx).unwrap();
+
+        let shown: Vec<_> = tabs.list().items().iter().map(|tab| tab.title()).collect();
+
+        assert_eq!(shown, ["vim notes.md", "editor", "PowerShell"]);
+
+        // Tabs the user never activated save again on quit; losing the title
+        // there would leave them unlabeled from the second launch on.
+        let workspaces = WorkspaceManager::new(
+            tabs,
+            WorkspaceId(100),
+            "Workspace".into(),
+            WorkspaceRoots::single("C:/Projects".into()),
+        );
+
+        let saved = session_state(&workspaces, None, cx);
+
+        let titles: Vec<_> = saved.workspaces[0]
+            .tabs
+            .iter()
+            .map(|tab| tab.title.as_deref())
+            .collect();
+
+        assert_eq!(titles, [Some("vim notes.md"), Some("vim notes.md"), None]);
     });
 }
 
