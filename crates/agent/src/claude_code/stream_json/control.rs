@@ -496,7 +496,7 @@ fn control_response_error(response: &Value) -> Option<String> {
                 .unwrap_or("unknown Claude control error")
                 .to_string(),
         ),
-        _ => Some("Claude returned a malformed file restore response.".to_string()),
+        _ => Some("Claude returned a malformed control response.".to_string()),
     }
 }
 

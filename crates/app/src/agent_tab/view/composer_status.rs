@@ -324,7 +324,7 @@ fn latency_readout(latency: Duration) -> String {
 async fn branch_label(cwd: &str, max_age: Duration) -> Option<String> {
     let branch = match git::current_branch(cwd, max_age).await {
         Ok(branch) => branch?,
-        Err(_) => return Some("Git unavailable".into()),
+        Err(_) => return Some(t!("agent-composer-git-unavailable").into_owned()),
     };
 
     Some(match branch {

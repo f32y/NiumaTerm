@@ -490,7 +490,7 @@ pub(crate) fn prepare_paste(
                 }),
             ClipboardEntry::String(_) => None,
         })
-        .ok_or_else(|| "Could not read the pasted image".to_string())?;
+        .ok_or_else(|| t!("agent-composer-image-unreadable").into_owned())?;
 
     let mut prepared = PreparedPaste {
         image: Arc::new(Image::from_bytes(ImageFormat::Png, bytes)),

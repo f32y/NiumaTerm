@@ -1165,7 +1165,7 @@ fn file_rewind_rejection_and_malformed_responses_are_nonfatal_results() {
         ("error", "checkpoint expired"),
         (
             "unexpected",
-            "Claude returned a malformed file restore response.",
+            "Claude returned a malformed control response.",
         ),
     ] {
         let mut pending = PendingRequests::new(1);
