@@ -119,7 +119,7 @@ impl WorkspaceDirsEditor {
             let _ = editor.update(cx, |editor, cx| {
                 // An older check must not replace results for a different directory list.
                 if editor.ordered() == expected {
-                    editor.available = available;
+                    editor.available.unavailable = available;
 
                     cx.notify();
                 }
@@ -368,17 +368,20 @@ impl Render for WorkspaceDirsEditor {
 #[derive(Default)]
 pub(super) struct RootAvailability {
     unavailable: collections::HashSet<String>,
+
+    /// Number of the latest check started. Checks can finish out of order,
+    /// for example when an earlier one waits on a sleeping share, and only
+    /// the latest describes the directories on screen now.
+    generation: u64,
 }
 
 impl RootAvailability {
-    fn check(paths: Vec<String>) -> Self {
-        Self {
-            unavailable: paths
-                .into_iter()
-                .filter(|path| !path::Path::new(path).is_dir())
-                .filter_map(|path| root_key(&path))
-                .collect(),
-        }
+    fn check(paths: Vec<String>) -> collections::HashSet<String> {
+        paths
+            .into_iter()
+            .filter(|path| !path::Path::new(path).is_dir())
+            .filter_map(|path| root_key(&path))
+            .collect()
     }
 
     /// Re-check the given directories off the UI thread and remember which
@@ -386,15 +389,22 @@ impl RootAvailability {
     /// the New Tab menu reads the remembered answer, so neither one waits on a
     /// sleeping disk or a disconnected share.
     pub(super) fn refresh(&mut self, paths: Vec<String>, cx: &mut Context<AppWindow>) {
+        self.generation += 1;
+
+        let generation = self.generation;
+
         cx.spawn(async move |shell, cx| {
-            let available = cx
+            let unavailable = cx
                 .background_executor()
                 .spawn(async move { Self::check(paths) })
                 .await;
 
             let _ = shell.update(cx, |this, cx| {
-                if this.root_availability.unavailable != available.unavailable {
-                    this.root_availability = available;
+                let availability = &mut this.root_availability;
+
+                if availability.generation == generation && availability.unavailable != unavailable
+                {
+                    availability.unavailable = unavailable;
 
                     cx.notify();
                 }
@@ -612,7 +622,10 @@ mod tests {
 
         let mut editor = WorkspaceDirsEditor {
             roots: Some(WorkspaceRoots::new(present.clone(), vec![missing.clone()])),
-            available: RootAvailability::check(vec![present.clone(), missing.clone()]),
+            available: RootAvailability {
+                unavailable: RootAvailability::check(vec![present.clone(), missing.clone()]),
+                ..RootAvailability::default()
+            },
             notice: None,
         };
 
