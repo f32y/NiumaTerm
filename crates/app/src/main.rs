@@ -540,6 +540,19 @@ fn on_app_quit(cx: &mut App) -> impl Future<Output = ()> + use<> {
         .system
         .restore_last_session_when_opening;
 
+    // Refresh each open window's session first: an agent tab's remembered
+    // thread controls change without notifying its window.
+    let views: Vec<_> = cx
+        .global::<WindowRegistry>()
+        .windows()
+        .iter()
+        .map(|entry| entry.view.clone())
+        .collect();
+
+    for view in views {
+        let _ = view.update(cx, |window, cx| window.sync_session_memory(cx));
+    }
+
     let states = cx.global::<WindowRegistry>().states();
 
     let windows: Vec<_> = if restore_last_session_when_opening {

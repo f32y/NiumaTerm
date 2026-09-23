@@ -1440,6 +1440,10 @@ impl AppWindow {
     }
 
     fn finish_window_close(&mut self, saved: bool, window: &mut Window, cx: &mut Context<Self>) {
+        // Every way this window is removed passes here; the state kept for
+        // reopening it must be current at that moment.
+        self.sync_session_memory(cx);
+
         let count: io::Result<usize> = self
             .workspaces
             .all_tabs()
@@ -3173,8 +3177,11 @@ impl AppWindow {
     }
 
     /// Publish this window's session to the registry the app writes out on
-    /// quit. Called from every path that changes what a restore would rebuild.
-    pub(super) fn sync_session_memory(&self, cx: &mut Context<AppWindow>) {
+    /// quit. Called from every path that changes what a restore would rebuild,
+    /// and again when the window closes and when the app quits, because some
+    /// state (an agent tab's remembered thread controls) changes without
+    /// telling the window.
+    pub(crate) fn sync_session_memory(&self, cx: &mut Context<AppWindow>) {
         let session = session_state(&self.workspaces, self.doomed_workspace, cx);
 
         if let Some(entry) = cx.global_mut::<WindowRegistry>().get_mut(self.window_id) {
