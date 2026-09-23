@@ -20,7 +20,10 @@ mod process_lifetime;
 #[cfg(not(windows))]
 mod unix;
 
+use std::ffi::OsStr;
 use std::io;
+use std::path::Path;
+use std::sync::OnceLock;
 
 use libc::c_ushort;
 
@@ -116,6 +119,28 @@ pub fn hook_command_contains(command: &str, marker: &str) -> bool {
 /// The shell a terminal launches when configuration names none.
 pub fn default_shell() -> String {
     platform::default_shell()
+}
+
+/// A display name for [`default_shell`]: its file stem, with PowerShell's
+/// executables spelled the way the product is. It names the built-in profile
+/// and stands in for a tab title the shell has not set yet.
+pub fn default_shell_name() -> &'static str {
+    static NAME: OnceLock<String> = OnceLock::new();
+
+    NAME.get_or_init(|| {
+        let shell = default_shell();
+
+        let stem = Path::new(&shell)
+            .file_stem()
+            .and_then(OsStr::to_str)
+            .unwrap_or(&shell);
+
+        if stem.eq_ignore_ascii_case("powershell") || stem.eq_ignore_ascii_case("pwsh") {
+            "PowerShell".to_string()
+        } else {
+            stem.to_string()
+        }
+    })
 }
 
 /// How a shell must be launched so it evaluates the bundled OSC 133 prompt

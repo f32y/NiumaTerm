@@ -5,6 +5,7 @@ use gpui::prelude::*;
 use gpui::{AnyElement, Context, Div, DragMoveEvent, Role, SharedString, Stateful, div, px};
 use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::{ActiveTheme as _, Icon, IconName, h_flex};
+use nmt_platform::default_shell_name;
 use nmt_terminal::event::ProgressReport;
 use rust_i18n::t;
 
@@ -143,7 +144,7 @@ impl VerticalTabList {
             .map(|tab| TabRow {
                 id: tab.id(),
                 label: match tab.title().is_empty() {
-                    true => SharedString::new_static("PowerShell"),
+                    true => SharedString::new_static(default_shell_name()),
                     false => tab.title().to_string().into(),
                 },
                 // Marking the active tab of a workspace that is not on screen

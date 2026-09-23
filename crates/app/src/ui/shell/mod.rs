@@ -61,7 +61,8 @@ use nmt_config::{config_dir_path, get};
 use nmt_platform::filesystem::path_identity;
 use nmt_platform::window::native_active_state;
 use nmt_platform::{
-    NativeNotification, remove_notification, show_notification, system_notification_enabled,
+    NativeNotification, default_shell_name, remove_notification, show_notification,
+    system_notification_enabled,
 };
 use rust_i18n::t;
 use tracing::warn;
@@ -892,7 +893,7 @@ impl AppWindow {
         let tab = &tabs.list().items()[tabs.list().active_index()];
 
         let base = if tab.title().is_empty() {
-            "PowerShell"
+            default_shell_name()
         } else {
             tab.title()
         };
@@ -2356,11 +2357,12 @@ impl AppWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Vertical tab rows list every workspace's tabs, and right-clicking a
+        // row does not activate its workspace.
         let Some(current) = self
             .workspaces
-            .active_tabs()
-            .list()
-            .find(id)
+            .tabs_for_tab(id)
+            .and_then(|tabs| tabs.list().find(id))
             .map(|tab| tab.title().to_string())
         else {
             return;

@@ -770,6 +770,7 @@ fn scrollbar_grab_preserves_offset_and_track_click_centers_the_thumb() {
     let release = model.mouse_up(left_press(LocalPoint { x: 0.0, y: 40.0 }));
 
     assert!(release.scrollbar_released);
+    assert!(matches!(release.outcome, MouseOutcome::Ignored));
     assert!(!model.scrollbar.is_dragging());
     assert!(
         !model

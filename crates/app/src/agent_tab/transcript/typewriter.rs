@@ -45,11 +45,13 @@ impl ReplyTyping {
 
         let previous = self.current.as_ref().map(Typewriter::index);
 
-        self.current = Some(Typewriter::start(
-            index,
-            text[..previous_bytes].chars().count(),
-            now,
-        ));
+        // The offset was recorded against the text before the newest delta. A
+        // completed payload merged in the same batch can replace that text with
+        // a shorter or differently encoded one, so the offset is clamped to a
+        // character boundary of the text as it is now.
+        let shown = &text[..text.floor_char_boundary(previous_bytes)];
+
+        self.current = Some(Typewriter::start(index, shown.chars().count(), now));
 
         previous
     }

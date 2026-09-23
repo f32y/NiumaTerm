@@ -603,7 +603,12 @@ impl PaneController {
 
         self.selection_origin = None;
 
-        let outcome = if self.interaction.commit_block_selection() {
+        let committed = self.interaction.commit_block_selection();
+
+        // The thumb's press stopped propagation, so the terminal never saw a
+        // matching press; forwarding the release would hand the program an
+        // unmatched button-up or end a selection that never started.
+        let outcome = if scrollbar_released || committed {
             MouseOutcome::Ignored
         } else {
             self.apply_mouse(input, SurfaceMouseEventKind::Up, SelectionType::Simple)

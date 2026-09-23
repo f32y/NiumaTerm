@@ -15,6 +15,7 @@ use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::tab::{Tab, TabBar, TabVariant};
 use gpui_component::{ActiveTheme, ElementExt as _, Icon, IconName, Sizable as _, h_flex, v_flex};
 use nmt_config::appearance::TabShape;
+use nmt_platform::default_shell_name;
 use nmt_terminal::event::ProgressReport;
 use rust_i18n::t;
 
@@ -126,7 +127,7 @@ impl TabStrip {
             .map(|tab| TabItem {
                 id: tab.id().0,
                 label: if tab.title().is_empty() {
-                    "PowerShell".to_string()
+                    default_shell_name().to_string()
                 } else {
                     tab.title().to_string()
                 },

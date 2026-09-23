@@ -25,7 +25,7 @@ use nmt_config::terminal::TerminalConfig;
 use nmt_config::theme_catalog::ThemeFamily;
 use nmt_config::update::UpdateConfig;
 use nmt_config::{Config, CursorShape, SettingsPatch, config_file_path, get, save_settings_to};
-use nmt_platform::default_shell;
+use nmt_platform::{default_shell, default_shell_name};
 use rust_i18n::t;
 
 /// Persistent settings are shared with the configuration reader and writer.
@@ -70,7 +70,7 @@ pub(super) fn input_style_label(style: InputStyle) -> Cow<'static, str> {
 /// The built-in profile seeded when the config file defines none.
 fn builtin_profile() -> Profile {
     Profile {
-        name: "PowerShell".to_string(),
+        name: default_shell_name().to_string(),
         shell: default_shell(),
         args: String::new(),
     }
