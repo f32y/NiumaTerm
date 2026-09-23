@@ -147,7 +147,16 @@ pub struct GhosttyTerminal {
     callbacks: Box<Callbacks>,
 
     titles: TitleMirror,
+
+    /// Set after a resize leaves only blank rows in the history: the viewport
+    /// stays pinned to the top and the scrollbar reports just the screen,
+    /// until output scrolls real content into the history.
     scrollbar_override: Option<ScrollbarInfo>,
+
+    /// Output arrived since the override was last decided. Deciding it
+    /// formats the whole screen and history, so it is redone once per frame
+    /// capture rather than for every PTY chunk.
+    override_stale: bool,
 }
 
 // The Ghostty `Terminal` and its render-state handles are raw FFI pointers
@@ -239,6 +248,7 @@ impl GhosttyTerminal {
             callbacks,
             titles: TitleMirror::default(),
             scrollbar_override: None,
+            override_stale: false,
         })
     }
 
@@ -391,7 +401,7 @@ impl GhosttyTerminal {
         unsafe { ghostty_terminal_vt_write(self.terminal, data.as_ptr(), data.len()) };
 
         if self.scrollbar_override.is_some() {
-            self.update_scrollbar_override();
+            self.override_stale = true;
         }
     }
 
@@ -542,6 +552,7 @@ impl GhosttyTerminal {
 
     fn update_scrollbar_override(&mut self) {
         self.scrollbar_override = None;
+        self.override_stale = false;
 
         let raw = self.raw_scrollbar();
 
@@ -694,6 +705,10 @@ impl GhosttyTerminal {
     /// Scroll the viewport by `delta` rows (negative = up into scrollback).
     /// Mutating: invalidates any outstanding `GridRef`.
     pub fn scroll_viewport_delta(&mut self, delta: isize) {
+        if self.override_stale {
+            self.update_scrollbar_override();
+        }
+
         if self.scrollbar_override.is_some() {
             return;
         }
@@ -703,6 +718,10 @@ impl GhosttyTerminal {
 
     /// Scroll the viewport to the bottom (active area).
     pub fn scroll_viewport_bottom(&mut self) {
+        if self.override_stale {
+            self.update_scrollbar_override();
+        }
+
         if self.scrollbar_override.is_some() {
             return;
         }
@@ -712,6 +731,10 @@ impl GhosttyTerminal {
 
     /// Scroll the viewport to the top of the scrollback.
     pub fn scroll_viewport_top(&mut self) {
+        if self.override_stale {
+            self.update_scrollbar_override();
+        }
+
         if self.scrollbar_override.is_some() {
             return;
         }
@@ -1114,6 +1137,10 @@ impl GhosttyTerminal {
         revision: u64,
         theme_revision: u64,
     ) -> Result<()> {
+        if self.override_stale {
+            self.update_scrollbar_override();
+        }
+
         self.render.update(self.terminal)?;
 
         self.render.consume_damage(self.rows)?;
