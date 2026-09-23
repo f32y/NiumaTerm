@@ -50,11 +50,14 @@ fn disconnected_controls_reject_without_consuming_approval_or_switching_state() 
 
     session.conversation.thread_id = Some("parent".into());
     session.conversation.current_turn = Some("turn".into());
-    session.conversation.pending_approval = Some(42);
+
+    session
+        .conversation
+        .request_approval(42, "Run command".into());
 
     assert!(!session.interrupt());
     assert!(!session.respond_approval("accept"));
-    assert_eq!(session.conversation.pending_approval, Some(42));
+    assert_eq!(session.conversation.shown_approval(), Some(42));
     assert!(!session.resume_thread("other"));
     assert!(!session.request_fork_checkpoints());
     assert!(
@@ -312,7 +315,10 @@ fn thread_switch_retires_commands_but_keeps_catalog_responses() {
         let mut session = disconnected_session();
 
         session.conversation.thread_id = Some("old".into());
-        session.conversation.pending_approval = Some(42);
+
+        session
+            .conversation
+            .request_approval(42, "Run command".into());
 
         let command = session.alloc_rpc_id();
 
@@ -567,30 +573,46 @@ fn routed_child_completion_does_not_finish_the_parent_turn() {
     );
 }
 
+/// The parent and a child agent can both wait on an approval. Each needs
+/// its own answer, and a child's resolution names the child's thread.
 #[test]
-fn conversation_approval_resolution_requires_its_thread_and_request() {
+fn concurrent_approvals_are_shown_one_at_a_time_and_each_resolves() {
     let mut state = ThreadState::default();
 
     state.thread_id = Some("parent".into());
-    state.pending_approval = Some(8);
 
+    assert!(matches!(
+        state.request_approval(8, "Run command: `ls`".into()),
+        Some(Event::ApprovalRequested { .. })
+    ));
+    assert!(
+        state
+            .request_approval(9, "Apply file changes".into())
+            .is_none()
+    );
+    assert_eq!(state.shown_approval(), Some(8));
+
+    // An unrelated request id leaves both waiting.
     assert!(
         state
             .on_notification(
                 "serverRequest/resolved",
-                &json!({"threadId":"other","requestId":8})
+                &json!({"threadId":"parent","requestId":10})
             )
             .is_empty()
     );
+
+    // The child's approval is cleared by turn lifecycle while the parent's
+    // is on screen: nothing visible changes.
     assert!(
         state
             .on_notification(
                 "serverRequest/resolved",
-                &json!({"threadId":"parent","requestId":9})
+                &json!({"threadId":"child","requestId":9})
             )
             .is_empty()
     );
-    assert_eq!(state.pending_approval, Some(8));
+    assert_eq!(state.shown_approval(), Some(8));
     assert!(matches!(
         state
             .on_notification(
@@ -600,7 +622,18 @@ fn conversation_approval_resolution_requires_its_thread_and_request() {
             .as_slice(),
         [Event::ApprovalResolved]
     ));
-    assert!(state.pending_approval.is_none());
+    assert!(!state.has_pending_approval());
+
+    // Answering the shown request brings up the next one.
+    state.request_approval(11, "Run command: `a`".into());
+    state.request_approval(12, "Run command: `b`".into());
+    state.answered_approval(11);
+
+    assert!(matches!(
+        state.next_approval(),
+        Some(Event::ApprovalRequested { description }) if description == "Run command: `b`"
+    ));
+    assert_eq!(state.shown_approval(), Some(12));
 }
 
 #[test]

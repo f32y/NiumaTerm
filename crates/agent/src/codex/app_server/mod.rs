@@ -318,7 +318,7 @@ impl Session {
 
     pub fn has_active_operation(&self) -> bool {
         self.conversation.current_turn.is_some()
-            || self.conversation.pending_approval.is_some()
+            || self.conversation.has_pending_approval()
             || self.conversation.questions.has_active_request()
             || self.control.has_command()
             || self.conversation.compaction.active.is_some()
@@ -391,12 +391,16 @@ impl Session {
             return self.apply_title_generation_result(&message["params"]);
         }
 
-        let events = match (id, method.as_deref()) {
+        let mut events = match (id, method.as_deref()) {
             (Some(rpc_id), Some(method)) => self.on_server_request(rpc_id, method, &message),
             (Some(rpc_id), None) => self.on_response(rpc_id, &message),
             (None, Some(method)) => self.on_notification(method, &message["params"]),
             (None, None) => Vec::new(),
         };
+
+        // An answer frees the approval surface outside this call; the next
+        // waiting approval shows with whatever the server sends next.
+        events.extend(self.conversation.next_approval());
 
         self.sync_descendant_owners();
 
@@ -756,10 +760,10 @@ impl Session {
             .collect()
     }
 
-    /// Answer the pending approval request (`"accept"` / `"decline"`); a no-op
-    /// when none is pending.
+    /// Answer the approval request on screen (`"accept"` / `"decline"`); a
+    /// no-op when none is shown.
     pub fn respond_approval(&mut self, decision: &str) -> bool {
-        let Some(rpc_id) = self.conversation.pending_approval else {
+        let Some(rpc_id) = self.conversation.shown_approval() else {
             return false;
         };
 
@@ -774,7 +778,7 @@ impl Session {
             return false;
         }
 
-        self.conversation.pending_approval = None;
+        self.conversation.answered_approval(rpc_id);
 
         true
     }
@@ -889,9 +893,10 @@ impl Session {
                     )
                 };
 
-                self.conversation.pending_approval = Some(rpc_id);
-
-                vec![Event::ApprovalRequested { description }]
+                self.conversation
+                    .request_approval(rpc_id, description)
+                    .into_iter()
+                    .collect()
             }
             // Any other server→client request is unsupported by this client;
             // an error reply keeps the turn from hanging (the same strategy

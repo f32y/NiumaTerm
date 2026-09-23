@@ -71,7 +71,7 @@ fn team_members_keep_native_settings_and_approval_requests() {
         events.as_slice(),
         [Event::ApprovalRequested { .. }]
     ));
-    assert_eq!(session.conversation.pending_approval, Some(4));
+    assert_eq!(session.conversation.shown_approval(), Some(4));
 }
 
 #[test]

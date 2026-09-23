@@ -727,36 +727,48 @@ fn a_root_conflict_keeps_the_requesting_sessions_previous_root() {
     assert_eq!(second_rx.recv().unwrap()["params"]["threadId"], "root-b");
 }
 
+/// A tab that resumes a thread another tab left behind must own it, even
+/// though Codex already broadcast that earlier session's close.
 #[test]
-fn an_early_closed_thread_is_not_retained_after_owner_discovery() {
+fn a_stale_close_of_an_unowned_thread_does_not_reach_a_later_owner() {
     let router = router();
     let (owner, rx) = register(&router);
 
-    let mut root_request = start_request(2);
-
-    router.prepare_outgoing(owner, &mut root_request).unwrap();
-
-    router.on_message(start_response(
-        root_request["id"].as_u64().unwrap(),
-        "root-a",
-    ));
-
-    let _ = rx.recv().unwrap();
+    router.on_message(json!({
+        "method": "turn/completed",
+        "params": {"threadId": "left-behind", "turn": {"id": "old"}},
+    }));
 
     router.on_message(json!({
         "method": "thread/closed",
-        "params": {"threadId": "child-a"},
+        "params": {"threadId": "left-behind"},
     }));
 
-    router.claim_descendants(owner, ["child-a".to_string()]);
+    let mut resume = json!({
+        "id": 3,
+        "method": "thread/resume",
+        "params": {"threadId": "left-behind"},
+    });
 
-    assert_eq!(rx.recv().unwrap()["method"], "thread/closed");
+    router.prepare_outgoing(owner, &mut resume).unwrap();
+
+    router.on_message(start_response(
+        resume["id"].as_u64().unwrap(),
+        "left-behind",
+    ));
+
+    // The tab gets the answer under its own request id.
+    assert_eq!(rx.recv().unwrap()["id"], 3);
 
     router.on_message(json!({
         "method": "turn/started",
-        "params": {"threadId": "child-a", "turn": {"id": "late"}},
+        "params": {"threadId": "left-behind", "turn": {"id": "new"}},
     }));
 
+    let delivered = rx.recv().unwrap();
+
+    assert_eq!(delivered["method"], "turn/started");
+    assert_eq!(delivered["params"]["turn"]["id"], "new");
     assert!(rx.try_recv().is_err());
 }
 

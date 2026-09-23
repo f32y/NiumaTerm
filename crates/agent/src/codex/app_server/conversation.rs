@@ -2,6 +2,7 @@
 #[path = "generation_tests.rs"]
 mod generation_tests;
 
+use std::collections::VecDeque;
 use std::time::Instant;
 
 use serde_json::Value;
@@ -52,7 +53,16 @@ impl TurnOutputUsage {
 pub(super) struct ThreadState {
     pub(super) thread_id: Option<String>,
     pub(super) current_turn: Option<String>,
-    pub(super) pending_approval: Option<u64>,
+
+    /// Approval requests not answered yet, in arrival order, with the text
+    /// that describes each. The parent and its child agents can each be
+    /// waiting on one at the same time.
+    approvals: VecDeque<(u64, String)>,
+
+    /// The request the user is looking at. The approval surface shows one at
+    /// a time; the next one appears once this one is answered or cleared.
+    shown_approval: Option<u64>,
+
     pub(super) questions: QuestionState,
     pub(super) compaction: CompactionState,
     turn_output_usage: TurnOutputUsage,
@@ -67,11 +77,55 @@ impl ThreadState {
     /// next thread, or none after the host exits, owes answers to none of it.
     pub(super) fn end_thread(&mut self) {
         self.current_turn = None;
-        self.pending_approval = None;
+
+        self.approvals.clear();
+
+        self.shown_approval = None;
         self.questions = QuestionState::default();
         self.generation_span = None;
 
         self.compaction.reset_thread();
+    }
+
+    pub(super) fn has_pending_approval(&self) -> bool {
+        !self.approvals.is_empty()
+    }
+
+    /// Queue approval request `rpc_id`, returning the event that shows it
+    /// when no other approval is on screen.
+    pub(super) fn request_approval(&mut self, rpc_id: u64, description: String) -> Option<Event> {
+        self.approvals.push_back((rpc_id, description));
+
+        self.next_approval()
+    }
+
+    /// The request on screen, for the user's answer.
+    pub(super) fn shown_approval(&self) -> Option<u64> {
+        self.shown_approval
+    }
+
+    /// Forget request `rpc_id` after its answer went out.
+    pub(super) fn answered_approval(&mut self, rpc_id: u64) {
+        self.approvals.retain(|(id, _)| *id != rpc_id);
+
+        if self.shown_approval == Some(rpc_id) {
+            self.shown_approval = None;
+        }
+    }
+
+    /// Show the oldest waiting approval once nothing else is on screen.
+    pub(super) fn next_approval(&mut self) -> Option<Event> {
+        if self.shown_approval.is_some() {
+            return None;
+        }
+
+        let (id, description) = self.approvals.front()?;
+
+        self.shown_approval = Some(*id);
+
+        Some(Event::ApprovalRequested {
+            description: description.clone(),
+        })
     }
 
     pub(super) fn on_notification(&mut self, method: &str, params: &Value) -> Vec<Event> {
@@ -263,28 +317,33 @@ impl ThreadState {
                 Event::CommandOutputDelta { item_id, delta }
             }),
             "serverRequest/resolved" => {
+                let request = params["requestId"].as_u64();
+
+                // Fires when an approval is answered or cleared by turn
+                // lifecycle. A child agent's approval names the child's
+                // thread, so approvals match by request id alone.
+                if let Some(id) = request
+                    && self.approvals.iter().any(|(pending, _)| *pending == id)
+                {
+                    let shown = self.shown_approval == Some(id);
+
+                    self.answered_approval(id);
+
+                    return if shown {
+                        vec![Event::ApprovalResolved]
+                    } else {
+                        Vec::new()
+                    };
+                }
+
                 if params["threadId"].as_str() != self.thread_id.as_deref() {
                     return Vec::new();
                 }
 
-                if let Some(event) = params["requestId"]
-                    .as_u64()
+                request
                     .and_then(|id| self.questions.resolve_request(id))
-                {
-                    return vec![event];
-                }
-
-                // Fires when a pending approval is answered or cleared by
-                // turn lifecycle — tear down the approval UI either way.
-                if self.pending_approval.is_some()
-                    && self.pending_approval == params["requestId"].as_u64()
-                {
-                    self.pending_approval = None;
-
-                    return vec![Event::ApprovalResolved];
-                }
-
-                Vec::new()
+                    .into_iter()
+                    .collect()
             }
             "error" => {
                 self.generation_span = None;

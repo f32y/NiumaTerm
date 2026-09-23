@@ -187,16 +187,9 @@ impl RouterState {
             return Ok(Vec::new());
         };
 
-        let early = self.early_messages.take(&thread_id);
-
-        let closed = early.iter().any(|message| {
-            matches!(
-                message["method"].as_str(),
-                Some("thread/closed" | "thread/deleted")
-            )
-        });
-
-        let deliveries = early
+        let deliveries = self
+            .early_messages
+            .take(&thread_id)
             .into_iter()
             .map(|message| {
                 if let (Some(id), Some(_)) = (message["id"].as_u64(), message["method"].as_str()) {
@@ -218,10 +211,6 @@ impl RouterState {
                 (Arc::clone(&delivery), message)
             })
             .collect();
-
-        if closed {
-            self.remove_thread(&thread_id);
-        }
 
         Ok(deliveries)
     }
@@ -574,7 +563,15 @@ impl Router {
         }
 
         let Some(owner) = state.thread_owners.get(&thread_id).copied() else {
-            state.hold_early(&thread_id, message);
+            // Codex broadcasts a close to every connection once a thread
+            // nobody here owns is unloaded, for example one a closed tab left
+            // behind. Holding it would hand a stale close, and the traffic
+            // before it, to whichever tab later resumes the thread.
+            if matches!(method, "thread/closed" | "thread/deleted") {
+                state.early_messages.forget(&thread_id);
+            } else {
+                state.hold_early(&thread_id, message);
+            }
 
             return Vec::new();
         };
