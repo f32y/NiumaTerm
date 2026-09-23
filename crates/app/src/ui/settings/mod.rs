@@ -224,6 +224,11 @@ fn save_settings_to(path: PathBuf, window: &mut Window, cx: &mut App) -> Task<bo
         let result = saved.await;
 
         let completed = cx.update(|window, cx| {
+            if result.is_ok() {
+                cx.global_mut::<AppSettings>()
+                    .mark_persisted(config.clone());
+            }
+
             // Edits made while the write ran are still only in memory. Write
             // again before reporting, so a close waiting on this sees them.
             if result.is_ok() && *cx.global::<AppSettings>().config() != config {

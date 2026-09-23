@@ -33,7 +33,12 @@ use rust_i18n::t;
 #[derive(Clone)]
 pub struct AppSettings {
     config: Config,
-    discard_on_exit: bool,
+
+    /// The configuration as it was last read from or written to disk. Quitting
+    /// writes only when the live configuration differs from it, so edits made
+    /// to the file by hand while the app runs survive a quit that changed
+    /// nothing.
+    persisted: Config,
 }
 
 #[derive(Default)]
@@ -119,11 +124,16 @@ fn builtin_agent_profiles() -> Vec<AgentProfile> {
 impl AppSettings {
     /// The last window's explicit discard also bypasses the final quit hook.
     pub(crate) fn discard_on_exit(&mut self) {
-        self.discard_on_exit = true;
+        self.persisted = self.config.clone();
     }
 
     pub(crate) fn should_save_on_exit(&self) -> bool {
-        !self.discard_on_exit
+        self.config != self.persisted
+    }
+
+    /// Record `config` as what the configuration file now holds.
+    pub(super) fn mark_persisted(&mut self, config: Config) {
+        self.persisted = config;
     }
 
     pub fn config(&self) -> &Config {
@@ -175,8 +185,8 @@ impl AppSettings {
         }
 
         Self {
+            persisted: config.clone(),
             config,
-            discard_on_exit: false,
         }
     }
 

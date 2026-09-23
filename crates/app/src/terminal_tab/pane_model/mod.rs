@@ -32,10 +32,10 @@ use nmt_terminal::session::{
     HostEvent, InFlightBlock, SurfaceMouseButton, SurfaceMouseEventKind, SurfaceScreenCell,
 };
 
-use crate::terminal_tab::block_list::ITEM_PAD_ROWS;
 use crate::terminal_tab::block_list::chrome::DurationLabels;
 use crate::terminal_tab::block_list::{
-    BlockListPoint, block_list_active_top_px, block_list_render_metrics, nav_item_top,
+    BlockListPoint, ITEM_PAD_ROWS, block_list_active_top_px, block_list_render_metrics,
+    nav_item_top,
 };
 use crate::terminal_tab::dirty::DirtyState;
 use crate::terminal_tab::frame::TerminalFrame;

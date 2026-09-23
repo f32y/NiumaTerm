@@ -1319,6 +1319,10 @@ fn background_save_completes_only_after_edits_made_during_the_write_are_saved(
         gpui_component::init(cx);
 
         cx.set_global(AppSettings::default());
+
+        // Nothing was edited since the configuration was read, so quitting
+        // must leave the file alone.
+        assert!(!cx.global::<AppSettings>().should_save_on_exit());
     });
 
     let window = cx.add_window(|window, cx| {
@@ -1353,6 +1357,9 @@ fn background_save_completes_only_after_edits_made_during_the_write_are_saved(
     let config: Config = toml::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
 
     assert!(config.appearance.reduce_motion);
+
+    // Both writes landed, so a quit now has nothing left to save.
+    cx.update(|_, cx| assert!(!cx.global::<AppSettings>().should_save_on_exit()));
 
     fs::write(&path, "invalid [ configuration").unwrap();
     completed.set(None);
