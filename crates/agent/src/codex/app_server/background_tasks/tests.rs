@@ -679,16 +679,38 @@ fn selecting_another_root_drops_the_previous_conversation_rows() {
     assert_eq!(tasks.scope(Some("thr_child")), ThreadScope::Unrelated);
 }
 
+/// Every panel opening refreshes the same root. Its pages must be followed
+/// again on each pass, while a server repeating a page within one pass ends
+/// discovery instead of looping.
 #[test]
-fn a_repeated_pagination_cursor_ends_discovery() {
+fn every_discovery_pass_follows_its_pages_and_a_repeat_ends_it() {
     let mut tasks = rooted();
 
-    assert!(tasks.accept_cursor("page-2"));
-    assert!(
-        !tasks.accept_cursor("page-2"),
-        "a cursor already requested for this root would page forever"
-    );
-    assert!(tasks.accept_cursor("page-3"));
+    for pass in 0..2 {
+        let first = 10 + pass * 10;
+
+        tasks
+            .descendant_request(first, None)
+            .expect("root is known");
+
+        let (_, next) =
+            tasks.apply_descendants(first, &json!({"data": [], "nextCursor": "page-2"}));
+
+        assert_eq!(next.as_deref(), Some("page-2"), "pass {pass}");
+
+        tasks
+            .descendant_request(first + 1, next.as_deref())
+            .expect("root is known");
+
+        let (_, next) =
+            tasks.apply_descendants(first + 1, &json!({"data": [], "nextCursor": "page-2"}));
+
+        assert!(next.is_none(), "pass {pass} repeats its cursor");
+        assert!(matches!(
+            tasks.snapshot().expect("registry exists").discovery,
+            BackgroundTaskLoadState::Ready
+        ));
+    }
 }
 
 #[test]

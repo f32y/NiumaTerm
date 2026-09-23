@@ -1117,9 +1117,7 @@ impl Session {
             .background
             .apply_descendants(rpc_id, &message["result"]);
 
-        // A server that keeps handing back the same cursor would page
-        // forever, so a repeat ends discovery instead of looping.
-        if let Some(cursor) = next_cursor.filter(|cursor| self.background.accept_cursor(cursor)) {
+        if let Some(cursor) = next_cursor {
             let next_rpc_id = self.alloc_rpc_id();
 
             if let Some(request) = self

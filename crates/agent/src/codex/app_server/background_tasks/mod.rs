@@ -79,7 +79,7 @@ pub(super) struct CodexTasks {
     /// active one, so stopping a child is only possible while this is known.
     active_turns: HashMap<String, String>,
 
-    /// Pagination cursors already requested for the current root.
+    /// Pagination cursors already requested in the current discovery pass.
     seen_cursors: HashSet<String>,
 
     /// In-flight `thread/read` requests, by the descendant they will deliver.
@@ -120,12 +120,6 @@ impl CodexTasks {
         self.reads.clear();
 
         true
-    }
-
-    /// Whether a returned cursor is worth following. A cursor already used for
-    /// this root means the server is repeating a page.
-    pub(super) fn accept_cursor(&mut self, cursor: &str) -> bool {
-        self.seen_cursors.insert(cursor.to_owned())
     }
 
     pub(super) fn root(&self) -> Option<&str> {
@@ -601,6 +595,12 @@ impl CodexTasks {
         let root = self.root()?.to_owned();
         let starting_sequence = self.registry.as_ref()?.sequence();
 
+        // A first page starts a new pass over the same pages, so the cursors
+        // of an earlier pass must be followed again.
+        if cursor.is_none() {
+            self.seen_cursors.clear();
+        }
+
         self.queries.insert(rpc_id, starting_sequence);
 
         if let Some(registry) = self.registry.as_mut() {
@@ -631,7 +631,10 @@ impl CodexTasks {
         }))
     }
 
-    /// Fold one descendant page. Returns the cursor of the next page, if any.
+    /// Fold one descendant page. Returns the cursor of the next page when it
+    /// is worth following, and marks discovery ready once paging stops. A
+    /// cursor already followed in this pass means the server is repeating a
+    /// page, which would otherwise page forever.
     pub(super) fn apply_descendants(
         &mut self,
         rpc_id: u64,
@@ -705,7 +708,10 @@ impl CodexTasks {
             }
         }
 
-        let next_cursor = result["nextCursor"].as_str().map(str::to_owned);
+        let next_cursor = result["nextCursor"]
+            .as_str()
+            .filter(|cursor| self.seen_cursors.insert((*cursor).to_owned()))
+            .map(str::to_owned);
 
         if next_cursor.is_none()
             && !self.query_in_flight()
