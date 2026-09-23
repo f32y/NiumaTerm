@@ -3353,16 +3353,27 @@ impl Render for AppWindow {
             .tab_strip
             .reveal_active(active_id, active_index, cx);
 
+        // The title-bar Git model only refreshes while its setting is on, so
+        // with the setting off its snapshot describes an earlier directory.
+        let show_branch = cx
+            .global::<AppSettings>()
+            .config()
+            .appearance
+            .show_git_status_on_title_bar;
+
         let title_center = match vertical_tabs {
             true => TitleCenter::Heading {
                 title: self.active_tab_title().into(),
-                branch: self
-                    .panels
-                    .git_model()
-                    .read(cx)
-                    .snapshot
-                    .as_ref()
-                    .and_then(|snapshot| snapshot.branch.clone())
+                branch: show_branch
+                    .then(|| {
+                        self.panels
+                            .git_model()
+                            .read(cx)
+                            .snapshot
+                            .as_ref()
+                            .and_then(|snapshot| snapshot.branch.clone())
+                    })
+                    .flatten()
                     .map(SharedString::from),
             },
             false => TitleCenter::Tabs(self.chrome.tab_strip.render(
