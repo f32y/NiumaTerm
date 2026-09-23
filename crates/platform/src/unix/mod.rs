@@ -27,6 +27,7 @@ mod notifier;
 mod process_exit;
 mod shell_integration;
 
+use std::cell::Cell;
 use std::ffi::CStr;
 use std::fs::File;
 use std::io::{Error, Read, Write};
@@ -629,6 +630,7 @@ pub fn create_pty_with_env(options: PtyOptions<'_>) -> Result<Pty, Error> {
                 id: Arc::new(main),
                 pid: Arc::new(child_process.id().try_into().unwrap()),
                 process: Some(child_process),
+                reaped: Cell::new(None),
             };
 
             let file = unsafe { File::from_raw_fd(main) };
@@ -728,6 +730,11 @@ pub struct Child {
     pub id: Arc<libc::c_int>,
     pub pid: Arc<libc::pid_t>,
     process: Option<ChildProcess>,
+
+    /// The exit status once `waitpid` reaped the child. From then on the pid
+    /// can name an unrelated process, so it is neither waited on nor
+    /// signalled again.
+    reaped: Cell<Option<i32>>,
 }
 
 impl Child {
@@ -760,6 +767,10 @@ impl Child {
     /// Return the child’s exit status if it has already exited. If the child is still running, return Ok(None).
     /// https://linux.die.net/man/2/waitpid
     pub fn waitpid(&self) -> Result<Option<i32>, String> {
+        if let Some(status) = self.reaped.get() {
+            return Ok(Some(status));
+        }
+
         let mut status = 0 as libc::c_int;
 
         // If WNOHANG was specified in options and there were no children in a waitable state, then waitid() returns 0 immediately and the state of the siginfo_t structure pointed to by infop is unspecified. To distinguish this case from that where a child was in a waitable state, zero out the si_pid field before the call and check for a nonzero value in this field after the call returns.
@@ -772,6 +783,8 @@ impl Child {
         if res == 0 && status == 0 {
             return Ok(None);
         }
+
+        self.reaped.set(Some(status));
 
         Ok(Some(status))
     }
@@ -787,6 +800,10 @@ impl Deref for Child {
 
 impl Drop for Child {
     fn drop(&mut self) {
+        if self.reaped.get().is_some() {
+            return;
+        }
+
         unsafe {
             libc::kill(*self.pid, libc::SIGHUP);
         }
