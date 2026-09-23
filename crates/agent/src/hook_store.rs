@@ -8,11 +8,14 @@
 
 pub use nmt_platform::{build_hook_command, hook_command_contains};
 
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::{fs, io};
 
 use nmt_platform::environment;
+use nmt_platform::filesystem::replace_file_durable;
 use serde_json::{Value, from_str, json, to_string_pretty};
+use tempfile::NamedTempFile;
 
 use crate::AGENT_HOOK_EXE_ENV;
 
@@ -217,21 +220,27 @@ pub(crate) fn read(path: &Path, file_label: &str) -> io::Result<Value> {
     }
 }
 
-/// Write-then-rename so a crash mid-write cannot truncate the user's file.
+/// Replace the user's file with a synced sibling temporary file, so neither a
+/// crash mid-write nor a power loss after the rename can leave it truncated.
 pub(crate) fn write(path: &Path, settings: &Value) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+
+    fs::create_dir_all(parent)?;
 
     let mut text = to_string_pretty(settings).map_err(io::Error::other)?;
 
     text.push('\n');
 
-    let temp = path.with_extension("json.niumaterm-tmp");
+    let mut temporary = NamedTempFile::new_in(parent)?;
 
-    fs::write(&temp, text)?;
+    temporary.write_all(text.as_bytes())?;
 
-    fs::rename(&temp, path)
+    temporary.as_file().sync_all()?;
+
+    replace_file_durable(&temporary.into_temp_path(), path)
 }
 
 pub(crate) fn invalid(message: &str) -> io::Error {

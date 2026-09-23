@@ -56,3 +56,32 @@ fn encoded_storage_moves_into_preview_and_survives_reordering_without_copying() 
         pointer
     );
 }
+
+/// Text typed in front of a placeholder can itself start like one; the real
+/// placeholder behind it must still keep its attachment.
+#[test]
+fn a_placeholder_behind_a_stray_prefix_keeps_its_attachment() {
+    use std::io::Cursor;
+
+    use image_rs::{DynamicImage, ImageFormat, RgbaImage};
+
+    use crate::images::PendingAttachments;
+
+    let mut source = Vec::new();
+
+    DynamicImage::ImageRgba8(RgbaImage::new(2, 2))
+        .write_to(&mut Cursor::new(&mut source), ImageFormat::Png)
+        .unwrap();
+
+    let mut images = PendingAttachments::default();
+
+    images.attach(&source, |bytes| bytes).ok().unwrap();
+
+    assert_eq!(images.reconcile("see [Image #[Image #1]"), None);
+    assert_eq!(images.iter().count(), 1);
+
+    // A signed number is text the user typed, not a placeholder.
+    images.reconcile("[Image #+1]");
+
+    assert_eq!(images.iter().count(), 0);
+}

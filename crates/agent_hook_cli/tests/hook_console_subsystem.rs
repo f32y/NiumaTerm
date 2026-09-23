@@ -1,3 +1,7 @@
+// The hook binary is a PE console executable only on Windows; elsewhere it is
+// built from an empty `main` in whatever format the target uses.
+#![cfg(windows)]
+
 use std::fs;
 
 #[test]

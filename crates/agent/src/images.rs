@@ -256,11 +256,21 @@ fn placeholder_spans(text: &str) -> Vec<(Range<usize>, usize)> {
 
         let digits = &text[digits_at..digits_at + length];
 
+        let number = (!digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit()))
+            .then(|| digits.parse::<usize>().ok())
+            .flatten();
+
+        let Some(number) = number else {
+            // Not a placeholder, but a real one can start inside what was
+            // scanned (`[Image #[Image #1]`), so resume right after the prefix.
+            cursor = digits_at;
+
+            continue;
+        };
+
         cursor = digits_at + length + PLACEHOLDER_SUFFIX.len_utf8();
 
-        if let Ok(number) = digits.parse::<usize>() {
-            spans.push((start..cursor, number));
-        }
+        spans.push((start..cursor, number));
     }
 
     spans
