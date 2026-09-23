@@ -108,13 +108,7 @@ impl EventListener for TerminalEventProxy {
             TerminalEvent::Bell => HostEvent::Bell,
             TerminalEvent::Cwd(cwd) => HostEvent::Cwd(cwd),
             TerminalEvent::ProgressReport(report) => HostEvent::Progress(report),
-            TerminalEvent::ClipboardStore(ty, text) => {
-                if let Some(observer) = &self.observer {
-                    observer.clipboard(ty, text);
-                }
-
-                return;
-            }
+            TerminalEvent::ClipboardStore(kind, text) => HostEvent::Clipboard { kind, text },
             TerminalEvent::CloseTerminal(_) => {
                 self.shared.exited.store(true, Ordering::Release);
 

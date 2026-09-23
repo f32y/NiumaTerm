@@ -108,8 +108,8 @@ impl ClipboardAccess for DesktopClipboard {
         (!text.is_empty()).then_some(text)
     }
 
-    fn write(&mut self, text: String) -> bool {
-        Clipboard::default().set(ClipboardType::Clipboard, text)
+    fn write(&mut self, kind: ClipboardType, text: String) -> bool {
+        Clipboard::default().set(kind, text)
     }
 }
 

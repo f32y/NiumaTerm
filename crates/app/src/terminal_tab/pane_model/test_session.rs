@@ -12,6 +12,7 @@ use nmt_config::appearance::InputStyle;
 use nmt_config::colors::Colors;
 use nmt_config::system::NewlineShortcut;
 use nmt_platform::{AsyncPty, WinsizeBuilder, poll_nonblocking};
+use nmt_terminal::clipboard::ClipboardType;
 use nmt_terminal::session::TerminalSession;
 use nmt_terminal::termio::SessionOptions;
 use parking_lot::Mutex;
@@ -53,7 +54,7 @@ impl ClipboardAccess for TestClipboard {
         self.text.lock().clone()
     }
 
-    fn write(&mut self, text: String) -> bool {
+    fn write(&mut self, _kind: ClipboardType, text: String) -> bool {
         if self.reject_writes {
             return false;
         }

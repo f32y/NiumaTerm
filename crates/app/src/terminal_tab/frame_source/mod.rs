@@ -14,7 +14,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{collections, ops, sync, time};
 
 use nmt_config::colors::Colors;
-use nmt_terminal::clipboard::{Clipboard, ClipboardType};
 use nmt_terminal::event::BlockEvent;
 use nmt_terminal::ghostty::BlockHandle;
 use nmt_terminal::graphics::UpdateQueues;
@@ -405,10 +404,6 @@ impl SessionObserver for SessionBridge {
 
     fn blocks(&self, events: &[BlockEvent]) {
         prune_frozen_images(&self.frozen, events);
-    }
-
-    fn clipboard(&self, kind: ClipboardType, text: String) {
-        Clipboard::default().set(kind, text);
     }
 
     fn changed(&self, change: SessionChange) {

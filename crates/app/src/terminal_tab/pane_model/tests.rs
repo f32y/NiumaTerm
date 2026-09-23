@@ -150,6 +150,23 @@ fn terminal_requested_keyboard_modes_drive_keys_and_ime_commits() {
     assert_input(&input, b"\x1b[99;5u\x1b[99;5:3u");
 }
 
+/// A program's OSC 52 copy reaches the desktop clipboard when the host
+/// events are drained on the UI thread, never from the PTY task.
+#[test]
+fn a_program_clipboard_write_lands_when_host_events_drain() {
+    let (mut model, _input) = controller(b"\x1b]52;c;aGVsbG8=\x07", false);
+
+    let clipboard = TestClipboard::default();
+
+    model.clipboard = Box::new(clipboard.clone());
+
+    assert!(clipboard.text.lock().is_none());
+
+    model.drain_host_events();
+
+    assert_eq!(clipboard.text.lock().as_deref(), Some("hello"));
+}
+
 #[test]
 fn paste_uses_the_supplied_clipboard_and_respects_input_rejection() {
     let (mut model, input) = controller(b"\x1b[?2004h", false);

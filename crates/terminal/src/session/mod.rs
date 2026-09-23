@@ -96,6 +96,11 @@ pub enum HostEvent {
     CommandFinished { exit_code: Option<i32> },
     /// An integrated-shell command began executing; read `in_flight_block`.
     CommandStarted,
+    /// The program wrote to a clipboard (OSC 52 and its relatives). Delivered
+    /// with the other host events so the platform clipboard, which can wait
+    /// on another process holding it, is written from the UI thread rather
+    /// than from the PTY task.
+    Clipboard { kind: ClipboardType, text: String },
 }
 
 /// The currently executing command for split live chrome.
@@ -830,8 +835,6 @@ pub trait SessionObserver: Send + Sync {
     fn graphics(&self, _updates: UpdateQueues) {}
 
     fn blocks(&self, _events: &[BlockEvent]) {}
-
-    fn clipboard(&self, _kind: ClipboardType, _text: String) {}
 
     fn changed(&self, _change: SessionChange) {}
 }

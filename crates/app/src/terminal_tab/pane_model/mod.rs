@@ -22,6 +22,7 @@ mod tests;
 
 use nmt_config::colors::Colors;
 use nmt_input::keyboard::ModifiersState;
+use nmt_terminal::clipboard::ClipboardType;
 use nmt_terminal::input::{TerminalKey, WheelDelta};
 use nmt_terminal::links::{follows_link, resolve_link};
 use nmt_terminal::selection::SelectionType;
@@ -62,7 +63,7 @@ use crate::terminal_tab::settings::TerminalSettings;
 pub(super) trait ClipboardAccess {
     fn read(&mut self) -> Option<String>;
 
-    fn write(&mut self, text: String) -> bool;
+    fn write(&mut self, kind: ClipboardType, text: String) -> bool;
 }
 
 pub(super) struct PaneController {
@@ -182,6 +183,9 @@ impl PaneController {
 
         for event in &events {
             match event {
+                HostEvent::Clipboard { kind, text } => {
+                    self.clipboard.write(*kind, text.clone());
+                }
                 HostEvent::CommandFinished { .. } => {
                     self.frame_cache.invalidate();
 
@@ -356,7 +360,7 @@ impl PaneController {
     }
 
     pub(super) fn copy_text_to_clipboard(&mut self, text: String) -> bool {
-        !text.is_empty() && self.clipboard.write(text)
+        !text.is_empty() && self.clipboard.write(ClipboardType::Clipboard, text)
     }
 
     pub(super) fn finish_copy(&mut self, text: String, completion: CopyCompletion) -> bool {
