@@ -17,7 +17,7 @@ use crate::dsh::events::session_address;
 use crate::dsh::models::ModelDirectory;
 use crate::dsh::session::{
     COMMANDS_FRAME, FORK_CHECKPOINT_MESSAGES, FORK_CHECKPOINTS_FRAME, HISTORY_FRAME, MODELS_FRAME,
-    OpenedConversation, PRESETS_FRAME, REPLAY_MESSAGES, SEARCH_FRAME, SKILLS_FRAME,
+    OpenedConversation, PRESETS_FRAME, REPLAY_MESSAGES, SEARCH_FRAME, SESSION_STATUS, SKILLS_FRAME,
     SUBAGENT_TRANSCRIPT_FRAME, SUBAGENTS_FRAME, WORKFLOW_TRANSCRIPT_FRAME,
 };
 use crate::dsh::{catalogs, events, frames, history};
@@ -139,6 +139,34 @@ pub(super) fn load_sessions(
             client.call("session/list", json!({ "_request": {} })).await,
             deliver.as_ref(),
         );
+    });
+}
+
+/// Report through the session status frame when the harness lists
+/// `session_id` as not running. A failed or inconclusive read reports
+/// nothing, leaving the turn as the log describes it.
+pub(super) fn check_running(
+    client: ApiClient,
+    session_id: String,
+    deliver: Arc<dyn Fn(Value) + Send + Sync>,
+) {
+    nmt_runtime::handle().spawn(async move {
+        let Ok(listed) = client.call("session/list", json!({ "_request": {} })).await else {
+            return;
+        };
+
+        let idle = listed["items"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|item| item["sessionId"] == session_id.as_str())
+            .is_some_and(|item| item["running"] == false);
+
+        if idle {
+            deliver(json!({ "payload": {
+                "type": SESSION_STATUS, "sessionId": session_id, "running": false,
+            } }));
+        }
     });
 }
 

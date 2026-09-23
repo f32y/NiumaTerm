@@ -506,3 +506,35 @@ fn a_stalled_pass_reply_does_not_stop_heartbeat_answers() {
 
     server.join().unwrap();
 }
+
+#[test]
+fn session_status_edges_reach_only_their_own_conversation() {
+    let frames = RefCell::new(Vec::new());
+    let deliver = |frame| frames.borrow_mut().push(frame);
+
+    let mut streams = Streams::new("session-1");
+
+    for (session, running) in [("session-2", false), ("session-1", false)] {
+        streams
+            .process(
+                item(
+                    "events",
+                    json!({ "type": "emit", "event": "api-session/status", "args": [session, running] }),
+                ),
+                &deliver,
+            )
+            .unwrap();
+    }
+
+    let statuses: Vec<Value> = frames
+        .borrow()
+        .iter()
+        .map(|frame| frame["payload"].clone())
+        .filter(|payload| payload["type"] == "host/session-status")
+        .collect();
+
+    assert_eq!(
+        statuses,
+        vec![json!({ "type": "host/session-status", "sessionId": "session-1", "running": false })]
+    );
+}

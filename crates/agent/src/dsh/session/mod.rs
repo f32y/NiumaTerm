@@ -42,7 +42,9 @@ use crate::dsh::models::ModelDirectory;
 use crate::dsh::projections::ProjectionTracker;
 use crate::dsh::session::controls::{COMPLETED_FRAME, Controls, Operation, question_id};
 use crate::dsh::session::lane::CommandLane;
-use crate::dsh::session::loads::{ModelProfile, failed_read_events, load_conversation};
+use crate::dsh::session::loads::{
+    ModelProfile, check_running, failed_read_events, load_conversation,
+};
 use crate::dsh::session::switch::{Switch, SwitchSlot, Switching, Target, switch_conversation};
 use crate::dsh::workflows::WorkflowTracker;
 use crate::dsh::{catalogs, frames, history};
@@ -153,6 +155,11 @@ pub struct Session {
 const MODELS_FRAME: &str = "nmt/models";
 
 const HISTORY_FRAME: &str = "nmt/history";
+
+/// Whether the harness is running a turn for this session, as its session
+/// list and status events report it.
+pub(crate) const SESSION_STATUS: &str = "host/session-status";
+
 const SEARCH_FRAME: &str = "nmt/search";
 const REPLAY_FRAME: &str = "nmt/replay";
 const COMMANDS_FRAME: &str = "nmt/commands";
@@ -635,6 +642,13 @@ impl Session {
             Some("host/agent-error") if self.running && self.is_current_session(payload) => {
                 events.push(Event::TurnCompleted { error: None });
             }
+            Some(SESSION_STATUS)
+                if self.running
+                    && payload["running"] == false
+                    && self.is_current_session(payload) =>
+            {
+                events.push(Event::TurnCompleted { error: None });
+            }
             _ if !self.running => {
                 events.retain(|event| !matches!(event, Event::TurnCompleted { .. }));
             }
@@ -1040,6 +1054,15 @@ impl Session {
 
         if self.running {
             events.push(Event::TurnStarted);
+
+            // A log whose last turn never closed reads as running, which is
+            // also what a turn whose end record the harness rejected leaves
+            // behind. The harness's session list says which it is.
+            check_running(
+                self.client.clone(),
+                self.session_id.clone(),
+                Arc::clone(&self.deliver),
+            );
         }
 
         events

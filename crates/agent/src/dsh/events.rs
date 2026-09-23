@@ -22,6 +22,7 @@ use tungstenite::{Error, Message};
 
 use crate::dsh::api::{ApiClient, CallError};
 use crate::dsh::host::Host;
+use crate::dsh::session::SESSION_STATUS;
 
 const RECONNECT_DELAY: Duration = Duration::from_millis(500);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -497,6 +498,17 @@ impl Streams {
             {
                 deliver(json!({ "payload": {
                     "type": "host/agent-error", "sessionId": self.session_id, "message": value["args"][1],
+                } }));
+            }
+            // The harness's own client takes a session's running state from
+            // these edges rather than from its log, which can leave a turn
+            // open when the turn-end record is rejected.
+            Some("emit")
+                if value["event"] == "api-session/status"
+                    && value["args"][0] == self.session_id =>
+            {
+                deliver(json!({ "payload": {
+                    "type": SESSION_STATUS, "sessionId": self.session_id, "running": value["args"][1],
                 } }));
             }
             Some("waterfall") => {
