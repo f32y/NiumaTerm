@@ -5,7 +5,7 @@ use nmt_agent::session::lifecycle::Status;
 use nmt_agent::session::team_capabilities::{ModeratorAdmission, RecoveredTeamTurn};
 use nmt_agent::team::attempt::{AttemptState, BudgetScope};
 use nmt_agent::team::discussion::{DiscussionState, PauseReason};
-use nmt_agent::team::model::{AttemptId, InteractionId, MemberId};
+use nmt_agent::team::model::{AttemptId, MemberId};
 use nmt_agent::team::session::{AttemptEventKey, TeamError, TeamSession};
 
 use crate::agent_tab::execution::ExecutionSignal;
@@ -17,7 +17,6 @@ use crate::agent_tab::team::member_host::MemberHost;
 pub(super) struct MemberSnapshot {
     pub(super) id: MemberId,
     pub(super) active: Option<AttemptId>,
-    pub(super) interaction: Option<InteractionId>,
     pub(super) ready_epoch: Option<u64>,
     pub(super) start_failure: Option<String>,
     work: WorkStatus,
@@ -41,7 +40,6 @@ impl MemberSnapshot {
         Self {
             id,
             active: host.active,
-            interaction: host.interaction,
             ready_epoch: host.ready_epoch,
             start_failure: state.runtime().start_failure().map(str::to_owned),
             work,
@@ -92,19 +90,16 @@ pub(super) fn refresh(
             .map(|discussion| discussion.id())
             .collect();
 
-        if member.work.interaction && member.interaction.is_none() {
-            let interaction = InteractionId::new();
+        // Keyed by the member, so the pause can be matched again after the
+        // room reopens or this host is rebuilt; both calls return early when
+        // the room already agrees.
+        let interaction = PauseReason::Interaction(member.id);
 
-            for id in &discussions {
-                session.pause_discussion(*id, PauseReason::Interaction(interaction))?;
-            }
-
-            member.interaction = Some(interaction);
-        } else if !member.work.interaction
-            && let Some(interaction) = member.interaction.take()
-        {
-            for id in &discussions {
-                session.resolve_pause(*id, &PauseReason::Interaction(interaction))?;
+        for id in &discussions {
+            if member.work.interaction {
+                session.pause_discussion(*id, interaction.clone())?;
+            } else {
+                session.resolve_pause(*id, &interaction)?;
             }
         }
 

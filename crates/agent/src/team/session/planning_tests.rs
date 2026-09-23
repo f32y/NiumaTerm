@@ -6,8 +6,12 @@ use crate::session::AgentKind;
 use crate::session::team_capabilities::ModeratorAdmission;
 use crate::team::attempt::{AttemptState, BudgetScope};
 use crate::team::budget::TurnPurpose;
-use crate::team::discussion::{DiscussionMode, DiscussionState, ModeratorAction};
-use crate::team::model::{AttemptId, ContextError, ContextLimits, MemberId, UserInput};
+use crate::team::discussion::{
+    DiscussionMode, DiscussionState, ModeratorAction, PauseReason, StageKind,
+};
+use crate::team::model::{
+    AttemptId, ContextError, ContextLimits, DiscussionId, MemberId, UserInput,
+};
 use crate::team::room::Room;
 use crate::team::session::{AttemptEventKey, TeamError, TeamSession};
 use crate::team::tests::config;
@@ -581,4 +585,238 @@ fn confirmed_nondelivery_refunds_a_turn_but_unknown_or_failed_delivery_keeps_it(
                 .is_err()
         );
     }
+}
+
+fn fixed_discussion(session: &mut TeamSession, alice: MemberId, bob: MemberId) -> DiscussionId {
+    session
+        .start_discussion(
+            UserInput {
+                text: "Choose a design".into(),
+                ..UserInput::default()
+            },
+            vec![alice, bob],
+            DiscussionMode::Fixed {
+                report_author: alice,
+            },
+        )
+        .unwrap()
+}
+
+const ROOMY: ContextLimits = ContextLimits {
+    max_bytes: 20_000,
+    recent_messages: 8,
+};
+
+#[test]
+fn continue_asks_a_moderator_again_after_an_undecided_stage() {
+    let (_directory, mut session, alice, bob) = ready_team();
+
+    enable_moderation(&mut session);
+
+    let id = session
+        .start_discussion(
+            UserInput {
+                text: "Choose a design".into(),
+                ..UserInput::default()
+            },
+            vec![alice, bob],
+            DiscussionMode::Moderated { moderator: alice },
+        )
+        .unwrap();
+
+    let moderation = session.advance_discussion(id, &ROOMY).unwrap();
+
+    finish(&mut session, moderation[0], "I think Bob should answer.");
+
+    assert!(session.advance_discussion(id, &ROOMY).is_err());
+
+    session.continue_discussion(id).unwrap();
+
+    let again = session.advance_discussion(id, &ROOMY).unwrap();
+
+    assert_eq!(again.len(), 1);
+    assert_ne!(again[0], moderation[0]);
+
+    let stages = session.store.room().discussions()[0].stages();
+
+    assert_eq!(stages.len(), 2);
+    assert_eq!(stages[1].kind, StageKind::ModeratorDecision);
+}
+
+#[test]
+fn continue_retries_after_the_context_limit_paused_a_discussion() {
+    let (_directory, mut session, alice, bob) = ready_team();
+
+    let id = fixed_discussion(&mut session, alice, bob);
+
+    let tight = ContextLimits {
+        max_bytes: 10,
+        recent_messages: 1,
+    };
+
+    assert!(session.advance_discussion(id, &tight).is_err());
+    assert!(
+        session.store.room().discussions()[0]
+            .pauses()
+            .contains(&PauseReason::ContextSelection)
+    );
+
+    session.continue_discussion(id).unwrap();
+
+    assert_eq!(session.advance_discussion(id, &ROOMY).unwrap().len(), 2);
+}
+
+#[test]
+fn finishing_clears_a_dispatch_pause_and_schedules_the_report() {
+    let (_directory, mut session, alice, bob) = ready_team();
+
+    let id = fixed_discussion(&mut session, alice, bob);
+
+    session
+        .pause_discussion(id, PauseReason::DispatchUnavailable)
+        .unwrap();
+
+    session.finish_with_report(id).unwrap();
+
+    assert_eq!(
+        session.store.room().discussions()[0].state(),
+        DiscussionState::Finishing
+    );
+    assert_eq!(session.advance_discussion(id, &ROOMY).unwrap().len(), 1);
+}
+
+#[test]
+fn an_excluded_participant_leaves_later_stages_without_pausing_them() {
+    let (_directory, mut session, alice, bob) = ready_team();
+
+    let id = fixed_discussion(&mut session, alice, bob);
+
+    session.exclude_member(bob).unwrap();
+
+    assert!(session.store.room().discussions()[0].pauses().is_empty());
+
+    let initial = session.advance_discussion(id, &ROOMY).unwrap();
+
+    assert_eq!(initial.len(), 1);
+    assert_eq!(
+        session
+            .store
+            .room()
+            .attempts()
+            .iter()
+            .find(|attempt| attempt.id == initial[0])
+            .unwrap()
+            .intent
+            .recipient,
+        alice
+    );
+}
+
+#[test]
+fn an_attempt_whose_member_exited_can_be_abandoned() {
+    let (_directory, mut session, alice, bob) = ready_team();
+
+    let id = fixed_discussion(&mut session, alice, bob);
+
+    let initial = session.advance_discussion(id, &ROOMY).unwrap();
+
+    session
+        .dispatch(initial[0], |_| SendOutcome::StartedTurn)
+        .unwrap();
+
+    let recipient = session
+        .store
+        .room()
+        .attempts()
+        .iter()
+        .find(|attempt| attempt.id == initial[0])
+        .unwrap()
+        .intent
+        .recipient;
+
+    assert!(
+        session
+            .fail_attempt(
+                AttemptEventKey {
+                    attempt: initial[0],
+                    member: recipient,
+                    backend_generation: 1,
+                },
+                true,
+            )
+            .unwrap()
+    );
+
+    assert_eq!(
+        session
+            .pending_recovery()
+            .map(|attempt| attempt.id)
+            .collect::<Vec<_>>(),
+        [initial[0]]
+    );
+
+    session.abandon_restored_attempt(initial[0]).unwrap();
+
+    assert!(session.pending_recovery().next().is_none());
+}
+
+#[test]
+fn work_sent_under_an_ended_generation_awaits_recovery() {
+    let (_directory, mut session, alice, bob) = ready_team();
+
+    let id = fixed_discussion(&mut session, alice, bob);
+
+    let initial = session.advance_discussion(id, &ROOMY).unwrap();
+
+    session
+        .dispatch(initial[0], |_| SendOutcome::StartedTurn)
+        .unwrap();
+
+    let recipient = session
+        .store
+        .room()
+        .attempts()
+        .iter()
+        .find(|attempt| attempt.id == initial[0])
+        .unwrap()
+        .intent
+        .recipient;
+
+    session
+        .member_ready(
+            recipient,
+            2,
+            ModeratorAdmission::unverified(AgentKind::Codex),
+        )
+        .unwrap();
+
+    assert_eq!(
+        session
+            .pending_recovery()
+            .map(|attempt| attempt.id)
+            .collect::<Vec<_>>(),
+        [initial[0]]
+    );
+}
+
+#[test]
+fn reopening_drops_interaction_pauses_of_ended_sessions() {
+    let (directory, mut session, alice, bob) = ready_team();
+
+    let id = fixed_discussion(&mut session, alice, bob);
+
+    session
+        .pause_discussion(id, PauseReason::Interaction(bob))
+        .unwrap();
+
+    let room = session.store.room().id();
+
+    drop(session);
+
+    let reopened = TeamSession::open(directory.path(), room).unwrap();
+
+    let pauses = reopened.store.room().discussions()[0].pauses();
+
+    assert!(!pauses.contains(&PauseReason::Interaction(bob)));
+    assert!(pauses.contains(&PauseReason::Reopened));
 }

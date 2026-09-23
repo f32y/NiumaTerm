@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use serde_json::json;
 
 use crate::team::attempt::{BudgetScope, DispatchIntent, Invocation};
@@ -41,9 +43,11 @@ pub(super) fn public_request(input: UserInput) -> PublicMessage {
 
 /// The stage `discussion` opens once its last one settled. A spent turn budget
 /// goes straight to the report, unless the moderator was just asked to decide.
+/// `excluded` members are left out of every participant stage.
 pub(super) fn next_stage(
     discussion: &Discussion,
     remaining_turns: u32,
+    excluded: &BTreeSet<MemberId>,
 ) -> Result<NextStage, TeamError> {
     if remaining_turns == 0
         && discussion
@@ -78,7 +82,12 @@ pub(super) fn next_stage(
             let recipients = if kind == StageKind::Report {
                 vec![report_author]
             } else {
-                discussion.participants.clone()
+                discussion
+                    .participants
+                    .iter()
+                    .copied()
+                    .filter(|member| !excluded.contains(member))
+                    .collect()
             };
 
             Ok(NextStage::Schedule(kind, recipients))

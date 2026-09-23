@@ -5,7 +5,7 @@ use nmt_agent::chat::{SendOutcome, TeamDecisionRequest, ThreadSettings};
 use nmt_agent::session::lifecycle::Status;
 use nmt_agent::session::{AgentKind, PromptRequest, RecoveryIdentity};
 use nmt_agent::team::attempt::DispatchIntent;
-use nmt_agent::team::model::{AttemptId, InteractionId};
+use nmt_agent::team::model::AttemptId;
 
 use crate::agent_tab::execution::SessionOwner;
 use crate::agent_tab::team::dispatch::{WorkStatus, work_status};
@@ -15,10 +15,6 @@ pub(super) struct MemberHost {
 
     /// The attempt this member was last sent and has not finished.
     pub(super) active: Option<AttemptId>,
-
-    /// The interaction the member's session is waiting on, which holds the
-    /// open discussions paused until it resolves.
-    pub(super) interaction: Option<InteractionId>,
 
     /// The backend epoch the room last recorded this member ready for.
     pub(super) ready_epoch: Option<u64>,
@@ -31,7 +27,6 @@ impl MemberHost {
         Self {
             owner,
             active: None,
-            interaction: None,
             ready_epoch: None,
             _subscriptions: subscriptions,
         }

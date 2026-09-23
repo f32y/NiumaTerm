@@ -56,7 +56,6 @@ identities!(
     SummaryId,
     AttemptId,
     MessageId,
-    InteractionId,
 );
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

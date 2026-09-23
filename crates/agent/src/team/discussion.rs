@@ -6,8 +6,7 @@ use thiserror::Error;
 use crate::team::attempt::{Attempt, AttemptState, BudgetScope};
 use crate::team::budget::{Budget, TurnPurpose};
 use crate::team::model::{
-    AttemptId, DiscussionId, InteractionId, MemberId, MessageId, OperationId, StageId, SummaryId,
-    UserInput,
+    AttemptId, DiscussionId, MemberId, MessageId, OperationId, StageId, SummaryId, UserInput,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -44,7 +43,8 @@ pub enum PauseReason {
     UserInput(MessageId),
     ModeChange,
     MemberUnavailable(MemberId),
-    Interaction(InteractionId),
+    /// The member is waiting on the user (an approval or a question).
+    Interaction(MemberId),
     AttemptFailed(AttemptId),
     UncertainAttempt(AttemptId),
     SummaryFailed(AttemptId),
@@ -59,6 +59,33 @@ pub enum PauseReason {
 }
 
 impl PauseReason {
+    /// Whether the user's explicit Continue clears this pause. These record
+    /// something the user has now seen or a dispatch problem worth retrying;
+    /// the rest wait for their own condition (a member returning, an answer,
+    /// an uncertain reply settling) or for a dedicated action (adding turns,
+    /// skipping or finishing past a failure).
+    pub(super) fn cleared_by_continue(&self) -> bool {
+        matches!(
+            self,
+            Self::User
+                | Self::UserInput(_)
+                | Self::ModeChange
+                | Self::Reopened
+                | Self::Closed
+                | Self::InvalidModeration(_)
+                | Self::SummaryFailed(_)
+                | Self::ContextSelection
+                | Self::DispatchUnavailable
+                | Self::Storage
+        )
+    }
+
+    /// Whether finishing with a report clears this pause: everything Continue
+    /// clears, plus the spent budget and failed turns the report supersedes.
+    pub(super) fn cleared_by_finish(&self) -> bool {
+        self.cleared_by_continue() || matches!(self, Self::Budget | Self::AttemptFailed(_))
+    }
+
     /// The pause for attempt `attempt`, sent for `purpose`, failing with a
     /// known outcome. A failed summary is reported apart from a failed turn.
     pub(super) fn attempt_failed(attempt: AttemptId, purpose: TurnPurpose) -> Self {
@@ -137,6 +164,18 @@ impl Stage {
                 .collect(),
             segments: vec![snapshot],
         }
+    }
+
+    /// Whether every arrangement reached an outcome that needs no more work.
+    pub(super) fn is_settled(&self) -> bool {
+        self.arrangements.iter().all(|arrangement| {
+            matches!(
+                arrangement.state,
+                ArrangementState::Completed(_)
+                    | ArrangementState::Skipped
+                    | ArrangementState::Cancelled
+            )
+        })
     }
 }
 

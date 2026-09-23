@@ -7,8 +7,8 @@ use crate::team::discussion::{
 };
 use crate::team::member::{MemberConfig, ProfileReference};
 use crate::team::model::{
-    AttemptId, Author, ContextError, ContextLimits, InteractionId, MessageId, OperationId,
-    PublicMessage, Publication, SourceFragment, StageId, Summary, SummaryId, UserInput,
+    AttemptId, Author, ContextError, ContextLimits, MessageId, OperationId, PublicMessage,
+    Publication, SourceFragment, StageId, Summary, SummaryId, UserInput,
 };
 use crate::team::room::{MemberError, Room};
 
@@ -126,7 +126,7 @@ fn mode_changes_preserve_checkpoints_budget_and_independent_pause_reasons() {
 
     let stages = run.stages.clone();
     let budget = run.budget.clone();
-    let question = PauseReason::Interaction(InteractionId::new());
+    let question = PauseReason::Interaction(bob);
     let update = PauseReason::Maintenance("codex-installation".into());
 
     run.pause(question.clone());

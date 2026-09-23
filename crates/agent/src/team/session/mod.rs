@@ -43,7 +43,12 @@ use crate::team::storage::{RoomStore, StorageError};
 pub struct TeamSession {
     store: RoomStore,
     readiness: BTreeMap<MemberId, MemberReadiness>,
-    restored_uncertainty: BTreeSet<AttemptId>,
+
+    /// Uncertain attempts no provider event can settle anymore: restored from
+    /// disk, or sent under a backend generation that has since ended. Only
+    /// the member's recovered history or the user abandoning them resolves
+    /// them, so they block dispatch until then.
+    unresolved: BTreeSet<AttemptId>,
 }
 
 struct MemberReadiness {
@@ -84,7 +89,7 @@ impl TeamSession {
         Ok(Self {
             store: RoomStore::create(data_directory, room)?,
             readiness: BTreeMap::new(),
-            restored_uncertainty: BTreeSet::new(),
+            unresolved: BTreeSet::new(),
         })
     }
 
@@ -93,6 +98,12 @@ impl TeamSession {
         let mut room = store.room().clone();
 
         for discussion in &mut room.discussions {
+            // An interaction pause describes a member session that did not
+            // survive the reopen; a member still waiting raises it again.
+            discussion
+                .pauses
+                .retain(|reason| !matches!(reason, PauseReason::Interaction(_)));
+
             discussion.pause(PauseReason::Reopened);
         }
 
@@ -105,7 +116,7 @@ impl TeamSession {
             }
         }
 
-        let restored_uncertainty = room
+        let unresolved = room
             .attempts
             .iter()
             .filter(|attempt| in_flight(&attempt.state))
@@ -127,7 +138,7 @@ impl TeamSession {
         Ok(Self {
             store,
             readiness: BTreeMap::new(),
-            restored_uncertainty,
+            unresolved,
         })
     }
 
@@ -148,6 +159,29 @@ impl TeamSession {
 
         for discussion in &mut room.discussions {
             changed |= discussion.resolve_pause(&PauseReason::MemberUnavailable(id));
+        }
+
+        // Events for work sent under an earlier backend generation are
+        // rejected, so that work can only settle through recovery.
+        let orphaned: Vec<usize> = room
+            .attempts
+            .iter()
+            .enumerate()
+            .filter(|(_, attempt)| {
+                attempt.intent.recipient == id
+                    && attempt.intent.backend_generation != backend_generation
+                    && in_flight(&attempt.state)
+                    && !self.unresolved.contains(&attempt.id)
+            })
+            .map(|(index, _)| index)
+            .collect();
+
+        for &index in &orphaned {
+            fail(&mut room, index, true)?;
+
+            self.unresolved.insert(room.attempts[index].id);
+
+            changed = true;
         }
 
         if changed {
@@ -232,9 +266,11 @@ impl TeamSession {
     }
 
     fn has_live_attempts(&self) -> bool {
-        self.store.room().attempts.iter().any(|attempt| {
-            in_flight(&attempt.state) && !self.restored_uncertainty.contains(&attempt.id)
-        })
+        self.store
+            .room()
+            .attempts
+            .iter()
+            .any(|attempt| in_flight(&attempt.state) && !self.unresolved.contains(&attempt.id))
     }
 
     pub fn member_unavailable(&mut self, member: MemberId) -> Result<(), TeamError> {
@@ -265,7 +301,7 @@ impl TeamSession {
     }
 
     pub(super) fn validate_member(&self, id: MemberId) -> Result<(), TeamError> {
-        if !self.restored_uncertainty.is_empty() {
+        if !self.unresolved.is_empty() {
             return Err(TeamError::Unavailable);
         }
 
@@ -396,25 +432,17 @@ impl TeamSession {
 
         self.validate_mode(discussion.mode)?;
 
-        let stage_complete = discussion.stages.last().is_none_or(|stage| {
-            stage.arrangements.iter().all(|arrangement| {
-                matches!(
-                    arrangement.state,
-                    ArrangementState::Completed(_)
-                        | ArrangementState::Skipped
-                        | ArrangementState::Cancelled
-                )
-            })
-        });
-
-        if stage_complete {
+        if discussion.stages.last().is_none_or(Stage::is_settled) {
             if self.has_live_attempts() {
                 return Ok(Vec::new());
             }
 
+            let excluded = excluded_members(self.store.room());
+
             let (kind, recipients) = match next_stage(
                 discussion,
                 discussion.remaining_non_report_turns(self.store.room().attempts()),
+                &excluded,
             )? {
                 NextStage::Schedule(kind, recipients) => (kind, recipients),
                 NextStage::InvalidModeration(operation) => {
@@ -591,11 +619,24 @@ impl TeamSession {
         Ok(())
     }
 
+    /// Hold `id` on `reason`. Hosts re-assert live conditions on every
+    /// refresh, so an unchanged pause returns early without cloning or
+    /// writing the room.
     pub fn pause_discussion(
         &mut self,
         id: DiscussionId,
         reason: PauseReason,
     ) -> Result<bool, TeamError> {
+        let discussion = self
+            .store
+            .room()
+            .discussion(id)
+            .ok_or(TeamError::Unavailable)?;
+
+        if discussion.state == DiscussionState::Completed || discussion.pauses.contains(&reason) {
+            return Ok(false);
+        }
+
         let mut room = self.store.room().clone();
 
         let changed = room
@@ -613,6 +654,16 @@ impl TeamSession {
         id: DiscussionId,
         reason: &PauseReason,
     ) -> Result<bool, TeamError> {
+        let discussion = self
+            .store
+            .room()
+            .discussion(id)
+            .ok_or(TeamError::Unavailable)?;
+
+        if !discussion.pauses.contains(reason) {
+            return Ok(false);
+        }
+
         let mut room = self.store.room().clone();
 
         let changed = room
@@ -626,7 +677,7 @@ impl TeamSession {
     }
 
     pub fn continue_discussion(&mut self, id: DiscussionId) -> Result<(), TeamError> {
-        if self.has_live_attempts() || !self.restored_uncertainty.is_empty() {
+        if self.has_live_attempts() || !self.unresolved.is_empty() {
             return Err(TeamError::Busy);
         }
 
@@ -646,16 +697,9 @@ impl TeamSession {
 
         self.validate_mode(discussion.mode)?;
 
-        discussion.pauses.retain(|reason| {
-            !matches!(
-                reason,
-                PauseReason::User
-                    | PauseReason::UserInput(_)
-                    | PauseReason::ModeChange
-                    | PauseReason::Reopened
-                    | PauseReason::Closed
-            )
-        });
+        discussion
+            .pauses
+            .retain(|reason| !reason.cleared_by_continue());
 
         if !discussion.pauses.is_empty() {
             return Err(TeamError::Paused);
@@ -666,7 +710,27 @@ impl TeamSession {
         let snapshot = room.public_snapshot();
         let discussion = &mut room.discussions[index];
 
-        if let Some(stage) = discussion.stages.last_mut() {
+        // A moderator whose decision stage ended without a valid decision is
+        // asked again; re-planning the same stage would only reproduce the
+        // invalid-moderation pause.
+        let undecided = match (discussion.mode, discussion.stages.last()) {
+            (DiscussionMode::Moderated { moderator }, Some(stage))
+                if stage.kind == StageKind::ModeratorDecision
+                    && stage.decision.is_none()
+                    && stage.is_settled() =>
+            {
+                Some(moderator)
+            }
+            _ => None,
+        };
+
+        if let Some(moderator) = undecided {
+            discussion.stages.push(Stage::pending(
+                StageKind::ModeratorDecision,
+                vec![moderator],
+                snapshot,
+            ));
+        } else if let Some(stage) = discussion.stages.last_mut() {
             stage.segments.push(snapshot);
         }
 
@@ -704,9 +768,17 @@ impl TeamSession {
 
         cancel_pending_reservations(&mut room, id)?;
 
+        let excluded = excluded_members(&room);
+
         let discussion = room.discussion_mut(id).ok_or(TeamError::Unavailable)?;
 
         discussion.change_mode(mode)?;
+
+        // The new mode's report author was just validated; an excluded member
+        // never becomes ready again, so waiting on one would never end.
+        discussion.pauses.retain(|reason| {
+            !matches!(reason, PauseReason::MemberUnavailable(member) if excluded.contains(member))
+        });
 
         for stage in &mut discussion.stages {
             if matches!(stage.kind, StageKind::ModeratorDecision | StageKind::Report) {
@@ -728,7 +800,7 @@ impl TeamSession {
         id: DiscussionId,
         operation: OperationId,
     ) -> Result<(), TeamError> {
-        if self.has_live_attempts() || !self.restored_uncertainty.is_empty() {
+        if self.has_live_attempts() || !self.unresolved.is_empty() {
             return Err(TeamError::Unresolved);
         }
 
@@ -767,7 +839,7 @@ impl TeamSession {
     pub fn finish_with_report(&mut self, id: DiscussionId) -> Result<(), TeamError> {
         self.pause_discussion(id, PauseReason::User)?;
 
-        if self.has_live_attempts() || !self.restored_uncertainty.is_empty() {
+        if self.has_live_attempts() || !self.unresolved.is_empty() {
             return Err(TeamError::Unresolved);
         }
 
@@ -796,12 +868,9 @@ impl TeamSession {
             }
         }
 
-        discussion.pauses.retain(|reason| {
-            !matches!(
-                reason,
-                PauseReason::Budget | PauseReason::AttemptFailed(_) | PauseReason::User
-            )
-        });
+        discussion
+            .pauses
+            .retain(|reason| !reason.cleared_by_finish());
 
         let report_author = discussion.mode.report_author();
 
@@ -866,7 +935,7 @@ impl TeamSession {
 
         self.store.commit(room)?;
 
-        self.restored_uncertainty.remove(&key.attempt);
+        self.unresolved.remove(&key.attempt);
 
         Ok(Some(id))
     }
@@ -890,8 +959,12 @@ impl TeamSession {
 
         self.store.commit(room)?;
 
-        if !uncertain {
-            self.restored_uncertainty.remove(&key.attempt);
+        // A host reports an uncertain outcome when the member's session ended
+        // with the attempt in flight; no later event can settle it.
+        if uncertain {
+            self.unresolved.insert(key.attempt);
+        } else {
+            self.unresolved.remove(&key.attempt);
         }
 
         Ok(true)
@@ -963,7 +1036,7 @@ impl TeamSession {
     }
 
     pub fn exclude_member(&mut self, id: MemberId) -> Result<(), TeamError> {
-        if self.has_live_attempts() || !self.restored_uncertainty.is_empty() {
+        if self.has_live_attempts() || !self.unresolved.is_empty() {
             return Err(TeamError::Busy);
         }
 
@@ -972,7 +1045,25 @@ impl TeamSession {
         room.exclude_member(id)?;
 
         for discussion in &mut room.discussions {
-            if discussion.participants.contains(&id) || discussion.mode.report_author() == id {
+            if discussion.state == DiscussionState::Completed {
+                continue;
+            }
+
+            // Stages planned later leave the member out; work already planned
+            // for it will not be sent.
+            for arrangement in discussion
+                .stages
+                .iter_mut()
+                .flat_map(|stage| &mut stage.arrangements)
+            {
+                if arrangement.recipient == id && arrangement.state == ArrangementState::Pending {
+                    arrangement.state = ArrangementState::Cancelled;
+                }
+            }
+
+            // Only a mode that needs the member cannot go on without it; that
+            // pause ends when the user picks another report author.
+            if discussion.mode.report_author() == id {
                 discussion.pause(PauseReason::MemberUnavailable(id));
             }
         }
@@ -1023,13 +1114,13 @@ impl TeamSession {
             .room()
             .attempts()
             .iter()
-            .filter(|attempt| self.restored_uncertainty.contains(&attempt.id))
+            .filter(|attempt| self.unresolved.contains(&attempt.id))
     }
 
     /// The user can end tracking restored work without claiming that the
     /// provider never ran it. Its consumed budget and provider identity remain.
     pub fn abandon_restored_attempt(&mut self, id: AttemptId) -> Result<(), TeamError> {
-        if self.has_live_attempts() || !self.restored_uncertainty.contains(&id) {
+        if self.has_live_attempts() || !self.unresolved.contains(&id) {
             return Err(TeamError::Unresolved);
         }
 
@@ -1039,7 +1130,7 @@ impl TeamSession {
 
         self.store.commit(room)?;
 
-        self.restored_uncertainty.remove(&id);
+        self.unresolved.remove(&id);
 
         Ok(())
     }
@@ -1163,6 +1254,14 @@ impl TeamSession {
 
         Ok(true)
     }
+}
+
+fn excluded_members(room: &Room) -> BTreeSet<MemberId> {
+    room.members()
+        .iter()
+        .filter(|member| member.excluded())
+        .map(|member| member.id())
+        .collect()
 }
 
 fn cancel_pending_reservations(room: &mut Room, id: DiscussionId) -> Result<(), TeamError> {

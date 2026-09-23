@@ -499,7 +499,6 @@ impl TeamRuntime {
 
                             if let Some(host) = this.hosts.get_mut(&member.id) {
                                 host.active = member.active;
-                                host.interaction = member.interaction;
                                 host.ready_epoch = member.ready_epoch;
                             }
                         }
