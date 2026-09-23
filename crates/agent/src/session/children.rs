@@ -125,7 +125,7 @@ impl ChildAgents {
         Some(match identity.kind {
             AgentKind::Codex => BackgroundTaskKey::codex(identity.id),
             AgentKind::Claude => BackgroundTaskKey::claude_code(identity.id),
-            AgentKind::DeepSeek => return None,
+            AgentKind::DeepSeek => BackgroundTaskKey::deepseek(identity.id),
         })
     }
 }

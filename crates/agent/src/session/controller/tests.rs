@@ -558,6 +558,26 @@ fn child_snapshots_are_visible_only_to_the_matching_parent_and_epoch() {
 }
 
 #[test]
+fn deepseek_child_snapshots_reach_their_parent() {
+    let mut session = started(AgentKind::DeepSeek, "current", Vec::new());
+
+    apply(
+        &mut session,
+        Event::BackgroundTasks(BackgroundTaskSnapshot {
+            parent_session: BackgroundTaskKey::deepseek("current"),
+            tasks: Vec::new(),
+            discovery: BackgroundTaskLoadState::Ready,
+            activity: 0,
+        }),
+    );
+
+    assert_eq!(
+        session.background_tasks().unwrap().parent_session,
+        BackgroundTaskKey::deepseek("current")
+    );
+}
+
+#[test]
 fn output_and_interaction_are_committed_without_a_renderer() {
     let mut session = started(AgentKind::Codex, "current", vec![SendOutcome::StartedTurn]);
 
