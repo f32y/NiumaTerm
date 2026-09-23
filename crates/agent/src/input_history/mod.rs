@@ -7,7 +7,7 @@ use std::future::Future;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::{env, fs, io};
+use std::{env, io};
 
 use nmt_platform::filesystem::history_path_spelling;
 use parking_lot::Mutex;
@@ -65,10 +65,25 @@ fn normalize_working_directory(cwd: Option<&str>) -> String {
             .unwrap_or(supplied)
     };
 
+    // `dunce` drops the verbatim `\\?\` prefix Windows canonicalization adds,
+    // so a directory keys the same whether it exists now or the lexical
+    // fallback has to name it.
     let normalized =
-        fs::canonicalize(&absolute).unwrap_or_else(|_| normalize_path_components(&absolute));
+        dunce::canonicalize(&absolute).unwrap_or_else(|_| normalize_path_components(&absolute));
 
     history_path_spelling(&normalized)
+}
+
+/// The key a stored directory spelling has today. Histories saved before the
+/// verbatim prefix was dropped keyed existing directories as `//?/c:/...`
+/// (or `//?/unc/server/...` for a share), which no longer matches the key
+/// the same directory produces now.
+pub(super) fn current_cwd_key(cwd: &str) -> String {
+    if let Some(share) = cwd.strip_prefix("//?/unc/") {
+        return format!("//{share}");
+    }
+
+    cwd.strip_prefix("//?/").unwrap_or(cwd).to_string()
 }
 
 fn normalize_path_components(path: &Path) -> PathBuf {

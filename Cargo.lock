@@ -4158,6 +4158,7 @@ version = "1.5.4"
 dependencies = [
  "base64 0.22.1",
  "chrono",
+ "dunce",
  "futures",
  "getrandom 0.4.3",
  "hex",

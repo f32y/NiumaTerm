@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
 use uuid::Uuid;
 
-use crate::input_history::InputHistoryScope;
+use crate::input_history::{InputHistoryScope, current_cwd_key};
 
 const HISTORY_FILE_VERSION: u32 = 2;
 const MAX_ENTRIES_PER_SCOPE: usize = 100;
@@ -158,10 +158,12 @@ pub(super) fn load_from_path(path: &Path) -> io::Result<HistoryStore> {
 
                     // Every process migrating the same legacy row must assign
                     // the same identity, including repeated nonadjacent text.
+                    // The stored spelling, not the current key, so identities
+                    // match those assigned before keys were migrated.
                     let identity = serde_json::to_vec(&(
                         &key.target,
                         &key.backend,
-                        &key.cwd,
+                        &scope.cwd,
                         &key.additional,
                         index,
                         text,
@@ -266,7 +268,7 @@ fn history_scope<E>(value: &StoredScope<E>) -> InputHistoryScope {
     InputHistoryScope {
         target: value.target.clone(),
         backend: value.backend.clone(),
-        cwd: value.cwd.clone(),
+        cwd: current_cwd_key(&value.cwd),
         additional: value.additional.clone(),
     }
 }
