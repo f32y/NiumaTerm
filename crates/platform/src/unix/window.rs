@@ -1,5 +1,8 @@
+#[cfg(target_os = "macos")]
 use objc2::MainThreadMarker;
+#[cfg(target_os = "macos")]
 use objc2_app_kit::{NSAlert, NSAlertStyle};
+#[cfg(target_os = "macos")]
 use objc2_foundation::NSString;
 use raw_window_handle::HasWindowHandle;
 use tracing::error;
@@ -9,25 +12,28 @@ use tracing::error;
 /// This is reached before there is a window, and sometimes before there is an
 /// event loop, so the message is also logged: an alert needs the main thread,
 /// and a caller that is already off it would otherwise lose the reason
-/// entirely.
+/// entirely. Platforms without a native alert rely on the log alone.
 pub fn show_error_dialog(title: &str, message: &str) {
     error!("{title}: {message}");
 
-    let Some(main_thread) = MainThreadMarker::new() else {
-        return;
-    };
+    #[cfg(target_os = "macos")]
+    {
+        let Some(main_thread) = MainThreadMarker::new() else {
+            return;
+        };
 
-    // `MainThreadMarker` is what makes these calls safe to state: AppKit
-    // requires the main thread, and holding one is the proof of it.
-    let alert = NSAlert::new(main_thread);
+        // `MainThreadMarker` is what makes these calls safe to state: AppKit
+        // requires the main thread, and holding one is the proof of it.
+        let alert = NSAlert::new(main_thread);
 
-    alert.setAlertStyle(NSAlertStyle::Critical);
+        alert.setAlertStyle(NSAlertStyle::Critical);
 
-    alert.setMessageText(&NSString::from_str(title));
+        alert.setMessageText(&NSString::from_str(title));
 
-    alert.setInformativeText(&NSString::from_str(message));
+        alert.setInformativeText(&NSString::from_str(message));
 
-    alert.runModal();
+        alert.runModal();
+    }
 }
 
 pub fn native_active_state(_window: &impl HasWindowHandle) -> Option<bool> {

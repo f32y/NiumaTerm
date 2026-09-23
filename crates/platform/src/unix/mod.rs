@@ -27,7 +27,7 @@ mod notifier;
 mod process_exit;
 mod shell_integration;
 
-use std::ffi::{CStr, CString, OsStr};
+use std::ffi::CStr;
 use std::fs::File;
 use std::io::{Error, Read, Write};
 use std::mem::MaybeUninit;
@@ -35,19 +35,18 @@ use std::ops::Deref;
 use std::os::fd::{AsFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Child as ChildProcess, Command, Stdio};
+use std::process::{Child as ChildProcess, Command};
 use std::sync::Arc;
 use std::task::{Context, Poll as TaskPoll, ready};
-use std::{env, error, io, ptr, str};
+use std::{env, io, ptr, str};
 
 use dirs::home_dir;
 use tokio::io::unix::AsyncFd;
 use tokio::signal::unix::{Signal, SignalKind, signal};
 use tracing::info;
 
-use crate::unix::hook_command::single_quoted;
 #[cfg(target_os = "macos")]
-use crate::unix::macos::*;
+use crate::unix::hook_command::single_quoted;
 use crate::unix::process::{KillOnCloseJob, ProcessTree};
 use crate::{APP_ID, AsyncPty, PtyOptions, Winsize, WinsizeBuilder};
 
@@ -65,13 +64,6 @@ const TIOCSWINSZ: libc::c_ulong = 2148037735;
 
 #[link(name = "util")]
 unsafe extern "C" {
-    fn forkpty(
-        main: *mut libc::c_int,
-        name: *mut libc::c_char,
-        termp: *const libc::termios,
-        winsize: *const Winsize,
-    ) -> libc::pid_t;
-
     fn openpty(
         main: *mut libc::c_int,
         child: *mut libc::c_int,
@@ -81,30 +73,6 @@ unsafe extern "C" {
     ) -> libc::pid_t;
 
     fn waitpid(pid: libc::pid_t, status: *mut libc::c_int, options: libc::c_int) -> libc::pid_t;
-
-    fn ptsname(fd: *mut libc::c_int) -> *mut libc::c_char;
-}
-
-#[cfg(target_os = "macos")]
-fn default_shell_command(shell: &str) {
-    let command_shell_string = CString::new(shell).unwrap();
-    let command_pointer = command_shell_string.as_ptr();
-    let args = CString::new("--login").unwrap();
-    let args_pointer = args.as_ptr();
-
-    unsafe {
-        libc::execvp(command_pointer, vec![args_pointer].as_ptr());
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn default_shell_command(shell: &str) {
-    let command_shell_string = CString::new(shell).unwrap();
-    let command_pointer = command_shell_string.as_ptr();
-
-    unsafe {
-        libc::execvp(command_pointer, vec![command_pointer, ptr::null()].as_ptr());
-    }
 }
 
 pub struct Pty {
@@ -586,14 +554,11 @@ pub fn create_pty_with_env(options: PtyOptions<'_>) -> Result<Pty, Error> {
                 "--host".to_string(),
                 "--watch-bus".to_string(),
                 "--env=COLORTERM=truecolor".to_string(),
-                "--env=TERM=rio".to_string(),
+                format!("--env=TERM={}", terminal_type()),
             ];
 
             if let Some(directory) = working_directory {
-                with_args.push(format!(
-                    "--directory={}",
-                    path::Path::new(directory).display()
-                ));
+                with_args.push(format!("--directory={}", Path::new(directory).display()));
             }
 
             let output = Command::new("flatpak-spawn")
@@ -660,11 +625,8 @@ pub fn create_pty_with_env(options: PtyOptions<'_>) -> Result<Pty, Error> {
                 set_nonblocking(main);
             }
 
-            let ptsname: String = tty_ptsname(main).unwrap_or_else(|_| "".to_string());
-
             let child_unix = Child {
                 id: Arc::new(main),
-                ptsname,
                 pid: Arc::new(child_process.id().try_into().unwrap()),
                 process: Some(child_process),
             };
@@ -733,100 +695,6 @@ unsafe fn prepare_pty_child(
 ///
 /// Creates a pseudoterminal using fork.
 ///
-/// The [`create_pty`] creates a pseudoterminal with similar behavior as tty,
-/// which is a command in Unix and Unix-like operating systems to print the file name of the
-/// terminal connected to standard input. tty stands for TeleTYpewriter.
-///
-/// It returns two [`Pty`] along with respective process name [`String`] and process id (`libc::pid_`)
-///
-#[expect(dead_code)]
-fn create_pty_with_fork(
-    shell: &str,
-    columns: u16,
-    rows: u16,
-    width: u16,
-    height: u16,
-) -> Result<Pty, Error> {
-    let mut main = 0;
-
-    let winsize = Winsize {
-        ws_row: rows as libc::c_ushort,
-        ws_col: columns as libc::c_ushort,
-        ws_xpixel: width as libc::c_ushort,
-        ws_ypixel: height as libc::c_ushort,
-    };
-
-    let term = create_termp(true);
-
-    let mut shell_program = shell;
-
-    let user = match ShellUser::from_env() {
-        Ok(data) => data,
-        Err(..) => ShellUser {
-            shell: shell.to_string(),
-            ..Default::default()
-        },
-    };
-
-    if shell.is_empty() {
-        info!("shell configuration is empty, will retrieve from env");
-        shell_program = &user.shell;
-    }
-
-    info!("fork {:?}", shell_program);
-
-    match unsafe {
-        forkpty(
-            &mut main as *mut _,
-            ptr::null_mut(),
-            &term as *const libc::termios,
-            &winsize as *const _,
-        )
-    } {
-        0 => {
-            default_shell_command(shell_program);
-
-            Err(Error::other(format!(
-                "forkpty has reach unreachable with {shell_program}"
-            )))
-        }
-        id if id > 0 => {
-            // TODO: Currently we fork the process and don't wait to know if led to failure
-            // Whenever it happens it will just simply shut down the teletyperwriter
-            // In the future add an option to check before release the method
-            let ptsname: String = tty_ptsname(main).unwrap_or_else(|_| "".to_string());
-
-            let child = Child {
-                id: Arc::new(main),
-                ptsname,
-                pid: Arc::new(id),
-                process: None,
-            };
-
-            unsafe {
-                set_nonblocking(main);
-            }
-
-            let file = unsafe { File::from_raw_fd(main) };
-
-            let (async_file, child_signals) = register_with_runtime(&file)?;
-
-            Ok(Pty {
-                child,
-                file,
-                // `forkpty` leaves no `std::process::Child` to attach to, so
-                // this path never manages the descendant tree.
-                job: None,
-                async_file,
-                child_signals,
-            })
-        }
-        _ => Err(Error::other(format!(
-            "forkpty failed using {shell_program}"
-        ))),
-    }
-}
-
 /// Really only needed on BSD, but should be fine elsewhere.
 fn set_controlling_terminal(fd: libc::c_int) -> Result<(), Error> {
     let res = unsafe {
@@ -859,9 +727,6 @@ unsafe fn set_nonblocking(fd: libc::c_int) {
 pub struct Child {
     pub id: Arc<libc::c_int>,
     pub pid: Arc<libc::pid_t>,
-    #[allow(dead_code)]
-    ptsname: String,
-    #[allow(dead_code)]
     process: Option<ChildProcess>,
 }
 
@@ -912,13 +777,6 @@ impl Child {
     }
 }
 
-#[expect(dead_code)]
-fn kill_pid(pid: i32) {
-    unsafe {
-        libc::kill(pid, libc::SIGHUP);
-    }
-}
-
 impl Deref for Child {
     type Target = libc::c_int;
 
@@ -933,22 +791,6 @@ impl Drop for Child {
             libc::kill(*self.pid, libc::SIGHUP);
         }
     }
-}
-
-#[expect(dead_code)]
-fn command_per_pid(pid: libc::pid_t) -> String {
-    let current_process_name = Command::new("ps")
-        .arg("-p")
-        .arg(format!("{pid:}"))
-        .arg("-o")
-        .arg("comm=")
-        .output()
-        .expect("failed to execute process")
-        .stdout;
-
-    str::from_utf8(&current_process_name)
-        .unwrap_or("")
-        .to_string()
 }
 
 /// Associate the PTY descriptor and SIGCHLD with the shared runtime. Creation
@@ -1066,117 +908,4 @@ fn get_pw_entry(buf: &mut [i8; 1024]) -> Result<Passwd<'_>, Error> {
         dir: unsafe { CStr::from_ptr(entry.pw_dir).to_str().unwrap() },
         shell: unsafe { CStr::from_ptr(entry.pw_shell).to_str().unwrap() },
     })
-}
-
-/// Unsafe
-/// Return tty pts name [`String`]
-///
-/// # Safety
-///
-/// This function is unsafe because it contains the usage of `libc::ptsname`
-/// from libc that's naturally unsafe.
-pub fn tty_ptsname(fd: libc::c_int) -> Result<String, String> {
-    let c_str: &CStr = unsafe {
-        let name_ptr = ptsname(fd as *mut _);
-
-        CStr::from_ptr(name_ptr)
-    };
-
-    let str_slice: &str = c_str.to_str().unwrap();
-    let str_buf: String = str_slice.to_owned();
-
-    Ok(str_buf)
-}
-
-pub fn foreground_process_name(main_fd: RawFd, shell_pid: u32) -> String {
-    let mut pid = unsafe { libc::tcgetpgrp(main_fd) };
-
-    if pid < 0 {
-        pid = shell_pid as libc::pid_t;
-    }
-
-    #[cfg(not(any(target_os = "macos", target_os = "freebsd")))]
-    let comm_path = format!("/proc/{pid}/comm");
-
-    #[cfg(target_os = "freebsd")]
-    let comm_path = format!("/compat/linux/proc/{pid}/comm");
-
-    #[cfg(not(target_os = "macos"))]
-    let name = match fs::read(comm_path) {
-        Ok(comm_str) => String::from_utf8_lossy(&comm_str)
-            .trim_end()
-            .parse()
-            .unwrap_or_default(),
-        Err(..) => "".into(),
-    };
-
-    #[cfg(target_os = "macos")]
-    let name = macos_process_name(pid);
-
-    name
-}
-
-pub fn foreground_process_path(
-    main_fd: RawFd,
-    shell_pid: u32,
-) -> Result<PathBuf, Box<dyn error::Error>> {
-    let mut pid = unsafe { libc::tcgetpgrp(main_fd) };
-
-    if pid < 0 {
-        pid = shell_pid as libc::pid_t;
-    }
-
-    #[cfg(not(any(target_os = "macos", target_os = "freebsd")))]
-    let link_path = format!("/proc/{pid}/cwd");
-
-    #[cfg(target_os = "freebsd")]
-    let link_path = format!("/compat/linux/proc/{pid}/cwd");
-
-    #[cfg(not(target_os = "macos"))]
-    let cwd = fs::read_link(link_path)?;
-
-    #[cfg(target_os = "macos")]
-    let cwd = macos_cwd(pid)?;
-
-    Ok(cwd)
-}
-
-/// Start a new process in the background.
-#[expect(dead_code)]
-fn spawn_daemon<I, S>(program: &str, args: I, main_fd: RawFd, shell_pid: u32) -> io::Result<()>
-where
-    I: IntoIterator<Item = S> + Copy,
-    S: AsRef<OsStr>,
-{
-    let mut command = Command::new(program);
-
-    command
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-
-    if let Ok(cwd) = foreground_process_path(main_fd, shell_pid) {
-        command.current_dir(cwd);
-    }
-
-    unsafe {
-        command
-            .pre_exec(|| {
-                match libc::fork() {
-                    -1 => return Err(io::Error::last_os_error()),
-                    0 => (),
-                    _ => libc::_exit(0),
-                }
-
-                if libc::setsid() == -1 {
-                    return Err(io::Error::last_os_error());
-                }
-
-                Ok(())
-            })
-            .spawn()?
-            .wait()
-            .map(|_| ())
-    }
 }
