@@ -210,6 +210,14 @@ pub(crate) fn reconcile_profiles(profiles: &[AgentProfile], cx: &mut App) {
             updates.register_launcher(definition);
         }
     }
+
+    let kept: HashSet<InstallationKey> = updates
+        .registrations
+        .iter()
+        .map(|registered| registered.key.clone())
+        .collect();
+
+    updates.coordinator.retain(|key| kept.contains(key));
 }
 
 fn distinct_installation_keys(

@@ -464,6 +464,17 @@ impl UpdateCoordinator {
         key
     }
 
+    /// Forget installations no current profile launches, so they stop being
+    /// checked and stop raising notifications. An installation whose check or
+    /// update is still running stays until a later call, because that
+    /// operation writes its outcome back into the record.
+    pub fn retain(&self, keep: impl Fn(&InstallationKey) -> bool) {
+        self.inner
+            .lock()
+            .records
+            .retain(|key, record| record.busy || keep(key));
+    }
+
     pub fn snapshots(&self) -> Vec<InstallationSnapshot> {
         let inner = self.inner.lock();
 

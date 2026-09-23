@@ -59,6 +59,12 @@ fn snapshot_reads_do_not_register_or_rediscover_profiles(cx: &mut TestAppContext
 
         assert_eq!(changed.len(), 1);
         assert_ne!(changed[0].identity.key, initial[0].identity.key);
+
+        // The replaced launcher is no longer checked or shown.
+        let remaining = cx.global::<AgentUpdates>().coordinator.snapshots();
+
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].identity.key, changed[0].identity.key);
     });
 }
 
