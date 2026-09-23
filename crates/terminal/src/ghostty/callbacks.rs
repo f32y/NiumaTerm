@@ -5,8 +5,9 @@ use libghostty_vt_sys::{
     Allocator as VtAllocator, ClipboardLocation as VtClipboardLocation,
     ClipboardWrite as VtClipboardWrite, ClipboardWriteResult as VtClipboardWriteResult,
     String as VtString, SysImage as VtSysImage, SysOption as VtSysOption, Terminal as VtTerminal,
-    TerminalOption as VtTerminalOption, TerminalProgressReport as VtProgressReport,
-    TerminalProgressState as VtProgressState, ghostty_alloc, ghostty_sys_set, ghostty_terminal_set,
+    TerminalDesktopNotification as VtDesktopNotification, TerminalOption as VtTerminalOption,
+    TerminalProgressReport as VtProgressReport, TerminalProgressState as VtProgressState,
+    ghostty_alloc, ghostty_sys_set, ghostty_terminal_set,
 };
 
 use crate::clipboard;
@@ -35,6 +36,10 @@ pub(super) struct Callbacks {
     /// the engine's DECTCEM state stays untouched so removal restores the
     /// exact cursor the program left.
     pub(super) progress_active: bool,
+
+    /// OSC 9 / OSC 777 desktop notifications as `(title, body)`, copied out
+    /// before the callback returns because the engine only lends the strings.
+    pub(super) notifications: Vec<(String, String)>,
 }
 
 /// Register the terminal's synchronous callbacks, which write into the
@@ -75,6 +80,12 @@ pub(super) unsafe fn install_callbacks(terminal: VtTerminal) -> Box<Callbacks> {
             terminal,
             VtTerminalOption::PROGRESS_REPORT,
             progress_report_cb as *const os::raw::c_void,
+        );
+
+        ghostty_terminal_set(
+            terminal,
+            VtTerminalOption::DESKTOP_NOTIFICATION,
+            desktop_notification_cb as *const os::raw::c_void,
         );
     }
 
@@ -118,6 +129,38 @@ unsafe extern "C" fn progress_report_cb(
 
     cb.progress_active = state != ProgressState::Remove;
     cb.progress = Some(ProgressReport { state, progress });
+}
+
+unsafe extern "C" fn desktop_notification_cb(
+    _terminal: VtTerminal,
+    userdata: *mut os::raw::c_void,
+    notification: *const VtDesktopNotification,
+) {
+    if userdata.is_null() || notification.is_null() {
+        return;
+    }
+
+    // Sized struct: an older engine may hand over fewer fields than this
+    // binding knows about.
+    let size = unsafe { notification.cast::<usize>().read() };
+
+    if size < mem::size_of::<VtDesktopNotification>() {
+        return;
+    }
+
+    let notification = unsafe { &*notification };
+
+    let text = |value: &VtString| {
+        unsafe { vt_string_bytes(value) }.map(|bytes| String::from_utf8_lossy(bytes).into_owned())
+    };
+
+    let (Some(title), Some(body)) = (text(&notification.title), text(&notification.body)) else {
+        return;
+    };
+
+    let cb = unsafe { &mut *(userdata as *mut Callbacks) };
+
+    cb.notifications.push((title, body));
 }
 
 unsafe extern "C" fn write_pty_cb(

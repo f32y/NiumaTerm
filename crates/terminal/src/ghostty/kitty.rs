@@ -31,11 +31,13 @@ pub(super) struct KittyState {
     /// storage with no allocation, so a no-graphics batch costs ~3 FFI calls.
     placement_iter: VtKittyGraphicsPlacementIterator,
 
-    /// Kitty image-delta cache: `image_id -> (width, height, data_len)`
-    /// of every image already shipped to the frontend. Owned by the PTY reader
-    /// thread (only `take_image_deltas` mutates it). A key change (re-transmit
-    /// with new size/length) re-ships the pixels; a vanished id is removed.
-    shipped_images: FxHashMap<u32, (u32, u32, usize)>,
+    /// Kitty image-delta cache: `image_id -> generation` of every image
+    /// already shipped to the frontend. Owned by the PTY reader thread (only
+    /// `take_image_deltas` mutates it). The engine stamps a new generation on
+    /// every re-transmit and animation frame, including ones that keep the
+    /// size and byte length, so a changed stamp re-ships the pixels; a vanished
+    /// id is removed.
+    shipped_images: FxHashMap<u32, u64>,
 }
 
 impl Drop for KittyState {
@@ -336,9 +338,17 @@ impl KittyState {
                     );
                 }
 
-                let key = (width, height, data_len);
+                let mut generation: u64 = 0;
 
-                if self.shipped_images.get(&p.image_id) == Some(&key) {
+                unsafe {
+                    ghostty_kitty_graphics_image_get(
+                        image,
+                        VtKittyGraphicsImageData::GENERATION,
+                        (&mut generation as *mut u64).cast(),
+                    );
+                }
+
+                if self.shipped_images.get(&p.image_id) == Some(&generation) {
                     continue; // unchanged — already shipped
                 }
 
@@ -350,7 +360,7 @@ impl KittyState {
 
                 pending.push((p.image_id, data));
 
-                self.shipped_images.insert(p.image_id, key);
+                self.shipped_images.insert(p.image_id, generation);
             }
         }
 

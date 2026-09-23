@@ -258,6 +258,11 @@ impl GhosttyTerminal {
         mem::take(&mut self.callbacks.clipboard_writes)
     }
 
+    /// Drain OSC 9 / OSC 777 desktop notifications as `(title, body)`.
+    pub fn take_notifications(&mut self) -> Vec<(String, String)> {
+        mem::take(&mut self.callbacks.notifications)
+    }
+
     /// Drain the latest OSC 9;4 progress report since the last call.
     pub fn take_progress_report(&mut self) -> Option<ProgressReport> {
         self.callbacks.progress.take()

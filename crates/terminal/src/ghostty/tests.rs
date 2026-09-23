@@ -342,20 +342,17 @@ fn kitty_image_placement() {
     );
 }
 
-/// The backend delta key is `(id, width, height,
-/// data_len)` because the pinned FFI exposes no image generation counter. A
-/// same-ID retransmission whose width, height, and byte length are unchanged
-/// is therefore NOT observed as a delta and is not re-shipped, even if the
-/// pixel bytes differ. This known limitation needs a future Ghostty generation
-/// field to distinguish same-sized retransmissions.
+/// A same-ID retransmission keeps the width, height and byte length, so only
+/// the engine's image generation shows that the pixels changed; the delta
+/// must re-ship them or the frontend keeps drawing the old image.
 #[test]
-fn kitty_same_size_retransmit_not_reshipped() {
+fn kitty_same_size_retransmit_is_reshipped() {
     let mut t = GhosttyTerminal::new(20, 5, 100).unwrap();
 
     t.resize(20, 5, 10, 20).unwrap();
 
     // Transmit + place a 1×1 opaque-red RGBA image, id=1.
-    t.write_vt(b"\x1b_Ga=T,f=32,s=1,v=1,i=1;/wAA/w==\x1b\\");
+    t.write_vt(b"_Ga=T,f=32,s=1,v=1,i=1;/wAA/w==\\");
 
     let snap = t.snapshot().unwrap();
     let (first, _) = t.take_image_deltas(snap.placements());
@@ -363,16 +360,22 @@ fn kitty_same_size_retransmit_not_reshipped() {
     assert!(first.iter().any(|(id, _)| *id == 1), "first ship");
 
     // Retransmit the SAME id with the SAME 1×1 RGBA dimensions/length but
-    // different pixels (opaque-blue). Same (id,w,h,len) key ⇒ not re-shipped.
-    t.write_vt(b"\x1b_Ga=T,f=32,s=1,v=1,i=1;AAD/fw==\x1b\\");
+    // different pixels (opaque-blue).
+    t.write_vt(b"_Ga=T,f=32,s=1,v=1,i=1;AAD/fw==\\");
 
     let snap = t.snapshot().unwrap();
     let (second, removed) = t.take_image_deltas(snap.placements());
 
     assert!(
-        second.iter().all(|(id, _)| *id != 1) && !removed.contains(&1),
-        "same-size same-id retransmission is not re-shipped (known residual)"
+        second.iter().any(|(id, _)| *id == 1) && !removed.contains(&1),
+        "same-size same-id retransmission is re-shipped"
     );
+
+    // Nothing changed since, so the next batch ships nothing.
+    let snap = t.snapshot().unwrap();
+    let (third, _) = t.take_image_deltas(snap.placements());
+
+    assert!(third.is_empty());
 }
 
 /// With the registered PNG decode hook, an `f=100` transmission is
@@ -1615,6 +1618,30 @@ fn bell_callback_counts() {
 
     assert_eq!(terminal.take_bell(), 2);
     assert_eq!(terminal.take_bell(), 0);
+}
+
+/// Agent attention alerts come from OSC 9 and OSC 777 notifications, so the
+/// engine callback must hand both forms to the PTY task.
+#[test]
+fn desktop_notifications_are_collected_from_osc_9_and_777() {
+    let mut terminal = GhosttyTerminal::new(8, 1, 100).unwrap();
+
+    terminal.write_vt(b"\x1b]9;build finished\x07");
+    terminal.write_vt(b"\x1b]777;notify;Agent;needs input\x1b\\");
+
+    assert_eq!(
+        terminal.take_notifications(),
+        [
+            (String::new(), "build finished".to_string()),
+            ("Agent".to_string(), "needs input".to_string()),
+        ]
+    );
+    assert!(terminal.take_notifications().is_empty());
+
+    // OSC 9;4 is a progress report, never a notification.
+    terminal.write_vt(b"\x1b]9;4;1;40\x07");
+
+    assert!(terminal.take_notifications().is_empty());
 }
 
 /// The tab strip draws the parsed state and percentage, and the published
