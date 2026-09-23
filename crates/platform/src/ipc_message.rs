@@ -1,14 +1,23 @@
+use std::time::Duration;
+
 use tokio::io::{AsyncRead, AsyncReadExt as _};
+use tokio::time::timeout;
 
 pub const MAX_MESSAGE_BYTES: usize = 64 * 1024;
 
+/// How long one client may take to send its message and close. Servers read
+/// one client at a time, and a sender writes a single line and disconnects,
+/// so a client that stays connected past this is holding every later one
+/// back.
+const READ_TIMEOUT: Duration = Duration::from_secs(2);
+
 pub(crate) async fn read_message(reader: impl AsyncRead + Unpin) -> Option<Vec<u8>> {
     let mut bytes = Vec::new();
+    let mut limited = reader.take((MAX_MESSAGE_BYTES + 1) as u64);
 
-    reader
-        .take((MAX_MESSAGE_BYTES + 1) as u64)
-        .read_to_end(&mut bytes)
+    timeout(READ_TIMEOUT, limited.read_to_end(&mut bytes))
         .await
+        .ok()?
         .ok()?;
 
     (bytes.len() <= MAX_MESSAGE_BYTES).then_some(bytes)

@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use std::{env, mem, thread};
 
 use tokio::net::UnixListener as AsyncUnixListener;
+use tokio::time::sleep;
 use tracing::warn;
 
 use crate::ipc_message::read_message;
@@ -154,7 +155,11 @@ pub fn spawn_server(
 
 async fn serve_socket(listener: AsyncUnixListener, mut on_message: impl FnMut(Vec<u8>) -> bool) {
     loop {
+        // Accept fails persistently when the process is out of descriptors;
+        // retrying at once would spin a runtime worker until one frees up.
         let Ok((stream, _)) = listener.accept().await else {
+            sleep(Duration::from_millis(100)).await;
+
             continue;
         };
 
