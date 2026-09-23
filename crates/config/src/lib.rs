@@ -100,11 +100,14 @@ impl From<char> for CursorShape {
     }
 }
 
+/// Reads the names written by the `&'static str` conversion, which are also
+/// the serde aliases, so a value round-trips through either.
 impl From<&str> for CursorShape {
     fn from(value: &str) -> Self {
         match value {
-            "line" => CursorShape::Beam,
+            "line" | "beam" => CursorShape::Beam,
             "underline" => CursorShape::Underline,
+            "hidden" => CursorShape::Hidden,
             _ => CursorShape::Block,
         }
     }
