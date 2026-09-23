@@ -46,7 +46,7 @@ use crate::session::update_readiness::{ConversationWork, Readiness, prepare_stop
 use crate::session::workflows::{RefreshPlan, WorkflowData, WorkflowReader};
 use crate::session::{
     AgentKind, Backend, ConversationTitleRequest, OperationError, RecoveryIdentity,
-    SettingsOutcome, TaskHistory, TaskHistoryRead,
+    SettingsOutcome, TaskHistory, TaskHistoryRead, TranscriptLoad,
 };
 use crate::transcript::TextField;
 use crate::transcript::conversation::{ConversationImage, ConversationState, hidden};
@@ -444,7 +444,7 @@ impl SessionController {
         &mut self,
         key: &BackgroundTaskKey,
         cwd: Option<&str>,
-    ) -> Option<Vec<Event>> {
+    ) -> Option<TranscriptLoad> {
         Some(
             self.runtime
                 .backend_mut()?

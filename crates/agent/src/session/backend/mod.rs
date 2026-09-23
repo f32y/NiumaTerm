@@ -123,6 +123,29 @@ impl TaskHistoryRead {
     }
 }
 
+/// How a provider answers a request for one child's conversation.
+pub enum TranscriptLoad {
+    /// The answer is at hand, or arrives later as ordinary session events.
+    Events(Vec<Event>),
+    /// The answer lives in files the harness wrote; read them off the UI
+    /// thread and apply the events it yields.
+    Read(TranscriptRead),
+}
+
+/// Blocking reads of files a harness wrote for one child, meant for a
+/// background thread.
+pub struct TranscriptRead(Box<dyn FnOnce() -> Vec<Event> + Send>);
+
+impl TranscriptRead {
+    pub(crate) fn new(read: impl FnOnce() -> Vec<Event> + Send + 'static) -> Self {
+        Self(Box::new(read))
+    }
+
+    pub fn run(self) -> Vec<Event> {
+        (self.0)()
+    }
+}
+
 /// What a [`TaskHistoryRead`] found, handed back to the session that asked.
 pub struct TaskHistory {
     restored: Result<Vec<RestoredTask>, String>,
@@ -474,19 +497,23 @@ impl Backend {
         &mut self,
         key: &BackgroundTaskKey,
         cwd: Option<&str>,
-    ) -> Vec<Event> {
+    ) -> TranscriptLoad {
         if !self.owns_task(key) {
-            return Vec::new();
+            return TranscriptLoad::Events(Vec::new());
         }
 
         match self {
-            Backend::Codex(session) => session.load_background_task_transcript(&key.id),
+            Backend::Codex(session) => {
+                TranscriptLoad::Events(session.load_background_task_transcript(&key.id))
+            }
             Backend::Claude(session) => session.load_background_task_transcript(&key.id, cwd),
             // A child's conversation is answered asynchronously and reaches
             // the pane as an ordinary event; a job row is answered here.
-            Backend::DeepSeek(session) => session.load_background_task_transcript(&key.id),
+            Backend::DeepSeek(session) => {
+                TranscriptLoad::Events(session.load_background_task_transcript(&key.id))
+            }
             #[cfg(any(test, feature = "test-support"))]
-            Backend::Test(_) => Vec::new(),
+            Backend::Test(_) => TranscriptLoad::Events(Vec::new()),
         }
     }
 

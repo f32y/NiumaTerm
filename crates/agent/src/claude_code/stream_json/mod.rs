@@ -65,6 +65,7 @@ use crate::claude_code::stream_json::transcript::{TurnOutputUsage, window_from_c
 use crate::claude_code::tasks::{ClaudeTasks, shell_items};
 use crate::claude_code::workflows::{ClaudeWorkflowSource, ClaudeWorkflows};
 use crate::launcher::AgentCli;
+use crate::session::{TranscriptLoad, TranscriptRead};
 use crate::subprocess::JsonLineProcess;
 use crate::subprocess::requests::{DeadlineTimer, RequestClass};
 use crate::workflow::{WorkflowRefreshRequest, WorkflowRefreshResult, WorkflowRun, WorkflowSource};
@@ -701,29 +702,37 @@ impl Session {
         &self,
         tool_use_id: &str,
         cwd: Option<&str>,
-    ) -> Vec<Event> {
+    ) -> TranscriptLoad {
+        let key = BackgroundTaskKey::claude_code(tool_use_id);
+
         // A background shell keeps its content in an output file rather than
-        // in a child session, so it answers from the reducer and never looks
-        // for a transcript that does not exist.
+        // in a child session, so it is read from there and never looks for a
+        // transcript that does not exist.
         if let Some(detail) = self.tasks.shell_detail(tool_use_id) {
-            return vec![Event::BackgroundTaskTranscript {
-                key: BackgroundTaskKey::claude_code(tool_use_id),
-                update: BackgroundTaskTranscriptUpdate::loaded(shell_items(&detail)),
-            }];
+            return TranscriptLoad::Read(TranscriptRead::new(move || {
+                vec![Event::BackgroundTaskTranscript {
+                    key,
+                    update: BackgroundTaskTranscriptUpdate::loaded(shell_items(&detail)),
+                }]
+            }));
         }
 
-        let Some(session_id) = self.session_id.as_deref() else {
-            return Vec::new();
+        let Some(session_id) = self.session_id.clone() else {
+            return TranscriptLoad::Events(Vec::new());
         };
 
-        let Some(items) = load_child_transcript(cwd, session_id, tool_use_id) else {
-            return Vec::new();
-        };
+        let cwd = cwd.map(str::to_owned);
+        let tool_use_id = tool_use_id.to_owned();
 
-        vec![Event::BackgroundTaskTranscript {
-            key: BackgroundTaskKey::claude_code(tool_use_id),
-            update: BackgroundTaskTranscriptUpdate::loaded(items),
-        }]
+        TranscriptLoad::Read(TranscriptRead::new(move || {
+            load_child_transcript(cwd.as_deref(), &session_id, &tool_use_id)
+                .map(|items| Event::BackgroundTaskTranscript {
+                    key,
+                    update: BackgroundTaskTranscriptUpdate::loaded(items),
+                })
+                .into_iter()
+                .collect()
+        }))
     }
 
     pub fn finish_task_restoration(

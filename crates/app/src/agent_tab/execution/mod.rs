@@ -12,7 +12,7 @@ mod registry;
 mod tests;
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -36,7 +36,7 @@ use nmt_agent::session::restore::{ReplayLoaded, ReplayRead, ResumeStart, Setting
 use nmt_agent::session::team_capabilities::TeamLaunch;
 use nmt_agent::session::update_readiness::{ConversationWork, Readiness};
 use nmt_agent::session::workflows::RefreshPlan;
-use nmt_agent::session::{Backend, RecoveryIdentity};
+use nmt_agent::session::{Backend, RecoveryIdentity, TranscriptLoad};
 use nmt_agent::update::InstallationKey;
 use nmt_agent::workflow::{WorkflowRefreshResult, WorkflowRun};
 use nmt_agent::{
@@ -73,6 +73,10 @@ pub(super) struct PollingRefresh<R> {
 
 pub struct AgentSession {
     child_refresh: PollingRefresh<ChildReaders>,
+
+    /// Child transcripts being read in the background, by epoch and child.
+    child_reads: HashSet<(u64, BackgroundTaskKey)>,
+
     pub(super) workflow_refresh: PollingRefresh<Rc<Cell<usize>>>,
     pub(super) controller: Rc<RefCell<SessionController>>,
 
@@ -270,6 +274,7 @@ impl AgentSession {
             last_completed: None,
             workflow_refresh: PollingRefresh::default(),
             child_refresh: PollingRefresh::default(),
+            child_reads: HashSet::new(),
             closed: closed.clone(),
             binding_generation: binding_generation.clone(),
             team_launch,
@@ -628,7 +633,7 @@ impl AgentSession {
     fn load_child(&mut self, key: &BackgroundTaskKey, cx: &mut Context<Self>) {
         let epoch = self.controller.borrow().runtime().epoch();
 
-        let Some(events) = self
+        let Some(load) = self
             .controller
             .borrow_mut()
             .load_background_task_transcript(key, self.active_workspace.primary())
@@ -636,9 +641,36 @@ impl AgentSession {
             return;
         };
 
-        for event in events {
-            self.on_event(epoch, event, cx);
+        let read = match load {
+            TranscriptLoad::Events(events) => {
+                for event in events {
+                    self.on_event(epoch, event, cx);
+                }
+
+                return;
+            }
+            TranscriptLoad::Read(read) => read,
+        };
+
+        // The poll asks again every second; a read still running for the
+        // same child would return the same files.
+        let reading = (epoch, key.clone());
+
+        if !self.child_reads.insert(reading.clone()) {
+            return;
         }
+
+        Self::read_in_background(
+            cx,
+            move || read.run(),
+            move |this, events, cx| {
+                this.child_reads.remove(&reading);
+
+                for event in events {
+                    this.on_event(epoch, event, cx);
+                }
+            },
+        );
     }
 
     pub(crate) fn on_event(&mut self, epoch: u64, event: Event, cx: &mut Context<Self>) {
