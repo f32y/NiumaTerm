@@ -352,7 +352,7 @@ fn kitty_same_size_retransmit_is_reshipped() {
     t.resize(20, 5, 10, 20).unwrap();
 
     // Transmit + place a 1×1 opaque-red RGBA image, id=1.
-    t.write_vt(b"_Ga=T,f=32,s=1,v=1,i=1;/wAA/w==\\");
+    t.write_vt(b"\x1b_Ga=T,f=32,s=1,v=1,i=1;/wAA/w==\x1b\\");
 
     let snap = t.snapshot().unwrap();
     let (first, _) = t.take_image_deltas(snap.placements());
@@ -361,7 +361,7 @@ fn kitty_same_size_retransmit_is_reshipped() {
 
     // Retransmit the SAME id with the SAME 1×1 RGBA dimensions/length but
     // different pixels (opaque-blue).
-    t.write_vt(b"_Ga=T,f=32,s=1,v=1,i=1;AAD/fw==\\");
+    t.write_vt(b"\x1b_Ga=T,f=32,s=1,v=1,i=1;AAD/fw==\x1b\\");
 
     let snap = t.snapshot().unwrap();
     let (second, removed) = t.take_image_deltas(snap.placements());
