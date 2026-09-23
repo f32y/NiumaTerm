@@ -1,3 +1,5 @@
+use std::{env, fs, process};
+
 use crate::windows::{command_line, quote_command_arg};
 
 #[test]
@@ -20,6 +22,23 @@ fn command_line_keeps_legacy_raw_shell_when_args_are_empty() {
         command_line("powershell -NoProfile -Command echo", &[]),
         "powershell -NoProfile -Command echo"
     );
+}
+
+#[test]
+fn command_line_quotes_an_existing_shell_path_without_args() {
+    let directory = env::temp_dir().join(format!("niumaterm shell {}", process::id()));
+
+    fs::create_dir_all(&directory).unwrap();
+
+    let shell = directory.join("my shell.exe");
+
+    fs::write(&shell, b"").unwrap();
+
+    let line = command_line(shell.to_str().unwrap(), &[]);
+
+    fs::remove_dir_all(&directory).unwrap();
+
+    assert_eq!(line, format!("\"{}\"", shell.display()));
 }
 
 #[test]

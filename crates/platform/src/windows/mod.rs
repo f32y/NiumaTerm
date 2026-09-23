@@ -42,6 +42,7 @@ use std::ffi::OsStr;
 use std::future::Future;
 use std::iter::{self, once};
 use std::os::windows::ffi::OsStrExt;
+use std::path::Path;
 use std::pin::Pin;
 use std::task::{Context, Poll as TaskPoll, ready};
 use std::{io, mem};
@@ -206,8 +207,16 @@ fn command_line(shell: &str, args: &[String]) -> String {
         shell
     };
 
+    // Without arguments the setting may be a whole legacy command line, which
+    // must pass through as written. A value that names an existing file is a
+    // bare program path, and left unquoted a space in it would make
+    // CreateProcessW try each space-separated prefix as a program first.
     if args.is_empty() {
-        return shell.to_string();
+        return if Path::new(shell).is_file() {
+            quote_command_arg(shell)
+        } else {
+            shell.to_string()
+        };
     }
 
     let mut out = quote_command_arg(shell);
