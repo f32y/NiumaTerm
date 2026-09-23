@@ -336,6 +336,23 @@ fn cwd_munges_to_the_cli_project_directory_name() {
         "C--Workspace-NiumaTerm"
     );
     assert_eq!(munge_cwd("/home/u/my.project"), "-home-u-my-project");
+
+    // The CLI munges per UTF-16 unit, so a character outside the BMP leaves
+    // two dashes.
+    assert_eq!(munge_cwd("/home/u/\u{1F600}x"), "-home-u---x");
+
+    // Past 200 units the CLI cuts the name and appends its 32-bit string
+    // hash in base 36; the expected suffix was produced by the CLI's own
+    // function.
+    let long = format!(
+        "C:\\{}\\project",
+        ["deeply-nested-workspace-folder"; 8].join("\\")
+    );
+
+    let munged = munge_cwd(&long);
+
+    assert_eq!(munged.len(), 207);
+    assert!(munged.ends_with("-deeply-nest-edw6lo"));
 }
 
 #[test]

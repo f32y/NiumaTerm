@@ -37,6 +37,7 @@ use crate::chat::{
     SendOutcome, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome,
     SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
 };
+use crate::claude_code::config_home;
 #[cfg(test)]
 use crate::claude_code::records::{edit_diff, input_detail, tool_item};
 use crate::claude_code::sessions::progress::{PROGRESS_METHOD, ProgressMonitor, ProgressSnapshot};
@@ -63,7 +64,6 @@ use crate::claude_code::stream_json::transcript::TranscriptState;
 use crate::claude_code::stream_json::transcript::{TurnOutputUsage, window_from_composition};
 use crate::claude_code::tasks::{ClaudeTasks, shell_items};
 use crate::claude_code::workflows::{ClaudeWorkflowSource, ClaudeWorkflows};
-use crate::hook_store::home_dir;
 use crate::launcher::AgentCli;
 use crate::subprocess::JsonLineProcess;
 use crate::subprocess::requests::{DeadlineTimer, RequestClass};
@@ -1499,13 +1499,13 @@ fn file_rewind_request(user_message_id: &str) -> Value {
     })
 }
 
-/// The permission mode the CLI will start in, from `~/.claude/settings.json`
+/// The permission mode the CLI will start in, from its user `settings.json`
 /// (`permissions.defaultMode`). The protocol has no way to query the mode
 /// before the first turn, so this mirrors the CLI's own config resolution;
 /// project-level overrides are not consulted (rare, and the first turn's
 /// `init` message corrects any mismatch).
 fn configured_permission_mode() -> Option<String> {
-    let path = home_dir()?.join(".claude").join("settings.json");
+    let path = config_home()?.join("settings.json");
     let settings: Value = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
 
     settings["permissions"]["defaultMode"]

@@ -49,6 +49,7 @@ use uuid::Uuid;
 
 #[cfg(test)]
 use crate::chat::Compaction;
+use crate::claude_code::config_home;
 #[cfg(test)]
 use crate::claude_code::sessions::fork::{build_fork_records, write_fork_file};
 #[cfg(test)]
@@ -64,7 +65,6 @@ use crate::claude_code::sessions::titles::{
     compaction_summary_text, recorded_title, resolved_session_title, session_title,
     user_prompt_text,
 };
-use crate::hook_store::home_dir;
 
 /// Whether the selected user message has a persisted file-history snapshot.
 /// `Unknown` is reserved for snapshot records whose schema is not understood;
@@ -94,18 +94,66 @@ pub struct ClaudeCheckpoint {
 // directory yields `None`; callers convert that absence into an empty result
 // or an operation error appropriate to their API.
 
+/// Longest munged project path the CLI uses as a directory name as is.
+const MUNGED_PATH_LIMIT: usize = 200;
+
 /// The CLI resolves `--resume` against the project directory derived from the
-/// process cwd, so listing and resuming must use the same directory mapping:
-/// every non-ASCII-alphanumeric character becomes `-`.
+/// process cwd, so listing and resuming must use the same directory mapping.
+/// Every UTF-16 unit that is not an ASCII letter or digit becomes `-` (the
+/// CLI's regex works per unit, so a character outside the BMP becomes two),
+/// and a result longer than the limit is cut there and suffixed with the
+/// base-36 magnitude of the CLI's 32-bit string hash of the original path.
 fn munge_cwd(cwd: &str) -> String {
-    cwd.chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect()
+    let units: Vec<u16> = cwd.encode_utf16().collect();
+
+    let munged: String = units
+        .iter()
+        .map(|&unit| match u8::try_from(unit) {
+            Ok(byte) if byte.is_ascii_alphanumeric() => char::from(byte),
+            _ => '-',
+        })
+        .collect();
+
+    if munged.len() <= MUNGED_PATH_LIMIT {
+        return munged;
+    }
+
+    let hash = units.iter().fold(0i32, |hash, &unit| {
+        hash.wrapping_shl(5)
+            .wrapping_sub(hash)
+            .wrapping_add(i32::from(unit))
+    });
+
+    format!(
+        "{}-{}",
+        &munged[..MUNGED_PATH_LIMIT],
+        base36(i64::from(hash).unsigned_abs())
+    )
+}
+
+fn base36(mut value: u64) -> String {
+    const DIGITS: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+
+    let mut digits = Vec::new();
+
+    loop {
+        digits.push(DIGITS[(value % 36) as usize]);
+
+        value /= 36;
+
+        if value == 0 {
+            break;
+        }
+    }
+
+    digits.reverse();
+
+    String::from_utf8(digits).expect("base-36 digits are ASCII")
 }
 
 /// The directory holding one transcript directory per project.
 fn projects_root() -> Option<PathBuf> {
-    Some(home_dir()?.join(".claude").join("projects"))
+    Some(config_home()?.join("projects"))
 }
 
 /// The transcript directory for `cwd` (falling back to the process cwd, which
@@ -116,12 +164,7 @@ pub(super) fn project_dir(cwd: Option<&str>) -> Option<PathBuf> {
         None => env::current_dir().ok()?.to_string_lossy().into_owned(),
     };
 
-    Some(
-        home_dir()?
-            .join(".claude")
-            .join("projects")
-            .join(munge_cwd(&cwd)),
-    )
+    Some(projects_root()?.join(munge_cwd(&cwd)))
 }
 
 fn session_path(cwd: Option<&str>, session_id: &str) -> Option<PathBuf> {

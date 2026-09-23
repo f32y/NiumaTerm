@@ -5,10 +5,9 @@
 #[path = "usage_fetcher_tests.rs"]
 mod usage_fetcher_tests;
 
-use std::ffi::OsStr;
 use std::future::poll_fn;
 use std::io::{self, ErrorKind};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 use std::{env, fmt};
 
@@ -24,7 +23,7 @@ use tokio::fs::File;
 use tokio::io::{AsyncRead, AsyncReadExt as _};
 use tokio::time::{Instant, timeout_at};
 
-use crate::hook_store::home_dir;
+use crate::claude_code::config_home;
 use crate::usage::{
     FIVE_HOUR_WINDOW_MINUTES, FetchCancellation, UsageSnapshot, UsageWindow, WEEKLY_WINDOW_MINUTES,
     parse_timestamp_millis,
@@ -167,17 +166,7 @@ pub async fn fetch_with_cancel(
 }
 
 fn oauth_credentials_path() -> Option<PathBuf> {
-    let config_dir = env::var_os("CLAUDE_CONFIG_DIR");
-
-    credentials_path(config_dir.as_deref(), home_dir().as_deref())
-}
-
-fn credentials_path(config_dir: Option<&OsStr>, home: Option<&Path>) -> Option<PathBuf> {
-    config_dir
-        .filter(|path| !path.is_empty())
-        .map(Into::into)
-        .or_else(|| home.map(|path| path.join(".claude")))
-        .map(|path| path.join(".credentials.json"))
+    Some(config_home()?.join(".credentials.json"))
 }
 
 fn parse_oauth_token(bytes: &[u8]) -> Result<String, String> {
