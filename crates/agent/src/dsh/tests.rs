@@ -2234,14 +2234,22 @@ fn a_frame_missing_a_required_field_is_dropped_not_emptied() {
     };
 
     // Renamed identity field: the whole frame is refused.
-    let renamed = json!({ "type": "nmt/workflow-transcript", "task": "t1", "agentId": "a1" });
+    let renamed = json!({
+        "type": "nmt/workflow-transcript", "sessionId": SESSION, "task": "t1", "agentId": "a1",
+    });
 
-    assert_eq!(workflow_transcript_events(&renamed), Vec::new());
+    assert_eq!(workflow_transcript_events(&renamed, SESSION), Vec::new());
 
     let complete = json!({
-        "type": "nmt/workflow-transcript", "taskId": "t1", "agentId": "a1",
+        "type": "nmt/workflow-transcript", "sessionId": SESSION, "taskId": "t1", "agentId": "a1",
         "page": { "records": [] },
     });
+
+    // An answer for the conversation this tab left is dropped.
+    assert_eq!(
+        workflow_transcript_events(&complete, "left-behind"),
+        Vec::new()
+    );
 
     assert!(matches!(
         complete_events(&complete).as_slice(),
@@ -2250,7 +2258,7 @@ fn a_frame_missing_a_required_field_is_dropped_not_emptied() {
     ));
 
     fn complete_events(payload: &Value) -> Vec<Event> {
-        workflow_transcript_events(payload)
+        workflow_transcript_events(payload, SESSION)
     }
 
     // A search error whose value is not a string is drift, never a success.
@@ -2271,9 +2279,20 @@ fn a_frame_missing_a_required_field_is_dropped_not_emptied() {
         [Event::History(sessions)] if sessions.is_empty()
     ));
     assert!(matches!(
-        fork_checkpoint_events(&json!({ "type": "nmt/fork-checkpoints" })).as_slice(),
+        fork_checkpoint_events(
+            &json!({ "type": "nmt/fork-checkpoints", "sessionId": SESSION }),
+            SESSION
+        )
+        .as_slice(),
         [Event::ForkCheckpoints(Ok(checkpoints))] if checkpoints.is_empty()
     ));
+    assert_eq!(
+        fork_checkpoint_events(
+            &json!({ "type": "nmt/fork-checkpoints", "sessionId": SESSION }),
+            "left-behind"
+        ),
+        Vec::new()
+    );
 }
 
 #[test]

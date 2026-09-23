@@ -55,6 +55,7 @@ pub(crate) struct SubagentTranscriptFrame {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct WorkflowTranscriptFrame {
+    pub(crate) session_id: String,
     pub(crate) task_id: String,
     pub(crate) agent_id: String,
     #[serde(default)]
@@ -141,7 +142,9 @@ pub(crate) struct SearchFrame {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct ForkCheckpointsFrame {
+    pub(crate) session_id: String,
     #[serde(default)]
     pub(crate) error: Option<String>,
     #[serde(default)]

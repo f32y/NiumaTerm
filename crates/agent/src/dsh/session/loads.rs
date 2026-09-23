@@ -199,14 +199,21 @@ pub(crate) fn queued_prompts(items: &Value) -> Vec<QueuedPrompt> {
 }
 
 /// Frame decoders with no session state of their own: each turns one bridge
-/// frame into the events it announces. They are addressed to this tab by the
-/// request that provoked them, so they carry no session id to check.
-pub(crate) fn workflow_transcript_events(payload: &Value) -> Vec<Event> {
+/// frame into the events it announces.
+///
+/// A read that was asked for before the tab switched conversations answers
+/// after it, so frames about one conversation name it and a frame for any
+/// other than `session_id` is dropped.
+pub(crate) fn workflow_transcript_events(payload: &Value, session_id: &str) -> Vec<Event> {
     let Some(frame) =
         frames::parse::<frames::WorkflowTranscriptFrame>(WORKFLOW_TRANSCRIPT_FRAME, payload)
     else {
         return Vec::new();
     };
+
+    if frame.session_id != session_id {
+        return Vec::new();
+    }
 
     vec![Event::WorkflowAgentTranscript {
         task_id: frame.task_id,
@@ -246,12 +253,18 @@ pub(crate) fn search_events(payload: &Value) -> Vec<Event> {
     ))]
 }
 
-pub(crate) fn fork_checkpoint_events(payload: &Value) -> Vec<Event> {
+/// Forking applies a checkpoint to the conversation on screen, so a list
+/// read from the conversation this tab left must not reach the picker.
+pub(crate) fn fork_checkpoint_events(payload: &Value, session_id: &str) -> Vec<Event> {
     let Some(frame) =
         frames::parse::<frames::ForkCheckpointsFrame>(FORK_CHECKPOINTS_FRAME, payload)
     else {
         return Vec::new();
     };
+
+    if frame.session_id != session_id {
+        return Vec::new();
+    }
 
     vec![Event::ForkCheckpoints(match frame.error {
         Some(message) => Err(message),
@@ -424,13 +437,17 @@ pub(super) fn load_subagent_transcript(
 /// registering there as well.
 pub(super) fn load_workflow_transcript(
     client: ApiClient,
+    session_id: String,
     task_id: String,
     child: String,
     deliver: Arc<dyn Fn(Value) + Send + Sync>,
 ) {
     nmt_runtime::handle().spawn(async move {
         deliver_read(
-            json!({ "type": WORKFLOW_TRANSCRIPT_FRAME, "taskId": task_id, "agentId": child }),
+            json!({
+                "type": WORKFLOW_TRANSCRIPT_FRAME, "sessionId": session_id,
+                "taskId": task_id, "agentId": child,
+            }),
             "page",
             events::snapshot(&client, session_address(&child), REPLAY_MESSAGES).await,
             deliver.as_ref(),
@@ -462,9 +479,12 @@ pub(super) fn load_fork_checkpoints(
         .await;
 
         let payload = match page {
-            Ok(page) => json!({ "type": FORK_CHECKPOINTS_FRAME, "page": page }),
+            Ok(page) => json!({
+                "type": FORK_CHECKPOINTS_FRAME, "sessionId": session_id, "page": page,
+            }),
             Err(error) => json!({
                 "type": FORK_CHECKPOINTS_FRAME,
+                "sessionId": session_id,
                 "error": error.message(),
             }),
         };

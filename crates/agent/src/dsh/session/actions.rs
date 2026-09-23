@@ -101,6 +101,7 @@ impl Session {
     pub fn request_workflow_agent_transcript(&mut self, task_id: &str, agent_id: &str) {
         load_workflow_transcript(
             self.client.clone(),
+            self.session_id.clone(),
             task_id.to_string(),
             agent_id.to_string(),
             Arc::clone(&self.deliver),

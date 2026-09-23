@@ -596,7 +596,9 @@ impl Session {
             Some(SUBAGENTS_FRAME) => return self.on_subagents(payload),
             Some(JOBS_FRAME) => return self.on_jobs(payload),
             Some(SUBAGENT_TRANSCRIPT_FRAME) => return self.on_subagent_transcript(payload),
-            Some(WORKFLOW_TRANSCRIPT_FRAME) => return workflow_transcript_events(payload),
+            Some(WORKFLOW_TRANSCRIPT_FRAME) => {
+                return workflow_transcript_events(payload, &self.session_id);
+            }
             Some(SKILLS_FRAME) => return self.on_skills(payload),
             Some(PRESETS_FRAME) => return self.on_presets(payload),
             Some(COMMANDS_FRAME) => return self.on_commands(payload),
@@ -610,7 +612,9 @@ impl Session {
                 return self.on_queue(payload);
             }
             Some(REPLAY_FRAME) => return self.on_replay(payload),
-            Some(FORK_CHECKPOINTS_FRAME) => return fork_checkpoint_events(payload),
+            Some(FORK_CHECKPOINTS_FRAME) => {
+                return fork_checkpoint_events(payload, &self.session_id);
+            }
             Some(MODELS_FRAME) => return self.on_models(payload),
             _ => {}
         }

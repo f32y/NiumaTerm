@@ -60,7 +60,7 @@ fn failed_background_reads_deliver_results_and_end_pending_discovery() {
                 load_subagent_transcript(api, session, "child".into(), true, send)
             }
             WORKFLOW_TRANSCRIPT_FRAME => {
-                load_workflow_transcript(api, "task".into(), "child".into(), send)
+                load_workflow_transcript(api, session, "task".into(), "child".into(), send)
             }
             MODELS_FRAME => load_models(
                 api,
