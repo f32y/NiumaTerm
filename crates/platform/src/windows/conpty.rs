@@ -7,6 +7,7 @@ use std::future::Future;
 use std::io::{Error, ErrorKind, Result};
 use std::os::windows::ffi::OsStrExt as _;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, IntoRawHandle, OwnedHandle};
+use std::sync::OnceLock;
 use std::time::Duration;
 use std::{env, mem, ptr};
 
@@ -32,15 +33,9 @@ use crate::windows::process::{KillOnCloseJob, ProcessTree};
 use crate::windows::{Pty, command_line, win32_string};
 use crate::{PtyOptions, Winsize};
 
-/// Load the pseudoconsole API from conpty.dll if possible, otherwise use the
-/// standard Windows API.
-///
-/// The conpty.dll from the Windows Terminal project
-/// supports loading OpenConsole.exe, which offers many improvements and
-/// bugfixes compared to the standard conpty that ships with Windows.
-///
-/// The conpty.dll and OpenConsole.exe files will be searched in PATH and in
-/// the directory where the NiumaTerm executable is located.
+/// Pseudoconsole entry points of the bundled Windows Terminal ConPTY. Its
+/// conpty.dll starts OpenConsole.exe, which keeps scrollback intact across a
+/// resize where the in-box system ConPTY repaints the whole buffer.
 type CreatePseudoConsoleFn =
     unsafe extern "system" fn(COORD, HANDLE, HANDLE, u32, *mut HPCON) -> HRESULT;
 
@@ -55,6 +50,19 @@ struct ConptyApi {
 }
 
 impl ConptyApi {
+    /// The API loaded once per process. Every tab shares the same module, so
+    /// loading it per pseudoconsole would only raise the module's refcount.
+    fn get() -> Result<&'static Self> {
+        static API: OnceLock<Option<ConptyApi>> = OnceLock::new();
+
+        API.get_or_init(|| Self::new().ok()).as_ref().ok_or_else(|| {
+            Error::new(
+                ErrorKind::NotFound,
+                "bundled ConPTY failed to load: conpty.dll and OpenConsole.exe must be                  available beside the executable; system ConPTY is not supported",
+            )
+        })
+    }
+
     fn new() -> Result<Self> {
         // The bundled Windows Terminal ConPTY is mandatory: it implements the resize
         // quirk (no full-buffer repaint), so scrollback survives a window resize. The
@@ -135,7 +143,7 @@ impl ConptyApi {
 /// RAII Pseudoconsole.
 pub struct Conpty {
     pub handle: HPCON,
-    api: ConptyApi,
+    api: &'static ConptyApi,
 
     /// Job object holding the shell's process tree (`KILL_ON_JOB_CLOSE`),
     /// present when job management is enabled. Closing the handle on drop
@@ -178,7 +186,7 @@ pub fn new(options: PtyOptions<'_>, job: Option<KillOnCloseJob>) -> Result<Pty> 
         ..
     } = options;
 
-    let api = ConptyApi::new()?;
+    let api = ConptyApi::get()?;
 
     let mut pty_handle: HPCON = 0;
 
@@ -192,22 +200,26 @@ pub fn new(options: PtyOptions<'_>, job: Option<KillOnCloseJob>) -> Result<Pty> 
         ws_ypixel: 0 as c_ushort,
     };
 
-    // Create the Pseudo Console, using the pipes. Prefer Windows Terminal's
-    // OpenConsoleProxy.dll (newer ConPTY) over the in-box one (loaded in
-    // `ConptyApi::new`): its console rewrite no longer repaints the whole buffer
-    // on resize the way the in-box ConPTY does, so the engine's scrollback
-    // survives a window resize (in-box ConPTY clears it — Microsoft bug #3490).
+    // Create the pseudoconsole on the pipes, through the API chosen in
+    // `ConptyApi::load_conpty`.
     let coord: COORD = winsize.into();
 
     let result = unsafe {
         (api.create)(
             coord,
-            conin_pty_handle.into_raw_handle() as HANDLE,
-            conout_pty_handle.into_raw_handle() as HANDLE,
+            conin_pty_handle.as_raw_handle() as HANDLE,
+            conout_pty_handle.as_raw_handle() as HANDLE,
             0,
             &mut pty_handle as *mut _,
         )
     };
+
+    // The console host duplicates both pipe ends it was given. Keeping our
+    // copies open would leak two handles per console and hold the output
+    // pipe's write end in this process, so the reader could never observe the
+    // hangup when the host goes away.
+    drop(conin_pty_handle);
+    drop(conout_pty_handle);
 
     if result != S_OK {
         return Err(Error::other(format!(
