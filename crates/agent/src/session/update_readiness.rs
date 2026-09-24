@@ -10,15 +10,17 @@ pub enum Readiness {
     MissingIdentity,
 }
 
-pub struct ConversationWork {
-    pub approval_open: bool,
-    pub branch_pending: bool,
-    pub compacting: bool,
-    pub empty: bool,
+/// The conversation-side work that keeps a backend from being stopped for an
+/// update, read from the controller that owns it.
+pub(crate) struct ConversationWork {
+    pub(crate) approval_open: bool,
+    pub(crate) branch_pending: bool,
+    pub(crate) compacting: bool,
+    pub(crate) empty: bool,
 }
 
 impl ConversationWork {
-    pub fn readiness(
+    pub(crate) fn readiness(
         &self,
         runtime: &SessionRuntime,
         commands: &CommandQueue,
@@ -46,7 +48,7 @@ impl ConversationWork {
         self.identity(runtime.backend())
     }
 
-    pub fn identity(&self, backend: Option<&Backend>) -> Readiness {
+    pub(crate) fn identity(&self, backend: Option<&Backend>) -> Readiness {
         if self.empty {
             return Readiness::Ready(None);
         }

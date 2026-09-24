@@ -216,7 +216,7 @@ async fn detached_session_retains_output_and_interaction_until_owner_close(
 
     assert_eq!(events.borrow().iter().filter(|event| matches!(event, AgentPaneEvent::Lifecycle(event) if event.kind == AgentEventKind::Stopped)).count(), 1);
 
-    let recovery = cx.update(|_, cx| match host.read(cx).recovery_readiness(cx) {
+    let recovery = cx.update(|_, cx| match host.read(cx).recovery_readiness() {
         RecoveryReadiness::Ready(snapshot) => snapshot,
         _ => panic!("settled retained session is recoverable"),
     });

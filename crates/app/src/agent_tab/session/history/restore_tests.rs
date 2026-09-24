@@ -193,7 +193,7 @@ fn restored_conversation_resumes_once_on_the_first_ready(cx: &mut TestAppContext
     // conversation the tab is about to continue.
     cx.update(|_, cx| {
         assert_eq!(
-            host.read(cx).saved_conversation(cx).as_deref(),
+            host.read(cx).saved_conversation().as_deref(),
             Some("selected")
         );
     });

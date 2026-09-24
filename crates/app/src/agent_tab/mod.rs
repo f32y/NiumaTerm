@@ -3350,7 +3350,7 @@ impl AgentPane {
     pub fn recovery_readiness(&self, cx: &App) -> RecoveryReadiness {
         self.host.upgrade().map_or_else(
             || RecoveryReadiness::Busy("session closed".into()),
-            |host| host.read(cx).recovery_readiness(cx),
+            |host| host.read(cx).recovery_readiness(),
         )
     }
 

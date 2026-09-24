@@ -165,7 +165,7 @@ pub(crate) fn session_state(
                                 agent_settings: session
                                     .remembered_settings()
                                     .map(saved_settings_from_thread),
-                                agent_conversation: session.saved_conversation(cx),
+                                agent_conversation: session.saved_conversation(),
                                 ..TabState::default()
                             }
                         }

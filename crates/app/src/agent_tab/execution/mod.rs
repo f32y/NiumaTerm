@@ -34,7 +34,7 @@ use nmt_agent::session::input::{QuestionAction, Submission};
 use nmt_agent::session::lifecycle::{RecoverySnapshot, StartOutcome};
 use nmt_agent::session::restore::{ReplayLoaded, ReplayRead, ResumeStart, SettingsSeed};
 use nmt_agent::session::team_capabilities::TeamLaunch;
-use nmt_agent::session::update_readiness::{ConversationWork, Readiness};
+use nmt_agent::session::update_readiness::Readiness;
 use nmt_agent::session::workflows::RefreshPlan;
 use nmt_agent::session::{Backend, RecoveryIdentity, TranscriptLoad};
 use nmt_agent::update::InstallationKey;
@@ -337,6 +337,8 @@ impl AgentSession {
 
     pub fn remember_settings(&mut self, settings: ThreadSettings) {
         self.remembered = Some(settings);
+
+        self.sync_ready_defaults();
     }
 
     /// Continue the conversation `summary` lists once this session reports
@@ -361,10 +363,8 @@ impl AgentSession {
     /// The conversation a restore of this tab should continue: the live one
     /// once it has content, otherwise a restored one whose resume has not
     /// replayed yet.
-    pub fn saved_conversation(&self, cx: &App) -> Option<String> {
-        let live = self
-            .update_work(cx)
-            .identity(self.controller.borrow().runtime().backend());
+    pub fn saved_conversation(&self) -> Option<String> {
+        let live = self.controller.borrow().recovery_identity();
 
         match live {
             Readiness::Ready(Some(identity)) => Some(identity.id),
@@ -678,8 +678,6 @@ impl AgentSession {
             return;
         }
 
-        self.prepare_defaults();
-
         let event = match event {
             Event::HostExited { message } => {
                 self.controller
@@ -941,44 +939,12 @@ impl AgentSession {
         Some(InstallationKey::derive(provider, &launcher).key)
     }
 
-    /// Assess both quiescence and recoverability before any related backend
-    /// is stopped. A blank tab needs no provider identity because restarting
-    /// it as another blank conversation loses no conversation state.
-    fn update_work(&self, _cx: &App) -> ConversationWork {
-        ConversationWork {
-            approval_open: self.controller.borrow().input().approval().is_some(),
-            branch_pending: self.controller.borrow().branch().holds_composer(),
-            compacting: self
-                .controller
-                .borrow()
-                .conversation()
-                .borrow()
-                .live
-                .is_compacting(),
-            empty: self
-                .controller
-                .borrow()
-                .conversation()
-                .borrow()
-                .content
-                .entries()
-                .is_empty(),
-        }
+    pub fn recovery_readiness(&self) -> RecoveryReadiness {
+        self.present_readiness(self.controller.borrow().update_readiness())
     }
 
-    pub fn recovery_readiness(&self, cx: &App) -> RecoveryReadiness {
-        self.present_readiness(
-            self.controller
-                .borrow()
-                .update_readiness(self.update_work(cx)),
-        )
-    }
-
-    pub fn recovery_identity_snapshot(&self, cx: &App) -> RecoveryReadiness {
-        self.present_readiness(
-            self.update_work(cx)
-                .identity(self.controller.borrow().runtime().backend()),
-        )
+    pub fn recovery_identity_snapshot(&self) -> RecoveryReadiness {
+        self.present_readiness(self.controller.borrow().recovery_identity())
     }
 
     fn present_readiness(&self, readiness: Readiness) -> RecoveryReadiness {
@@ -1316,7 +1282,7 @@ impl AgentSession {
 
         cx.emit(AgentPaneEvent::Interrupted);
 
-        self.prepare_defaults();
+        self.sync_ready_defaults();
 
         let workspace = self.active_workspace.clone();
 
@@ -1501,23 +1467,16 @@ impl AgentSession {
         });
     }
 
-    pub(crate) fn prepare_defaults(&self) {
-        let seed = self.controller.borrow().controls.seed;
-
-        let defaults = match seed {
-            SettingsSeed::Defaults => ReadyDefaults {
+    /// Hand the controller this tab's settings, which change only when the
+    /// tab starts or the user leaves it set to something else.
+    fn sync_ready_defaults(&self) {
+        self.controller
+            .borrow_mut()
+            .set_ready_defaults(ReadyDefaults {
                 stored: self.remembered.clone(),
                 model: launch_model(self.kind, &self.profile),
                 effort: launch_effort(&self.profile),
-            },
-            SettingsSeed::Reviewer => ReadyDefaults {
-                stored: self.remembered.clone(),
-                ..ReadyDefaults::default()
-            },
-            SettingsSeed::None => ReadyDefaults::default(),
-        };
-
-        self.controller.borrow_mut().set_ready_defaults(defaults);
+            });
     }
 
     pub(crate) fn install(

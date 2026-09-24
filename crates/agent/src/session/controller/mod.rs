@@ -59,6 +59,10 @@ pub enum SubmissionBlock {
     CommandStarting,
 }
 
+/// The host's settings a conversation may start from: what the tab was last
+/// left set to and its launch profile's model and effort. Which of them apply
+/// is the controller's own decision, made from its settings seed when the
+/// session reports ready.
 #[derive(Clone, Default)]
 pub struct ReadyDefaults {
     pub stored: Option<ThreadSettings>,
@@ -683,8 +687,29 @@ impl SessionController {
         Some((source, session_id, request))
     }
 
-    pub fn update_readiness(&self, work: ConversationWork) -> Readiness {
-        work.readiness(&self.runtime, &self.commands, &self.delivery)
+    /// Whether the backend can be stopped for an update now, and what a
+    /// restart would resume.
+    pub fn update_readiness(&self) -> Readiness {
+        self.work()
+            .readiness(&self.runtime, &self.commands, &self.delivery)
+    }
+
+    /// What a restart would resume, whatever work is running. A blank tab
+    /// needs no provider identity, because restarting it as another blank
+    /// conversation loses nothing.
+    pub fn recovery_identity(&self) -> Readiness {
+        self.work().identity(self.runtime.backend())
+    }
+
+    fn work(&self) -> ConversationWork {
+        let conversation = self.conversation.borrow();
+
+        ConversationWork {
+            approval_open: self.input.approval().is_some(),
+            branch_pending: self.branch.holds_composer(),
+            compacting: conversation.live.is_compacting(),
+            empty: conversation.content.entries().is_empty(),
+        }
     }
 
     pub fn prepare_update_stop(&mut self) {
@@ -1305,14 +1330,27 @@ impl SessionController {
     fn finish_ready(&mut self, settings: ThreadSettings) -> Option<SettingsOutcome> {
         self.input.restore(&mut self.runtime);
 
-        let defaults = self.ready_defaults.clone();
+        let defaults = &self.ready_defaults;
+
+        // A reviewer keeps the tab's own settings but not the launch profile's
+        // model and effort; a resumed or branched conversation keeps what the
+        // provider restored.
+        let (stored, model, effort) = match self.controls.seed {
+            SettingsSeed::Defaults => (
+                defaults.stored.clone(),
+                defaults.model.clone(),
+                defaults.effort.clone(),
+            ),
+            SettingsSeed::Reviewer => (defaults.stored.clone(), None, None),
+            SettingsSeed::None => (None, None, None),
+        };
 
         self.controls.ready(
             self.kind,
             settings,
-            defaults.stored.as_ref(),
-            defaults.model.as_deref(),
-            defaults.effort.as_deref(),
+            stored.as_ref(),
+            model.as_deref(),
+            effort.as_deref(),
         );
 
         let selection = self

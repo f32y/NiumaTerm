@@ -54,7 +54,7 @@ pub(crate) fn request_update(key: InstallationKey, window: &mut Window, cx: &mut
         .iter()
         .filter(|session| {
             matches!(
-                session.read(cx).recovery_readiness(cx),
+                session.read(cx).recovery_readiness(),
                 RecoveryReadiness::Busy(_)
             )
         })
@@ -226,7 +226,7 @@ impl UpdateEnvironment for SessionUpdateEnvironment<'_> {
     fn identity_failure(&mut self) -> Option<String> {
         self.cx.update(|cx| {
             self.sessions.iter().find_map(|session| {
-                match session.read(cx).recovery_identity_snapshot(cx) {
+                match session.read(cx).recovery_identity_snapshot() {
                     RecoveryReadiness::MissingIdentity(message) => Some(message),
                     _ => None,
                 }
@@ -249,7 +249,7 @@ impl UpdateEnvironment for SessionUpdateEnvironment<'_> {
         self.cx.update(|cx| {
             self.sessions
                 .iter()
-                .map(|session| session.read(cx).recovery_readiness(cx))
+                .map(|session| session.read(cx).recovery_readiness())
                 .collect()
         })
     }
