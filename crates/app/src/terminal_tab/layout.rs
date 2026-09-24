@@ -24,45 +24,23 @@ pub(super) fn frame_content_rows(frame: &TerminalFrame) -> usize {
     content_end.min(lines.len())
 }
 
-pub(super) fn bottom_anchor_offsets(
-    frame: &TerminalFrame,
-    cell_height: f32,
-    fixed_bottom: bool,
-) -> Vec<f32> {
+/// The pixel gap above the grid that pins content to the floor in the
+/// fixed-bottom input style: the blank rows below the content, as a height.
+/// Zero in the waterfall style, where the grid starts at the top.
+pub(super) fn bottom_slack(frame: &TerminalFrame, cell_height: f32, fixed_bottom: bool) -> f32 {
     if !fixed_bottom {
-        return Vec::new();
+        return 0.0;
     }
 
     let rows = frame.lines().len();
 
-    let slack = rows.saturating_sub(frame_content_rows(frame)) as f32 * cell_height;
-
-    if slack > 0.0 {
-        vec![slack; rows]
-    } else {
-        Vec::new()
-    }
+    rows.saturating_sub(frame_content_rows(frame)) as f32 * cell_height
 }
 
-/// The pixel y-offset for a viewport row (0 with no gaps / out of range).
-pub(super) fn row_y_offset(offsets: &[f32], row: usize) -> f32 {
-    offsets.get(row).copied().unwrap_or(0.0)
-}
-
-/// Inverse of the offset mapping: the viewport row under a content-relative
-/// pixel y. A pointer inside the gap above a block maps to the block's first row.
-pub(super) fn terminal_row_at_y(y: f32, cell_height: f32, offsets: &[f32]) -> u16 {
-    if offsets.is_empty() {
-        return (y / cell_height).floor().max(0.0) as u16;
-    }
-
-    for (row, off) in offsets.iter().enumerate() {
-        if y < (row as f32 + 1.0) * cell_height + off {
-            return row as u16;
-        }
-    }
-
-    offsets.len().saturating_sub(1) as u16
+/// Inverse of the slack mapping: the viewport row under a content-relative
+/// pixel y. A pointer inside the gap above the grid maps to its first row.
+pub(super) fn terminal_row_at_y(y: f32, cell_height: f32, slack: f32) -> u16 {
+    ((y - slack).max(0.0) / cell_height).floor() as u16
 }
 
 /// First `max` chars of the command for the header label.
@@ -78,14 +56,14 @@ pub(super) fn truncate_command(command: &str, max: usize) -> String {
 
 #[cfg(test)]
 #[test]
-fn bottom_anchor_offsets_pin_content_to_the_floor() {
+fn bottom_slack_pins_content_to_the_floor() {
     use nmt_terminal::render_buffer::RenderBuffer;
 
     let frame = TerminalFrame::from_render_buffer(&RenderBuffer::new(80, 3));
 
-    assert_eq!(
-        bottom_anchor_offsets(&frame, 10.0, false),
-        Vec::<f32>::new()
-    );
-    assert_eq!(bottom_anchor_offsets(&frame, 10.0, true), [30.0; 3]);
+    assert_eq!(bottom_slack(&frame, 10.0, false), 0.0);
+    assert_eq!(bottom_slack(&frame, 10.0, true), 30.0);
+    assert_eq!(terminal_row_at_y(5.0, 10.0, 30.0), 0);
+    assert_eq!(terminal_row_at_y(45.0, 10.0, 30.0), 1);
+    assert_eq!(terminal_row_at_y(45.0, 10.0, 0.0), 4);
 }

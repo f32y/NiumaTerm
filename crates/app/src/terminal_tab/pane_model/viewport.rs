@@ -1,9 +1,7 @@
-use std::sync::Arc;
-
 use nmt_terminal::ghostty::ScrollbarInfo;
 use nmt_terminal::session::{SurfaceCell, SurfaceCellSide};
 
-use crate::terminal_tab::layout::{row_y_offset, terminal_row_at_y};
+use crate::terminal_tab::layout::terminal_row_at_y;
 use crate::terminal_tab::metrics::CellMetrics;
 use crate::terminal_tab::scrollbar::geometry::scrollbar_offset_for_thumb;
 
@@ -23,7 +21,7 @@ pub(crate) struct LocalRect {
 pub(crate) enum Viewport {
     Grid {
         scrollbar: ScrollbarInfo,
-        row_offsets: Arc<[f32]>,
+        bottom_slack: f32,
     },
     BlockList {
         scroll_px: f32,
@@ -37,16 +35,16 @@ impl Default for Viewport {
     fn default() -> Self {
         Self::Grid {
             scrollbar: ScrollbarInfo::default(),
-            row_offsets: Arc::default(),
+            bottom_slack: 0.0,
         }
     }
 }
 
 impl Viewport {
-    pub(crate) fn row_offsets(&self) -> Arc<[f32]> {
+    pub(crate) fn bottom_slack(&self) -> f32 {
         match self {
-            Self::Grid { row_offsets, .. } => row_offsets.clone(),
-            Self::BlockList { .. } => Arc::default(),
+            Self::Grid { bottom_slack, .. } => *bottom_slack,
+            Self::BlockList { .. } => 0.0,
         }
     }
 
@@ -103,13 +101,13 @@ impl Viewport {
     ) -> (SurfaceCell, SurfaceCellSide) {
         let x = local.x.max(0.0);
 
-        let (y, offsets) = match self {
-            Self::Grid { row_offsets, .. } => (local.y.max(0.0), row_offsets.as_ref()),
-            Self::BlockList { active_top, .. } => ((local.y - active_top).max(0.0), &[][..]),
+        let (y, slack) = match self {
+            Self::Grid { bottom_slack, .. } => (local.y.max(0.0), *bottom_slack),
+            Self::BlockList { active_top, .. } => ((local.y - active_top).max(0.0), 0.0),
         };
 
         let col = (x / cell.width_px).floor() as u16;
-        let row = terminal_row_at_y(y, cell.height_px, offsets);
+        let row = terminal_row_at_y(y, cell.height_px, slack);
 
         let side = if x - col as f32 * cell.width_px < cell.width_px / 2.0 {
             SurfaceCellSide::Left
@@ -122,7 +120,7 @@ impl Viewport {
 
     pub(crate) fn cursor_y(&self, row: u16, cell_h: f32) -> f32 {
         let offset = match self {
-            Self::Grid { row_offsets, .. } => row_y_offset(row_offsets, row as usize),
+            Self::Grid { bottom_slack, .. } => *bottom_slack,
             Self::BlockList { active_top, .. } => *active_top,
         };
 

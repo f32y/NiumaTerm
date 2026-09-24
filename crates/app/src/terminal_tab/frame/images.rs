@@ -68,19 +68,10 @@ pub(super) fn empty_images() -> Arc<[FrameImage]> {
 }
 
 impl FrameImage {
-    /// The image's top viewport row, for computing its row displacement (fixed-bottom
-    /// / block-list) before geometry.
-    pub(crate) fn top_row(&self) -> i32 {
-        match self.kind {
-            FrameImageKind::Ordinary { viewport_row, .. } => viewport_row,
-            FrameImageKind::Virtual { screen_line, .. } => screen_line as i32,
-        }
-    }
-
     /// Pixel destination rectangle `[x, y, w, h]` and normalized source rectangle
     /// `[u0, v0, u1, v1]` for painting this image. `origin_x`/`origin_y` are
-    /// the terminal grid's top-left; `row_offset` is the extra y displacement for this
-    /// image's top row (`top_row`). Ordinary placements map viewport cells + sub-cell
+    /// the terminal grid's top-left; `row_offset` is the y displacement the grid
+    /// itself has, the fixed-bottom slack. Ordinary placements map viewport cells + sub-cell
     /// offsets directly; virtual runs go through `compute_run_geometry` (aspect-fit).
     /// Returns `None` for degenerate geometry (paint skips it).
     pub(crate) fn destination(

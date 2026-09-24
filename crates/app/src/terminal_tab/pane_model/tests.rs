@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use futures::executor::block_on;
 use nmt_config::appearance::InputStyle;
 use nmt_input::keyboard::ModifiersState;
@@ -288,13 +286,11 @@ fn pending_repaint_retains_shared_grid_coordinates_and_coalesces_wakes() {
     model.update_viewport();
 
     let cell = model.cell_metrics.unwrap();
-    let offsets = model.viewport.row_offsets();
 
-    assert_eq!(offsets.as_ref(), &[90.0; 6]);
+    assert_eq!(model.viewport.bottom_slack(), 90.0);
     assert!(model.invalidate());
     assert!(!model.invalidate());
-    assert!(Arc::ptr_eq(&offsets, &model.viewport.row_offsets()));
-    assert_eq!(model.viewport.cursor_y(0, cell.height_px), offsets[0]);
+    assert_eq!(model.viewport.cursor_y(0, cell.height_px), 90.0);
     assert_eq!(
         model
             .viewport
@@ -306,7 +302,7 @@ fn pending_repaint_retains_shared_grid_coordinates_and_coalesces_wakes() {
 
     model.begin_frame();
 
-    assert_eq!(model.viewport.row_offsets(), offsets);
+    assert_eq!(model.viewport.bottom_slack(), 90.0);
     assert!(model.invalidate());
 }
 
@@ -385,7 +381,7 @@ fn both_viewports_map_pointer_cursor_and_thumb_consistently() {
                 offset: 10,
                 len: 20,
             },
-            row_offsets: vec![36.0; 4].into(),
+            bottom_slack: 36.0,
         },
         Viewport::BlockList {
             scroll_px: 10.0,

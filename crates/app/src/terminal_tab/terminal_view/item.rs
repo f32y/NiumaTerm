@@ -268,7 +268,7 @@ impl Element for BlockListItem {
                     frame,
                     active_shaped.as_slice(),
                     *cell,
-                    &[],
+                    0.0,
                     window,
                     cx,
                 );

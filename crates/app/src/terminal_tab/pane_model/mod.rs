@@ -41,7 +41,7 @@ use crate::terminal_tab::block_list::{
 use crate::terminal_tab::dirty::DirtyState;
 use crate::terminal_tab::frame::TerminalFrame;
 use crate::terminal_tab::frame_source::TerminalFrameSource;
-use crate::terminal_tab::layout::{bottom_anchor_offsets, frame_content_rows};
+use crate::terminal_tab::layout::{bottom_slack, frame_content_rows};
 use crate::terminal_tab::metrics::CellMetrics;
 use crate::terminal_tab::pane_model::blocks::ListPlan;
 use crate::terminal_tab::pane_model::frame_cache::TerminalFrameCache;
@@ -168,12 +168,9 @@ impl PaneController {
 
             Viewport::Grid {
                 scrollbar: frame.scrollbar(),
-                row_offsets: self
-                    .cell_metrics
-                    .map_or_else(Vec::new, |cell| {
-                        bottom_anchor_offsets(&frame, cell.height_px, self.settings.fixed_bottom())
-                    })
-                    .into(),
+                bottom_slack: self.cell_metrics.map_or(0.0, |cell| {
+                    bottom_slack(&frame, cell.height_px, self.settings.fixed_bottom())
+                }),
             }
         };
     }

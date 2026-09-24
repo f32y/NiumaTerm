@@ -8,7 +8,6 @@ use nmt_config::CursorShape;
 use tracing::error;
 
 use crate::terminal_tab::frame::{TerminalCursor, TerminalFrame};
-use crate::terminal_tab::layout::row_y_offset;
 use crate::terminal_tab::paint::text::{paint_glyph_rows, paint_line_backgrounds_at, shape_lines};
 use crate::terminal_tab::{block_list, frame, graphics, metrics};
 
@@ -37,52 +36,43 @@ pub(crate) fn paint_frame(
     frame: &TerminalFrame,
     lines: &[ShapedLine],
     cell: metrics::CellMetrics,
-    offsets: &[f32],
+    slack: f32,
     window: &mut Window,
     cx: &mut App,
 ) {
     use crate::terminal_tab::frame::ZLayer;
 
     // Kitty images below cell backgrounds (z < i32::MIN/2).
-    paint_frame_images(
-        bounds,
-        frame,
-        ZLayer::BelowBackground,
-        cell,
-        offsets,
-        window,
-    );
+    paint_frame_images(bounds, frame, ZLayer::BelowBackground, cell, slack, window);
 
     for (row, line) in frame.lines().iter().take(lines.len()).enumerate() {
         paint_line_backgrounds_at(
             bounds,
             line,
-            row as f32 * cell.height_px + row_y_offset(offsets, row),
+            row as f32 * cell.height_px + slack,
             cell,
             window,
         );
     }
 
     // Kitty images above backgrounds, below cursor/text (i32::MIN/2 <= z < 0).
-    paint_frame_images(bounds, frame, ZLayer::BelowText, cell, offsets, window);
+    paint_frame_images(bounds, frame, ZLayer::BelowText, cell, slack, window);
 
-    paint_cursor(bounds, frame.cursor(), cell, offsets, window);
+    paint_cursor(bounds, frame.cursor(), cell, slack, window);
 
     paint_glyph_rows(
         bounds,
-        lines.iter().enumerate().map(|(row, line)| {
-            (
-                row as f32 * cell.height_px + row_y_offset(offsets, row),
-                line,
-            )
-        }),
+        lines
+            .iter()
+            .enumerate()
+            .map(|(row, line)| (row as f32 * cell.height_px + slack, line)),
         cell.height_px,
         window,
         cx,
     );
 
     // Kitty images above cursor/text (z >= 0).
-    paint_frame_images(bounds, frame, ZLayer::AboveText, cell, offsets, window);
+    paint_frame_images(bounds, frame, ZLayer::AboveText, cell, slack, window);
 }
 
 /// Paint the frame's Kitty images whose z-index falls in `layer`, in engine order (no
@@ -95,7 +85,7 @@ fn paint_frame_images(
     frame: &TerminalFrame,
     layer: frame::ZLayer,
     cell: metrics::CellMetrics,
-    offsets: &[f32],
+    slack: f32,
     window: &mut Window,
 ) {
     let images = frame.images();
@@ -109,20 +99,15 @@ fn paint_frame_images(
             continue;
         }
 
-        let top = img.top_row();
-
-        let row_offset = if top >= 0 {
-            row_y_offset(offsets, top as usize)
-        } else {
-            0.0
-        };
+        // The slack moves the whole grid, so an image whose top row scrolled
+        // above the screen shifts with the rows still visible.
 
         let Some((dest, source)) = img.destination(
             cell.width_px,
             cell.height_px,
             bounds.left().into(),
             bounds.top().into(),
-            row_offset,
+            slack,
         ) else {
             continue;
         };
@@ -224,16 +209,14 @@ fn paint_cursor(
     bounds: Bounds<Pixels>,
     cursor: Option<TerminalCursor>,
     cell: metrics::CellMetrics,
-    offsets: &[f32],
+    slack: f32,
     window: &mut Window,
 ) {
     let Some(cursor) = cursor else {
         return;
     };
 
-    let y_offset = row_y_offset(offsets, cursor.row as usize);
-
-    let Some(bounds) = cursor_bounds(bounds, cursor, cell, y_offset) else {
+    let Some(bounds) = cursor_bounds(bounds, cursor, cell, slack) else {
         return;
     };
 
