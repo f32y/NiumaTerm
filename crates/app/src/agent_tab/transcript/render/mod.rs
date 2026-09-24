@@ -8,6 +8,7 @@ pub(super) mod compaction_row;
 pub(super) mod image_preview;
 pub(super) mod menus;
 pub(super) mod message_rows;
+pub(super) mod side_boundary_row;
 pub(super) mod task_list_row;
 pub(super) mod text_style;
 pub(super) mod user_row;

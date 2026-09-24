@@ -13,6 +13,10 @@ pub(super) enum QueryKind {
     Checkpoints,
     Fork,
     Goal(u64),
+    /// The fork that opens a side conversation.
+    SideFork,
+    /// The boundary written into a side conversation before it is ready.
+    SideBoundary,
 }
 
 impl QueryKind {

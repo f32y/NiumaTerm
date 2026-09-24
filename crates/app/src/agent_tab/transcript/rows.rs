@@ -269,6 +269,11 @@ pub(crate) fn entry_fingerprint(
             tasks.items.len(),
             tasks.tally().map_or(0, |(done, _)| u64::from(done)),
         ),
+        SessionItem::SideBoundary {
+            instructions,
+            message,
+            ..
+        } => (instructions.len() + message.len(), 0, 0),
     };
 
     (content_len as u64)

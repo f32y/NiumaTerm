@@ -289,6 +289,7 @@ impl RowSource<'_> {
         match &entry.item {
             SessionItem::Error { .. }
             | SessionItem::Compaction { .. }
+            | SessionItem::SideBoundary { .. }
             | SessionItem::UserMessage { .. } => true,
             SessionItem::AgentMessage {
                 questions: Some(_), ..

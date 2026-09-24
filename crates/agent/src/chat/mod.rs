@@ -134,6 +134,16 @@ pub enum Item {
         id: String,
         tasks: TaskList,
     },
+    /// What the client wrote into the model's history when it forked a side
+    /// conversation: the developer instructions the fork carries and the
+    /// message marking where the inherited history ends. Neither was typed
+    /// by the user, and both steer every answer that follows, so the
+    /// transcript shows them rather than leaving them invisible.
+    SideBoundary {
+        id: String,
+        instructions: String,
+        message: String,
+    },
 }
 
 impl Item {
@@ -147,7 +157,8 @@ impl Item {
             | Self::FileChange { id, .. }
             | Self::Compaction { id, .. }
             | Self::Other { id, .. }
-            | Self::TaskList { id, .. } => Some(id),
+            | Self::TaskList { id, .. }
+            | Self::SideBoundary { id, .. } => Some(id),
             Self::UserMessage { .. } | Self::Error { .. } => None,
         }
     }

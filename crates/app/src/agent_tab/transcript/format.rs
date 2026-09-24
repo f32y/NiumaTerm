@@ -352,6 +352,11 @@ pub(crate) fn entry_copy_text(item: &SessionItem) -> String {
             }
         }
         SessionItem::TaskList { tasks, .. } => task_list_text(tasks),
+        SessionItem::SideBoundary {
+            instructions,
+            message,
+            ..
+        } => format!("{instructions}\n\n{message}"),
     }
 }
 

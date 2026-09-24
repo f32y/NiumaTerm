@@ -915,6 +915,35 @@ impl Backend {
         }
     }
 
+    /// Open a side conversation forked from `side`'s parent thread. Only
+    /// Codex can fork a live thread into a separate ephemeral one; Claude
+    /// answers side questions inside its own session instead.
+    pub async fn spawn_side(
+        kind: AgentKind,
+        launch: &LaunchConfig,
+        host_catalog: &[LaunchConfig],
+        workspace: &AgentWorkspace,
+        side: app_server::SideStart,
+        deliver: impl Fn(Value) + Send + Sync + 'static,
+    ) -> Result<Self, String> {
+        match kind {
+            AgentKind::Codex => app_server::Session::spawn_side(
+                launch,
+                host_catalog,
+                workspace,
+                side,
+                deliver,
+                |line| trace!("codex app-server: {line}"),
+            )
+            .await
+            .map(Self::Codex),
+            AgentKind::Claude | AgentKind::DeepSeek => Err(format!(
+                "{} cannot open a side chat thread.",
+                kind.display()
+            )),
+        }
+    }
+
     pub async fn spawn_team(
         kind: AgentKind,
         launch: &LaunchConfig,

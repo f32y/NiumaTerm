@@ -26,6 +26,7 @@ use nmt_agent::chat::{
     Event, Item, QuestionMode, SessionSummary, SlashCommandOutcome, TeamDecisionRequest,
     ThreadSettings,
 };
+use nmt_agent::codex::app_server::SideStart;
 use nmt_agent::launcher::AgentCli;
 use nmt_agent::session::branch::{BranchUpdate, CheckpointRead};
 use nmt_agent::session::capabilities::AgentCapabilities as _;
@@ -121,6 +122,11 @@ pub struct AgentSession {
     binding_generation: Rc<Cell<u64>>,
     pub(super) team_launch: Option<TeamLaunch>,
 
+    /// The parent a side chat session forks from. Every start of such a
+    /// session forks it again, because the fork it held is ephemeral and
+    /// cannot be resumed.
+    side_launch: Option<SideStart>,
+
     /// Whether the side chat had content when last reported, so the chrome
     /// hears only when it appears or goes away.
     side_chat_open: Cell<bool>,
@@ -195,7 +201,11 @@ impl SessionOwner {
     pub fn start(&self, recovery: Option<RecoveryIdentity>, cx: &mut App) {
         self.session.update(cx, |session, cx| {
             if session.controller.borrow().runtime().epoch() == 0 {
-                session.start(recovery, false, |_, _| {}, cx);
+                // A side chat starts on the settings its parent was using,
+                // which were written into its controls before the start.
+                let preserve_settings = session.side_launch.is_some();
+
+                session.start(recovery, preserve_settings, |_, _| {}, cx);
             }
         });
     }
@@ -253,6 +263,35 @@ impl AgentSession {
         Self::create(profile, workspace, Some(policy), cx)
     }
 
+    /// A session that opens as a side chat of the conversation `side`
+    /// names, starting on the parent's `settings`. Every turn carries the
+    /// full settings, so this is also what makes it inherit the parent's
+    /// approval and sandbox policy. It is never named: its thread is
+    /// ephemeral, and a name could neither be stored nor listed.
+    pub(crate) fn create_side(
+        profile: AgentProfile,
+        workspace: AgentWorkspace,
+        side: SideStart,
+        settings: ThreadSettings,
+        cx: &mut App,
+    ) -> SessionOwner {
+        let owner = Self::create(profile, workspace, None, cx);
+
+        owner
+            .session
+            .update(cx, |session, _| session.side_launch = Some(side));
+
+        let mut controller = owner.controller.borrow_mut();
+
+        controller.controls.settings = settings;
+
+        controller.claim_title();
+
+        drop(controller);
+
+        owner
+    }
+
     pub fn create(
         profile: AgentProfile,
         workspace: AgentWorkspace,
@@ -282,6 +321,7 @@ impl AgentSession {
             closed: closed.clone(),
             binding_generation: binding_generation.clone(),
             team_launch,
+            side_launch: None,
             side_chat_open: Cell::new(false),
         });
 
@@ -1334,8 +1374,22 @@ impl AgentSession {
             policy
         });
 
+        let side_launch = self.side_launch.clone();
+
         let spawned = cx.spawn(async move |_, _| {
             on_runtime(async move {
+                if let Some(side) = side_launch {
+                    return Backend::spawn_side(
+                        kind,
+                        &launch,
+                        &catalog,
+                        &workspace,
+                        side,
+                        move |message| sender.send(message),
+                    )
+                    .await;
+                }
+
                 if let Some(policy) = team_launch {
                     return Backend::spawn_team(
                         kind,

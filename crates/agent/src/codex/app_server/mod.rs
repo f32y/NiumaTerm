@@ -15,6 +15,7 @@ pub use crate::chat::{
     SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
     TokenUsageBreakdown,
 };
+pub use crate::codex::app_server::side::SideStart;
 
 pub(crate) use crate::codex::app_server::title_generation::provisional_title_from_prompt;
 
@@ -26,6 +27,7 @@ mod host;
 mod progress;
 mod protocol;
 mod questions;
+mod side;
 mod skills;
 mod team;
 mod title_generation;
@@ -67,6 +69,9 @@ use crate::codex::app_server::protocol::{
 };
 use crate::codex::app_server::questions::{
     on_question_request, on_question_response, respond_input, restore_question_requests,
+};
+use crate::codex::app_server::side::{
+    side_boundary_item, side_boundary_request, side_fork_request,
 };
 #[cfg(test)]
 use crate::codex::app_server::skills::parse_skill_catalog;
@@ -157,6 +162,14 @@ pub struct Session {
     background: CodexTasks,
 
     team: Option<TeamState>,
+
+    /// The parent this session forks from when it is a side conversation.
+    side: Option<Box<SideStart>>,
+
+    /// A side conversation's settings from its fork reply, held until the
+    /// boundary is written: a question sent before the boundary would be
+    /// read as a continuation of the parent's inherited task.
+    side_ready: Option<Box<ThreadSettings>>,
 }
 
 #[derive(Default)]
@@ -164,6 +177,7 @@ struct ConversationStart {
     resume: Option<String>,
     suppress_replay: bool,
     team: Option<TeamLaunch>,
+    side: Option<SideStart>,
 }
 
 impl Session {
@@ -207,6 +221,14 @@ impl Session {
                 name: "goal".into(),
                 description: "Set, inspect, pause, resume, or clear a persistent goal".into(),
                 argument_hint: Some("[objective|pause|resume|clear]".into()),
+                source: SlashCommandSource::Adapter,
+                arguments: SlashCommandArguments::Freeform,
+                run_policy: SlashCommandRunPolicy::Immediate,
+            },
+            SlashCommandInfo {
+                name: "side".into(),
+                description: "Open a side chat forked from this conversation".into(),
+                argument_hint: Some("[question]".into()),
                 source: SlashCommandSource::Adapter,
                 arguments: SlashCommandArguments::Freeform,
                 run_policy: SlashCommandRunPolicy::Immediate,
@@ -269,6 +291,33 @@ impl Session {
                 resume: Some(thread_id),
                 suppress_replay,
                 team: None,
+                side: None,
+            },
+            deliver,
+            on_stderr,
+        )
+        .await
+    }
+
+    /// Open a side conversation: an ephemeral fork of `side`'s parent
+    /// thread under its own registration on the shared host. The parent
+    /// keeps its thread, routes, and running turn; the fork inherits its
+    /// model context up to the moment the server takes the snapshot.
+    pub async fn spawn_side(
+        launch: &LaunchConfig,
+        host_catalog: &[LaunchConfig],
+        workspace: &AgentWorkspace,
+        side: SideStart,
+        deliver: impl Fn(Value) + Send + Sync + 'static,
+        on_stderr: impl Fn(String) + Send + 'static,
+    ) -> Result<Self, String> {
+        Self::spawn_inner(
+            launch,
+            host_catalog,
+            workspace,
+            ConversationStart {
+                side: Some(side),
+                ..ConversationStart::default()
             },
             deliver,
             on_stderr,
@@ -308,6 +357,8 @@ impl Session {
             suppress_resume_replay: start.suppress_replay,
             background: CodexTasks::default(),
             team: start.team.map(TeamState::new),
+            side: start.side.map(Box::new),
+            side_ready: None,
         };
 
         session.request_skills(false);
@@ -786,6 +837,17 @@ impl Session {
         true
     }
 
+    fn request_models(&mut self) {
+        self.send_query(
+            QueryKind::Models,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "model/list",
+                "params": {"limit": 100},
+            }),
+        );
+    }
+
     fn alloc_rpc_id(&mut self) -> u64 {
         self.control.alloc_id()
     }
@@ -1028,14 +1090,7 @@ impl Session {
 
                 self.request_goal();
 
-                self.send_query(
-                    QueryKind::Models,
-                    json!({
-                        "jsonrpc": "2.0",
-                        "method": "model/list",
-                        "params": {"limit": 100},
-                    }),
-                );
+                self.request_models();
 
                 // History for the empty-tab session list, over whatever scope
                 // the tab last asked for.
@@ -1044,6 +1099,49 @@ impl Session {
                 self.start_descendant_discovery();
 
                 self.finish_team_start(vec![Event::Ready(parse_thread_settings(result))])
+            }
+            // A side conversation is ready only once its boundary is in the
+            // model history, so the fork reply writes it and waits. It lists
+            // no history and discovers no descendants: it is kept out of the
+            // history list and may not use sub-agents.
+            Some(QueryKind::SideFork) => {
+                let result = &message["result"];
+
+                let Some(thread_id) = result["thread"]["id"].as_str().map(str::to_owned) else {
+                    return vec![Event::Error {
+                        message: "Could not start the side chat: the fork named no thread.".into(),
+                        fatal: true,
+                    }];
+                };
+
+                self.conversation.thread_id = Some(thread_id.clone());
+
+                self.side_ready = Some(Box::new(parse_thread_settings(result)));
+
+                self.send_query(QueryKind::SideBoundary, side_boundary_request(&thread_id));
+
+                Vec::new()
+            }
+            Some(QueryKind::SideBoundary) => {
+                self.request_goal();
+
+                self.request_models();
+
+                let boundary = self.thread_id().map(side_boundary_item);
+
+                let ready = Event::Ready(
+                    self.side_ready
+                        .take()
+                        .map(|settings| *settings)
+                        .unwrap_or_default(),
+                );
+
+                // The boundary lands after Ready so it opens the side
+                // transcript, above the first question.
+                [ready]
+                    .into_iter()
+                    .chain(boundary.map(Event::ItemStarted))
+                    .collect()
             }
             Some(QueryKind::Models) => {
                 let models = if self.thread_profile.provider.is_some() {
@@ -1179,13 +1277,21 @@ impl Session {
             // A refused branch leaves the session on the thread it was
             // already holding, so the conversation stays usable.
             Some(QueryKind::Fork) => format!("Could not branch this conversation: {error}"),
+            Some(QueryKind::SideFork | QueryKind::SideBoundary) => {
+                format!("Could not start the side chat: {error}")
+            }
             _ => error.to_string(),
         };
 
-        vec![Event::Error {
-            message,
-            fatal: initial_resume_failed || query == Some(QueryKind::Start),
-        }]
+        // A side conversation that failed to fork or to take its boundary
+        // has nothing it could safely answer from.
+        let fatal = initial_resume_failed
+            || matches!(
+                query,
+                Some(QueryKind::Start | QueryKind::SideFork | QueryKind::SideBoundary)
+            );
+
+        vec![Event::Error { message, fatal }]
     }
 
     fn on_thread_switched(&mut self, result: &Value) -> Vec<Event> {
@@ -1483,6 +1589,7 @@ impl Session {
                 resume,
                 suppress_replay: !policy.restore_transcript,
                 team: Some(policy),
+                side: None,
             },
             deliver,
             on_stderr,
@@ -1505,6 +1612,14 @@ impl Session {
     }
 
     pub(super) fn start_initial_thread(&mut self) {
+        if let Some(side) = &self.side {
+            let request = side_fork_request(side);
+
+            self.send_query(QueryKind::SideFork, request);
+
+            return;
+        }
+
         let mut request = initial_thread_request(
             self.initial_resume.as_deref(),
             &self.thread_profile,

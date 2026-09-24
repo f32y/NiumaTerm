@@ -478,6 +478,20 @@ impl SessionController {
         Some(outcome)
     }
 
+    /// The thread a side chat would fork from: the one this conversation
+    /// runs on, once it has history to inherit. A fork of a conversation
+    /// with no turns yet would have nothing to answer from.
+    pub fn side_parent_thread(&self) -> Option<String> {
+        if self.conversation.borrow().content.entries().is_empty() {
+            return None;
+        }
+
+        self.runtime
+            .backend()
+            .and_then(Backend::recovery_identity)
+            .map(|identity| identity.id)
+    }
+
     pub fn side_questions(&self) -> &SideQuestions {
         &self.side
     }

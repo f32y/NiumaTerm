@@ -76,6 +76,11 @@ pub struct Capabilities {
     /// A question about the conversation can be answered beside it, from its
     /// live context and without adding a turn, which is what `/side` offers.
     pub side_questions: bool,
+
+    /// The conversation can be forked into a separate ephemeral thread that
+    /// runs beside it with its own turns, tools, and settings, which is what
+    /// `/side` opens where side questions are not answered in place.
+    pub side_threads: bool,
 }
 
 const CODEX: Capabilities = Capabilities {
@@ -93,6 +98,7 @@ const CODEX: Capabilities = Capabilities {
     session_search: false,
     multi_root_access: MultiRootAccess::Full,
     side_questions: false,
+    side_threads: true,
 };
 
 const CLAUDE: Capabilities = Capabilities {
@@ -110,6 +116,7 @@ const CLAUDE: Capabilities = Capabilities {
     session_search: false,
     multi_root_access: MultiRootAccess::Full,
     side_questions: true,
+    side_threads: false,
 };
 
 /// `skill_references` is false because the harness has no structured skill
@@ -137,6 +144,7 @@ const DEEPSEEK: Capabilities = Capabilities {
     // adapter passes every selected root.
     multi_root_access: MultiRootAccess::PrimaryOnly,
     side_questions: false,
+    side_threads: false,
 };
 
 pub trait AgentCapabilities {

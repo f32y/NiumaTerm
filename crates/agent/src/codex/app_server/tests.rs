@@ -41,6 +41,8 @@ pub(super) fn disconnected_session() -> Session {
         suppress_resume_replay: false,
         background: CodexTasks::default(),
         team: None,
+        side: None,
+        side_ready: None,
     }
 }
 
@@ -1767,4 +1769,57 @@ fn raw_reasoning_tokens_outrank_the_generated_recap() {
             summary: Some("Recap".into()),
         })
     );
+}
+
+#[test]
+fn side_start_is_ready_only_after_its_boundary_is_written() {
+    let mut session = disconnected_session();
+
+    let fork = session.control.next_id();
+
+    session.send_query(QueryKind::SideFork, json!({"method": "thread/fork"}));
+
+    let boundary = session.control.next_id();
+
+    // The fork reply names the side thread and writes the boundary; nothing
+    // is ready yet, so a question sent now would reach an unmarked history.
+    assert!(
+        session
+            .process(json!({"id": fork, "result": {
+                "thread": {"id": "side", "turns": []},
+                "model": "gpt-6-astra",
+                "reasoningEffort": "low",
+            }}))
+            .is_empty()
+    );
+    assert_eq!(session.thread_id(), Some("side"));
+
+    let events = session.process(json!({"id": boundary, "result": {}}));
+
+    assert!(matches!(
+        events.as_slice(),
+        [Event::Ready(settings), Event::ItemStarted(Item::SideBoundary { message, .. })]
+            if settings.model.as_deref() == Some("gpt-6-astra")
+                && settings.effort.as_deref() == Some("low")
+                && message.starts_with("Side conversation boundary.")
+    ));
+}
+
+#[test]
+fn a_side_that_cannot_take_its_boundary_fails_fatally() {
+    let mut session = disconnected_session();
+
+    let boundary = session.control.next_id();
+
+    session.send_query(
+        QueryKind::SideBoundary,
+        json!({"method": "thread/inject_items"}),
+    );
+
+    assert!(matches!(
+        session
+            .process(json!({"id": boundary, "error": {"message": "unsupported"}}))
+            .as_slice(),
+        [Event::Error { fatal: true, message }] if message.contains("side chat")
+    ));
 }

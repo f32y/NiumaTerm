@@ -407,7 +407,7 @@ pub(super) fn route_slash(
         // the name it was reached by.
         "fork" if caps.file_rewind => SlashRoute::Rewind,
         "find" if caps.session_search => SlashRoute::Find(parsed.arguments),
-        "side" if caps.side_questions => SlashRoute::Side(parsed.arguments),
+        "side" if caps.side_questions || caps.side_threads => SlashRoute::Side(parsed.arguments),
         "model" | "permissions" => SlashRoute::Unapplied,
         _ => SlashRoute::Backend {
             command: PendingSlashCommand {

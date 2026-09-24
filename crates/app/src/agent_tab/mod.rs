@@ -63,6 +63,7 @@ use nmt_agent::chat::{
 };
 use nmt_agent::claude_code::stream_json;
 use nmt_agent::codex::app_server;
+use nmt_agent::codex::app_server::SideStart;
 use nmt_agent::session::branch::{
     BranchCompletion, BranchError, BranchFailure, BranchUpdate, BranchView, FileProgress,
     PromptTarget,
@@ -136,7 +137,7 @@ use crate::agent_tab::view::composer_status::{ComposerStatusBar, poll_git_branch
 use crate::agent_tab::view::progress_panel::ProgressPanel;
 use crate::agent_tab::view::recent_sessions::{ListControl, RecentSessionsMode, SessionHistoryUi};
 use crate::agent_tab::view::selection_menu::show_selected_text_menu;
-use crate::agent_tab::view::side_questions::{SideChatWindow, side_chat_window};
+use crate::agent_tab::view::side_questions::{SideChatWindow, SideThread, side_chat_window};
 use crate::agent_tab::workflows::WorkflowUi;
 
 #[derive(Clone)]
@@ -199,6 +200,16 @@ pub struct AgentPane {
     host: WeakEntity<AgentSession>,
     binding: CommandBinding,
     team_member: bool,
+
+    /// This pane presents another pane's side chat. It keeps the commands
+    /// that replace or reopen a conversation, and the recent-sessions list,
+    /// out of reach, because an ephemeral fork can be neither.
+    side_chat_member: bool,
+
+    /// The question a side chat was opened with, sent once its fork is
+    /// ready.
+    pending_side_prompt: Option<String>,
+
     #[cfg(test)]
     owned_session: Option<SessionOwner>,
 
@@ -1460,7 +1471,7 @@ impl AgentPane {
     pub(crate) fn submit_current_slash(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let input = self.input.read(cx).text().to_string();
 
-        if self.submit_slash_input(&input, cx) {
+        if self.submit_slash_input(&input, window, cx) {
             self.input_history_navigation.record_input_history(
                 &self.input_history_scope,
                 &input,
@@ -1477,7 +1488,12 @@ impl AgentPane {
 
     /// Route a leading slash before ordinary message handling. Every failure
     /// returns false so the user's input stays available for correction.
-    pub(super) fn submit_slash_input(&mut self, input: &str, cx: &mut Context<Self>) -> bool {
+    pub(super) fn submit_slash_input(
+        &mut self,
+        input: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let Some(session_host) = self.host.upgrade() else {
             return false;
         };
@@ -1501,6 +1517,29 @@ impl AgentPane {
         ) else {
             return false;
         };
+
+        // A side chat is one ephemeral fork: it cannot be replaced, resumed,
+        // branched, renamed, or given a side chat of its own.
+        if self.side_chat_member
+            && matches!(
+                route,
+                SlashRoute::NewConversation
+                    | SlashRoute::Resume
+                    | SlashRoute::Rewind
+                    | SlashRoute::Rename(_)
+                    | SlashRoute::Fork
+                    | SlashRoute::Find(_)
+                    | SlashRoute::Side(_)
+            )
+        {
+            self.palette.set_feedback(
+                CommandFeedbackKind::Error,
+                t!("agent-side-command-unavailable").into_owned(),
+                cx,
+            );
+
+            return false;
+        }
 
         match route {
             SlashRoute::Refused(message) => {
@@ -1575,7 +1614,7 @@ impl AgentPane {
             SlashRoute::Rename(arguments) => self.rename_conversation(&arguments, cx),
             SlashRoute::Fork => self.open_fork(cx),
             SlashRoute::Find(arguments) => self.search_conversations(&arguments, cx),
-            SlashRoute::Side(arguments) => self.ask_side_question(&arguments, cx),
+            SlashRoute::Side(arguments) => self.ask_side_question(&arguments, window, cx),
             SlashRoute::Unapplied => false,
             SlashRoute::Backend { command, policy } => {
                 self.route_backend_command(command, policy, cx)
@@ -2127,10 +2166,16 @@ impl AgentPane {
         true
     }
 
-    /// Ask a question beside the conversation. The answer lands in the Side
-    /// Chat window, which opens, or comes back from being minimized, with the
-    /// question itself.
-    pub(crate) fn ask_side_question(&mut self, question: &str, cx: &mut Context<Self>) -> bool {
+    /// Open the Side Chat for `question`. Where the harness answers side
+    /// questions in place, the answer lands in the side transcript; where it
+    /// forks a side thread, the question goes to that thread's own session.
+    /// Either way the window opens, or comes back from being minimized.
+    pub(crate) fn ask_side_question(
+        &mut self,
+        question: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let Some(session_host) = self.host.upgrade() else {
             return false;
         };
@@ -2142,6 +2187,10 @@ impl AgentPane {
         }
 
         let question = question.trim();
+
+        if session_kind.caps().side_threads {
+            return self.ask_side_thread(question, window, cx);
+        }
 
         let refusal = if question.is_empty() {
             t!("agent-side-needs-question").into_owned()
@@ -2175,6 +2224,103 @@ impl AgentPane {
         false
     }
 
+    /// Send `question` to the side thread, forking one first when there is
+    /// none. An empty question opens the side thread without asking anything.
+    fn ask_side_thread(
+        &mut self,
+        question: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if let Some(thread) = &self.side_chat.thread {
+            let pane = thread.pane.clone();
+
+            if !question.is_empty() {
+                let question = question.to_owned();
+
+                pane.update(cx, |pane, cx| pane.send_side_prompt(question, cx));
+            }
+
+            self.side_chat.minimized = false;
+
+            pane.update(cx, |pane, cx| pane.focus(window, cx));
+
+            self.sync_side_chat(cx);
+
+            return true;
+        }
+
+        let Some(parent_thread) = self.session.borrow().side_parent_thread() else {
+            self.palette.set_feedback(
+                CommandFeedbackKind::Error,
+                t!("agent-side-needs-history").into_owned(),
+                cx,
+            );
+
+            return false;
+        };
+
+        let Some(session_host) = self.host.upgrade() else {
+            return false;
+        };
+
+        let (profile, workspace) = {
+            let host = session_host.read(cx);
+
+            (host.profile.clone(), host.active_workspace.clone())
+        };
+
+        let settings = self.session.borrow().controls.settings.clone();
+
+        let side = SideStart {
+            parent_thread_id: parent_thread.clone(),
+            model: settings.model.clone(),
+            effort: settings.effort.clone(),
+        };
+
+        let owner = AgentSession::create_side(profile, workspace, side, settings, cx);
+
+        let pane = cx.new(|cx| {
+            let mut pane = AgentPane::attach_side_chat(&owner, window, cx);
+
+            // The fork is still being prepared, so the question waits for the
+            // side session to be ready rather than being refused as early.
+            if !question.is_empty() {
+                pane.pending_side_prompt = Some(question.to_owned());
+            }
+
+            pane
+        });
+
+        owner.start(None, cx);
+
+        pane.update(cx, |pane, cx| pane.focus(window, cx));
+
+        self.side_chat.thread = Some(SideThread {
+            owner,
+            pane,
+            parent_thread,
+        });
+
+        self.side_chat.minimized = false;
+
+        self.sync_side_chat(cx);
+
+        true
+    }
+
+    /// Send `text` in this side chat, or hold it until the side session is
+    /// ready when its fork is still being prepared.
+    fn send_side_prompt(&mut self, text: String, cx: &mut Context<Self>) {
+        if self.session.borrow().runtime().status() == Status::Starting {
+            self.pending_side_prompt = Some(text);
+
+            return;
+        }
+
+        self.send_text_with_skill(text, None, cx);
+    }
+
     /// Ask before discarding the side chat: closing drops every exchange, and
     /// nothing of it was ever part of the conversation to find again.
     pub(crate) fn confirm_close_side_chat(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -2195,8 +2341,15 @@ impl AgentPane {
         });
     }
 
+    /// Discard the side chat. Closing a side thread's owner stops its turn,
+    /// unsubscribes its thread, and releases its registration on the shared
+    /// host, which keeps running for the parent.
     fn close_side_chat(&mut self, cx: &mut Context<Self>) {
         self.session.borrow_mut().close_side_questions();
+
+        if let Some(thread) = self.side_chat.thread.take() {
+            thread.owner.close();
+        }
 
         self.side_chat.minimized = false;
 
@@ -2206,7 +2359,7 @@ impl AgentPane {
     /// Minimize the Side Chat window, or bring it back. Answers keep arriving
     /// while it is minimized.
     pub fn toggle_side_chat(&mut self, cx: &mut Context<Self>) {
-        if !self.session.borrow().side_questions().is_open() {
+        if self.side_chat_shown().is_none() {
             return;
         }
 
@@ -2218,11 +2371,27 @@ impl AgentPane {
     /// Whether the Side Chat window is showing, or `None` while there is no
     /// side chat to show.
     pub fn side_chat_shown(&self) -> Option<bool> {
-        self.session
-            .borrow()
-            .side_questions()
-            .is_open()
-            .then_some(!self.side_chat.minimized)
+        let open =
+            self.side_chat.thread.is_some() || self.session.borrow().side_questions().is_open();
+
+        open.then_some(!self.side_chat.minimized)
+    }
+
+    /// A side thread forked from a thread this conversation no longer runs
+    /// on: a new conversation, a resumed one, or a branch replaced it. The
+    /// side chat answers about the conversation it was forked from, so it is
+    /// closed rather than left describing one that is gone.
+    fn close_orphaned_side_thread(&mut self, cx: &mut Context<Self>) {
+        let parent = self.session.borrow().side_parent_thread();
+
+        if self
+            .side_chat
+            .thread
+            .as_ref()
+            .is_some_and(|thread| Some(&thread.parent_thread) != parent.as_ref())
+        {
+            self.close_side_chat(cx);
+        }
     }
 
     /// Bring the side transcript up to date and tell the chrome, whose Side
@@ -2416,6 +2585,12 @@ impl AgentPane {
             self.palette
                 .set_feedback(CommandFeedbackKind::Error, message, cx);
         }
+
+        if let Some(text) = self.pending_side_prompt.take() {
+            self.send_text_with_skill(text, None, cx);
+        }
+
+        self.close_orphaned_side_thread(cx);
 
         info!(
             "agent thread ready: profile=\"{}\", model={:?}, profile_model={:?}",
@@ -2770,6 +2945,24 @@ impl AgentPane {
         pane
     }
 
+    /// A pane presenting `owner`'s side chat. Its transcript has no owner:
+    /// branching and rewinding address a persisted conversation, and an
+    /// ephemeral fork is not one.
+    pub(super) fn attach_side_chat(
+        owner: &SessionOwner,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut pane = Self::attach(owner, window, cx);
+
+        pane.side_chat_member = true;
+
+        pane.transcript
+            .update(cx, |transcript, _| transcript.clear_owner());
+
+        pane
+    }
+
     pub fn attach(owner: &SessionOwner, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let host = owner.session();
         let profile = host.read(cx).profile.clone();
@@ -2870,6 +3063,8 @@ impl AgentPane {
             host: host.downgrade(),
             binding,
             team_member: false,
+            side_chat_member: false,
+            pending_side_prompt: None,
             #[cfg(test)]
             owned_session: None,
             history_ui: SessionHistoryUi::default(),
@@ -3955,9 +4150,10 @@ impl Render for AgentPane {
         let transcript_empty = self.transcript.read(cx).is_empty();
         let composer_empty = self.input.read(cx).text().len() == 0;
 
-        let history = self
-            .history_ui
-            .is_visible(transcript_empty, composer_empty)
+        // A side chat starts empty on purpose and cannot switch to another
+        // conversation, so it never offers the list.
+        let history = (self.history_ui.is_visible(transcript_empty, composer_empty)
+            && !self.side_chat_member)
             .then(|| self.history_ui.render(cx));
 
         // A list opened over a live conversation is a picker, and the

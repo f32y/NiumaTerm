@@ -16,6 +16,7 @@ use gpui_component::{ActiveTheme as _, ElementExt as _, IconName, Sizable as _, 
 use rust_i18n::t;
 
 use crate::agent_tab::AgentPane;
+use crate::agent_tab::execution::SessionOwner;
 use crate::agent_tab::settings::UI_RADIUS;
 use crate::agent_tab::transcript::TranscriptView;
 
@@ -26,6 +27,11 @@ const CARD_INSET: Pixels = px(12.);
 /// virtual list, which needs a definite height to lay out against, so the
 /// window always has one.
 const DEFAULT_SIZE: Size<Pixels> = size(px(420.), px(440.));
+
+/// The size a side thread's window opens at. It carries a whole composer
+/// with its settings row under the transcript, so it needs more room than
+/// a list of answers.
+const THREAD_DEFAULT_SIZE: Size<Pixels> = size(px(480.), px(600.));
 
 /// Smallest size a resize leaves: room for the title bar's buttons and a few
 /// transcript rows below it.
@@ -67,6 +73,19 @@ pub(crate) enum Gesture {
     Resize(Edges),
 }
 
+/// A side chat that runs as its own session: a fork of the pane's thread,
+/// and the pane presenting it with its own composer and settings.
+pub(crate) struct SideThread {
+    /// Dropping the owner closes the side session.
+    pub(crate) owner: SessionOwner,
+
+    pub(crate) pane: Entity<AgentPane>,
+
+    /// The thread the fork was taken from. A conversation that moves to
+    /// another thread leaves this side chat describing one that is gone.
+    pub(crate) parent_thread: String,
+}
+
 /// The pointer and the card's pane-local bounds when a gesture began.
 struct Press {
     pointer: Point<Pixels>,
@@ -84,6 +103,10 @@ pub(crate) struct SideChatWindow {
     /// Renders the side conversation through the same view as the pane's own
     /// conversation, so the two cannot drift apart in presentation.
     pub(crate) transcript: Entity<TranscriptView>,
+
+    /// A side thread, where the harness forks one instead of answering side
+    /// questions in place. It is presented in place of `transcript`.
+    pub(crate) thread: Option<SideThread>,
 
     /// Minimizing only hides the window; its exchanges and any answer still
     /// on its way are kept for when it is restored.
@@ -108,6 +131,7 @@ impl SideChatWindow {
     pub(crate) fn new(transcript: Entity<TranscriptView>) -> Self {
         Self {
             transcript,
+            thread: None,
             minimized: false,
             bounds: None,
             press: None,
@@ -340,13 +364,48 @@ pub(crate) fn side_chat_window(window: &SideChatWindow, cx: &mut Context<AgentPa
                 .w(bounds.size.width)
                 .h(bounds.size.height)
         }
+        None => {
+            let size = match window.thread {
+                Some(_) => THREAD_DEFAULT_SIZE,
+                None => DEFAULT_SIZE,
+            };
+
+            div()
+                .top(CARD_INSET)
+                .right(CARD_INSET)
+                .w(size.width)
+                .h(size.height)
+                .max_w(relative(1.))
+                .max_h(relative(1.))
+        }
+    };
+
+    // Only answers given in place need telling how to follow up; a side
+    // thread's own composer says that by being there. The slot fills the row
+    // either way, keeping the window buttons at its far end.
+    let hint = div()
+        .flex_1()
+        .min_w_0()
+        .truncate()
+        .text_xs()
+        .text_color(cx.theme().muted_foreground)
+        .children(window.thread.is_none().then(|| t!("agent-side-hint")));
+
+    let content = match &window.thread {
+        // A side thread's pane brings its own transcript, composer, and
+        // settings row, and handles its own selections.
+        Some(thread) => div().flex_1().min_h_0().child(thread.pane.clone()),
         None => div()
-            .top(CARD_INSET)
-            .right(CARD_INSET)
-            .w(DEFAULT_SIZE.width)
-            .h(DEFAULT_SIZE.height)
-            .max_w(relative(1.))
-            .max_h(relative(1.)),
+            .flex_1()
+            .min_h_0()
+            // Releasing a selection offers the same copy and quote menu
+            // the pane's own transcript does, which is how an answer
+            // reaches the composer.
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(AgentPane::on_transcript_mouse_up),
+            )
+            .child(window.transcript.clone()),
     };
 
     card.absolute()
@@ -355,8 +414,8 @@ pub(crate) fn side_chat_window(window: &SideChatWindow, cx: &mut Context<AgentPa
         // Every gesture reports its moves here. GPUI calls drag-move listeners
         // on every pointer move of an active drag, wherever the pointer is, so
         // one listener serves the title bar and every handle, and fast drags
-        // that outrun the handle still land. Changing the card is a pointer event outside any frame,
-        // so it has to wake the frame pump itself.
+        // that outrun the handle still land. Changing the card is a pointer
+        // event outside any frame, so it has to wake the frame pump itself.
         .on_drag_move(
             cx.listener(move |this, event: &DragMoveEvent<SideCardDrag>, _, cx| {
                 if event.drag(cx).0 == owner && this.side_chat.drag_to(event.event.position) {
@@ -378,8 +437,8 @@ pub(crate) fn side_chat_window(window: &SideChatWindow, cx: &mut Context<AgentPa
                         .id("side-chat-title")
                         .w_full()
                         .flex_none()
-                        .px_4()
-                        .py_2()
+                        .px_3()
+                        .py_0p5()
                         .gap_2()
                         .items_center()
                         .border_b_1()
@@ -397,23 +456,14 @@ pub(crate) fn side_chat_window(window: &SideChatWindow, cx: &mut Context<AgentPa
                             cx.new(|_| drag.clone())
                         })
                         .child(
-                            v_flex()
-                                .flex_1()
-                                .min_w_0()
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(t!("agent-side-title")),
-                                )
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(t!("agent-side-hint")),
-                                ),
+                            div()
+                                .flex_none()
+                                .text_xs()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(cx.theme().muted_foreground)
+                                .child(t!("agent-side-title")),
                         )
+                        .child(hint)
                         .child(
                             Button::new("side-chat-minimize")
                                 .ghost()
@@ -435,19 +485,7 @@ pub(crate) fn side_chat_window(window: &SideChatWindow, cx: &mut Context<AgentPa
                                 })),
                         ),
                 )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_h_0()
-                        // Releasing a selection offers the same copy and quote
-                        // menu the pane's own transcript does, which is how an
-                        // answer reaches the composer.
-                        .on_mouse_up(
-                            MouseButton::Left,
-                            cx.listener(AgentPane::on_transcript_mouse_up),
-                        )
-                        .child(window.transcript.clone()),
-                ),
+                .child(content),
         )
         // Painted after the content so the handles win the edge over it.
         .children(resize_handles(cx))
