@@ -1,6 +1,8 @@
 //! How transcript prose and code are styled, from the configured font down to
 //! the markdown view every text row is built on.
 
+mod file_icons;
+
 #[cfg(test)]
 mod link_tests;
 
@@ -14,6 +16,7 @@ use gpui_component::text::TextViewStyle;
 use gpui_component::{ActiveTheme as _, text};
 
 use crate::agent_tab::settings::AgentSettings;
+use crate::agent_tab::transcript::render::text_style::file_icons::file_link_icon;
 
 /// Assistant reply: bare markdown — no bubble, no border; alignment and
 /// surface carry the distinction.
@@ -91,9 +94,11 @@ pub(crate) fn markdown_view(
     markdown: impl Into<SharedString>,
     cwd: Option<String>,
 ) -> text::TextView {
-    text::TextView::markdown(id, markdown).on_link_click(move |target, _, _, cx| {
-        open_link(target, cwd.as_deref().map(Path::new), cx);
-    })
+    text::TextView::markdown(id, markdown)
+        .link_icon(file_link_icon)
+        .on_link_click(move |target, _, _, cx| {
+            open_link(target, cwd.as_deref().map(Path::new), cx);
+        })
 }
 
 fn open_link(target: &str, cwd: Option<&Path>, cx: &mut App) {

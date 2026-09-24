@@ -1,4 +1,4 @@
-//! Local preview of command and output rendering. No commands are executed.
+//! Local preview of transcript rendering. Use --file-links for file link samples.
 
 use std::cell::RefCell;
 use std::env;
@@ -44,7 +44,7 @@ impl Render for Preview {
                     .p_4()
                     .border_b_1()
                     .border_color(cx.theme().border)
-                    .child("Transcript highlighting — expand a command to inspect its output")
+                    .child("Transcript preview — compare themes with Light / dark")
                     .child(
                         Button::new("theme")
                             .label("Light / dark")
@@ -77,6 +77,14 @@ fn command(id: &str, purpose: &str, command: &str, output: String) -> Item {
 }
 
 fn samples() -> Vec<Item> {
+    if env::args().any(|arg| arg == "--file-links") {
+        return vec![Item::AgentMessage {
+            id: "file-links".into(),
+            text: Some(include_str!("transcript_links.md").into()),
+            questions: None,
+        }];
+    }
+
     vec![
         command("bash", "Bash command + JSON", "count=3\nprintf '{\"files\":%s,\"ok\":true}\\n' \"$count\"",
             "{\"files\":3,\"ok\":true,\"paths\":[\"src/main.rs\",\"src/lib.rs\"]}".into()),

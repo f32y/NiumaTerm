@@ -7,6 +7,7 @@ use rust_embed::RustEmbed;
 #[derive(RustEmbed)]
 #[folder = "$CARGO_MANIFEST_DIR/../../assets"]
 #[include = "icons/**/*.svg"]
+#[include = "file-icons/*.svg"]
 struct ProjectAssets;
 
 /// Registered with the `Application` so `svg().path(..)` resolves both project
