@@ -96,8 +96,14 @@ check_no_ai_slop_marker() {
     slop_markers='ponytail|seam|fact|parity|envelope|wire|contract'
     slop=$(git diff --cached --diff-filter=ACMR -U0 |
         awk -v generated="$generated_paths" '
-            /^\+\+\+ b\// { file = substr($0, 7); vendored = file ~ generated; next }
-            !vendored && /^\+/ { print file ": " $0 }
+            /^\+\+\+ b\// {
+                file = substr($0, 7)
+                vendored = file ~ generated
+                # License notices must retain the original upstream wording.
+                license_file = tolower(file) ~ /(^|\/)license([.](md|txt|rst))?$/
+                next
+            }
+            !vendored && !license_file && /^\+/ { print file ": " $0 }
         ' | grep -Eiw "$slop_markers" || true)
     if [ -z "$slop" ]; then
         return 0
