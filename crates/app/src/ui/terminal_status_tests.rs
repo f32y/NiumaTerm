@@ -1,5 +1,5 @@
 use crate::tabs::CommandOutcome;
-use crate::terminal_tab::terminal_status::{TerminalVisual, terminal_presentation};
+use crate::ui::terminal_status::{TerminalVisual, terminal_presentation};
 use crate::workspace::TerminalActivity;
 
 #[test]

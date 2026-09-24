@@ -10,8 +10,8 @@ use gpui_component::v_flex;
 use nmt_agent::AgentRuntimeStatus;
 use rust_i18n::t;
 
-use crate::terminal_tab::terminal_status::{terminal_dot, terminal_presentation};
 use crate::ui::composition::{StatusMark, StatusMarkTone};
+use crate::ui::terminal_status::{terminal_dot, terminal_presentation};
 use crate::workspace::TerminalActivity;
 
 /// What a workspace is doing, as the sidebar's status column reports it: its

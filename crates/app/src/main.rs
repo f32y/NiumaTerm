@@ -58,14 +58,6 @@ use crate::ui::{
     selected_window_appearance,
 };
 
-// These terminal helpers use the executable's window and workspace types, while
-// the reusable terminal renderer is compiled in the app library.
-mod terminal_tab {
-    pub(crate) mod terminal_launch;
-    pub(crate) mod terminal_layout;
-    pub(crate) mod terminal_status;
-}
-
 #[cfg(enable_profiling)]
 #[global_allocator]
 static ALLOCATOR: ProfilingAllocator = ProfilingAllocator;

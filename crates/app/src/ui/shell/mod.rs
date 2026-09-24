@@ -71,8 +71,6 @@ use crate::agent_updates::AgentUpdates;
 use crate::agent_usage::AgentUsageView;
 use crate::cli::CliAction;
 use crate::tabs::{Tab, TabId, TabManager};
-use crate::terminal_tab::terminal_launch::spawn_default_pane;
-use crate::terminal_tab::terminal_layout::TerminalLayout;
 use crate::ui::background_tasks::BackgroundTasksView;
 use crate::ui::git_sidebar::GitSidebar;
 use crate::ui::git_status::GitStatusModel;
@@ -102,6 +100,8 @@ use crate::ui::shell::workspace_dirs::{
     RootAvailability, open_new_workspace_dialog, open_workspace_dirs_dialog,
 };
 use crate::ui::tab_bar::{TabStrip, VerticalTabList, WorkspaceTabs};
+use crate::ui::terminal_launch::spawn_default_pane;
+use crate::ui::terminal_layout::TerminalLayout;
 use crate::ui::title_bar::{PanelToggle, TitleBarInputs, TitleCenter, WindowTitleBar};
 use crate::ui::token_usage::TokenUsageView;
 use crate::ui::workflows::WorkflowsView;

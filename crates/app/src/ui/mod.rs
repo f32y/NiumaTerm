@@ -39,6 +39,11 @@ mod settings;
 mod shell;
 mod sidebar_resize;
 mod tab_bar;
+// Terminal helpers that use the executable's window and workspace types;
+// the reusable terminal renderer is compiled in the app library.
+mod terminal_launch;
+mod terminal_layout;
+mod terminal_status;
 mod title_bar;
 mod token_usage;
 mod workflows;
