@@ -45,12 +45,13 @@ fn main() {
         source.display()
     );
 
-    // OUT_DIR is <target>/<profile>/build/nmt_updater-<hash>/out; walk up to
-    // <target>/<profile>, which holds the binaries and, in deps/, the test
-    // executables.
+    // Cargo versions use different package/hash directory depths below
+    // <target>/<profile>/build. The profile directory holds the binaries and
+    // the framework that the application bundler copies.
     let profile_dir = out_dir
         .ancestors()
-        .nth(3)
+        .find(|dir| dir.file_name().is_some_and(|name| name == "build"))
+        .and_then(|build_dir| build_dir.parent())
         .expect("OUT_DIR is not under a target profile directory")
         .to_path_buf();
 
