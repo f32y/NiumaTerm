@@ -247,20 +247,6 @@ fn publish_render_buffer(
     true
 }
 
-/// Convert `scrollback-history-limit` (in **lines**) to the engine's
-/// scrollback byte budget. The engine stores rows in byte-bounded pages
-/// (~14 B/cell observed), so we size for `cols × 16 B/cell` — 16 is an upper bound,
-/// guaranteeing *at least* `lines` rows at the creation width. Approximate by
-/// nature: a later resize-widen can hold fewer than `lines` rows, and the engine
-/// floors very small budgets at ~one page. `lines == 0` → 0 (engine minimum).
-fn scrollback_bytes(lines: usize, cols: u16) -> usize {
-    const BYTES_PER_CELL: usize = 16;
-
-    lines
-        .saturating_mul(cols as usize)
-        .saturating_mul(BYTES_PER_CELL)
-}
-
 impl<T, U> Termio<T, U>
 where
     T: AsyncPty + Send + 'static,
@@ -283,13 +269,7 @@ where
             (rb.cols() as u16, rb.rows() as u16)
         };
 
-        // `max_scrollback` is a **byte budget** in the engine — the C-binding's
-        // "lines" doc is wrong (verified: budgets ≤1 MB floor at ~3297 lines, 10 MB
-        // holds ~36k at 20 cols ≈ 273 B/line). `scrollback-history-limit` is
-        // in lines, so convert through `scrollback_bytes`.
-        let max_scrollback = scrollback_bytes(options.scrollback_lines, cols.max(1));
-
-        let mut ghostty = GhosttyTerminal::new(cols.max(1), rows.max(1), max_scrollback)
+        let mut ghostty = GhosttyTerminal::new(cols.max(1), rows.max(1), options.scrollback_lines)
             .map_err(|err| Box::new(err) as Box<dyn error::Error>)?;
 
         // Push the host theme's default colors + 256-palette into the engine so

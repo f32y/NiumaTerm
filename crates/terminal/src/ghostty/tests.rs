@@ -1970,3 +1970,25 @@ fn read_screen_row_out_of_range_is_none() {
 
     assert!(t.read_screen_row(9999).unwrap().is_none());
 }
+
+/// The configured line limit bounds the history the engine keeps, to page
+/// granularity, and a limit of zero keeps none at all.
+#[test]
+fn scrollback_is_bounded_by_the_configured_line_count() {
+    let output: String = (0..20_000).map(|line| format!("{line}\r\n")).collect();
+
+    let history = |limit: usize| {
+        let mut terminal = GhosttyTerminal::new(20, 4, limit).unwrap();
+
+        terminal.write_vt(output.as_bytes());
+
+        terminal.scrollbar().total - 4
+    };
+
+    let bounded = history(1_000);
+
+    assert!(bounded >= 1_000, "kept {bounded} lines");
+    assert!(bounded < 5_000, "kept {bounded} lines");
+    assert!(history(10_000) > bounded);
+    assert_eq!(history(0), 0);
+}

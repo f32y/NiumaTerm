@@ -130,7 +130,7 @@ pub struct GhosttyTerminal {
 unsafe impl Send for GhosttyTerminal {}
 
 impl GhosttyTerminal {
-    pub fn new(cols: u16, rows: u16, max_scrollback: usize) -> Result<Self> {
+    pub fn new(cols: u16, rows: u16, scrollback_lines: usize) -> Result<Self> {
         if cols == 0 || rows == 0 {
             return Err(Error::InvalidValue);
         }
@@ -140,15 +140,25 @@ impl GhosttyTerminal {
         Error::from_code(unsafe { ghostty_terminal_new(ptr::null(), &mut terminal, cols, rows) })?;
 
         // A new terminal starts on the engine's own scrollback default, so the
-        // caller's budget has to be applied before any output reaches it. A
-        // rejected budget is the caller's error, as it was when the budget was
-        // a construction parameter, so the half-built terminal is released.
+        // caller's limit has to be applied before any output reaches it. The
+        // engine counts lines itself, to page granularity; a limit of zero
+        // goes through the byte limit, which is what disables scrollback and
+        // erases retained history. A rejected limit is the caller's error, so
+        // the half-built terminal is released.
         let scrollback = unsafe {
-            ghostty_terminal_set(
-                terminal,
-                VtTerminalOption::SCROLLBACK_MAX_BYTES,
-                (&max_scrollback as *const usize).cast(),
-            )
+            if scrollback_lines == 0 {
+                ghostty_terminal_set(
+                    terminal,
+                    VtTerminalOption::SCROLLBACK_MAX_BYTES,
+                    (&0usize as *const usize).cast(),
+                )
+            } else {
+                ghostty_terminal_set(
+                    terminal,
+                    VtTerminalOption::SCROLLBACK_MAX_LINES,
+                    (&scrollback_lines as *const usize).cast(),
+                )
+            }
         };
 
         if let Err(err) = Error::from_code(scrollback) {
