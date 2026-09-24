@@ -1,6 +1,5 @@
-use nmt_agent::chat::ThreadSettings;
 use nmt_agent::team::discussion::DiscussionMode;
-use nmt_agent::team::model::{AttemptId, DiscussionId, MemberId, OperationId, UserInput};
+use nmt_agent::team::model::{AttemptId, DiscussionId, MemberId, UserInput};
 
 pub enum TeamCommand {
     Direct {
@@ -20,18 +19,9 @@ pub enum TeamCommand {
         count: u32,
     },
     Finish(DiscussionId),
-    Skip {
-        discussion: DiscussionId,
-        operation: OperationId,
-    },
     ChangeMode {
         discussion: DiscussionId,
         mode: DiscussionMode,
-    },
-    AutomaticSummaries(bool),
-    MemberSettings {
-        member: MemberId,
-        settings: ThreadSettings,
     },
     Exclude(MemberId),
     Stop(MemberId),

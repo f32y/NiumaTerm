@@ -546,11 +546,6 @@ impl TeamRuntime {
     ) -> Task<Result<(), TeamError>> {
         let closed = self.closed;
 
-        let settings_member = match &command {
-            TeamCommand::MemberSettings { member, .. } => Some(*member),
-            _ => None,
-        };
-
         let stopped = match &command {
             TeamCommand::Stop(member) => Some(*member),
             _ => None,
@@ -578,13 +573,6 @@ impl TeamRuntime {
             move |this, result, cx| {
                 if result.is_ok() && !this.closed {
                     this.error = None;
-
-                    if let Some(id) = settings_member
-                        && let Some(member) = this.room.member(id)
-                        && let Some(host) = this.hosts.get(&id)
-                    {
-                        host.apply_settings(member.settings().clone(), cx);
-                    }
 
                     if let Some(id) = stopped
                         && let Some(host) = this.hosts.get(&id)

@@ -643,32 +643,9 @@ impl TeamPane {
             .targeting
             .render_mode(room, active.is_some(), cx.entity());
 
-        let controls = room.controls().clone();
-        let pane = cx.entity();
-
         let settings = settings_pill(Button::new("team-settings"))
             .label(t!("team-options"))
-            .dropdown_menu_with_anchor(Anchor::BottomLeft, move |menu, window, cx| {
-                let summaries = pane.clone();
-
-                let mut menu = menu.item(
-                    PopupMenuItem::new(t!("team-auto-summaries"))
-                        .checked(controls.automatic_summaries)
-                        .on_click(move |_, _, cx| {
-                            summaries.update(cx, |pane, cx| {
-                                pane.perform(
-                                    TeamCommand::AutomaticSummaries(!controls.automatic_summaries),
-                                    cx,
-                                )
-                                .detach();
-                            });
-                        }),
-                );
-
-                if !member_settings.is_empty() {
-                    menu = menu.separator();
-                }
-
+            .dropdown_menu_with_anchor(Anchor::BottomLeft, move |mut menu, window, cx| {
                 for (name, kind, member_pane) in &member_settings {
                     let member_pane = member_pane.clone();
                     let kind = *kind;

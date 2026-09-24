@@ -272,7 +272,6 @@ pub(super) fn command(
         TeamCommand::Continue(_) | TeamCommand::Exclude(_) if !busy.is_empty() => {
             return Err(TeamError::Busy);
         }
-        TeamCommand::Skip { .. } if !busy.is_empty() => return Err(TeamError::Unresolved),
         TeamCommand::ChangeMode { discussion, .. } if !busy.is_empty() => {
             session.pause_discussion(discussion, PauseReason::ModeChange)?;
 
@@ -314,15 +313,7 @@ pub(super) fn command(
         TeamCommand::Continue(id) => session.continue_discussion(id)?,
         TeamCommand::AddTurns { discussion, count } => session.add_turns(discussion, count)?,
         TeamCommand::Finish(id) => session.finish_with_report(id)?,
-        TeamCommand::Skip {
-            discussion,
-            operation,
-        } => session.skip_arrangement(discussion, operation)?,
         TeamCommand::ChangeMode { discussion, mode } => session.change_mode(discussion, mode)?,
-        TeamCommand::AutomaticSummaries(enabled) => session.set_automatic_summaries(enabled)?,
-        TeamCommand::MemberSettings { member, settings } => {
-            session.set_member_settings(member, settings)?
-        }
         TeamCommand::Exclude(member) => session.exclude_member(member)?,
         TeamCommand::Stop(_) => {
             let discussions: Vec<_> = session

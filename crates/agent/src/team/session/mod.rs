@@ -20,7 +20,7 @@ use thiserror::Error;
 
 use crate::chat::{SendOutcome, ThreadSettings};
 use crate::session::team_capabilities::ModeratorAdmission;
-use crate::team::attempt::{Attempt, AttemptState, BudgetScope, DispatchIntent, Invocation};
+use crate::team::attempt::{Attempt, AttemptState, BudgetScope, DispatchIntent};
 use crate::team::budget::{BudgetError, TurnPurpose};
 use crate::team::discussion::{
     ArrangementState, DiscussionError, DiscussionMode, DiscussionState, ModeratorAction,
@@ -795,47 +795,6 @@ impl TeamSession {
         Ok(())
     }
 
-    pub fn skip_arrangement(
-        &mut self,
-        id: DiscussionId,
-        operation: OperationId,
-    ) -> Result<(), TeamError> {
-        if self.has_live_attempts() || !self.unresolved.is_empty() {
-            return Err(TeamError::Unresolved);
-        }
-
-        let mut room = self.store.room().clone();
-
-        cancel_pending_reservations(&mut room, id)?;
-
-        let discussion = room.discussion_mut(id).ok_or(TeamError::Unavailable)?;
-
-        let arrangement = discussion
-            .stages
-            .iter_mut()
-            .flat_map(|stage| &mut stage.arrangements)
-            .find(|entry| entry.operation == operation)
-            .ok_or(TeamError::Unavailable)?;
-
-        match arrangement.state {
-            ArrangementState::Pending => {}
-            ArrangementState::Failed(attempt) => {
-                discussion
-                    .pauses
-                    .remove(&PauseReason::AttemptFailed(attempt));
-            }
-            _ => return Err(TeamError::Unresolved),
-        }
-
-        arrangement.state = ArrangementState::Skipped;
-
-        discussion.pause(PauseReason::User);
-
-        self.store.commit(room)?;
-
-        Ok(())
-    }
-
     pub fn finish_with_report(&mut self, id: DiscussionId) -> Result<(), TeamError> {
         self.pause_discussion(id, PauseReason::User)?;
 
@@ -1080,28 +1039,6 @@ impl TeamSession {
 
         for discussion in &mut room.discussions {
             discussion.pause(PauseReason::Closed);
-        }
-
-        self.store.commit(room)?;
-
-        Ok(())
-    }
-
-    pub fn set_automatic_summaries(&mut self, enabled: bool) -> Result<(), TeamError> {
-        let mut room = self.store.room().clone();
-
-        room.controls.automatic_summaries = enabled;
-
-        if !enabled {
-            for attempt in &mut room.attempts {
-                if attempt.state != AttemptState::Reserved
-                    || !matches!(attempt.intent.invocation, Invocation::PublicSummary(_))
-                {
-                    continue;
-                }
-
-                attempt.state = AttemptState::Rejected;
-            }
         }
 
         self.store.commit(room)?;
