@@ -53,7 +53,7 @@ use gpui_base::TextSelection;
 use gpui_component::input::{
     Enter, Escape, IndentInline, InputEvent, MoveDown, MoveUp, Paste, Textarea, TextareaState,
 };
-use gpui_component::{ActiveTheme as _, WindowExt, v_flex};
+use gpui_component::{ActiveTheme as _, ElementExt as _, WindowExt, v_flex};
 use nmt_agent::background_task::{BackgroundTaskKey, BackgroundTaskSnapshot};
 use nmt_agent::catalog::adapter_commands;
 use nmt_agent::chat::{
@@ -78,7 +78,7 @@ use nmt_agent::session::input::{
 };
 use nmt_agent::session::lifecycle::InterruptOutcome;
 use nmt_agent::session::restore::{ResumeStart, SettingsSeed};
-use nmt_agent::session::side::{SideAnswer, SideQuestionOutcome};
+use nmt_agent::session::side::SideQuestionOutcome;
 use nmt_agent::session::workflows::OpenWorkflowAgent;
 use nmt_agent::session::{ImageAttachment, PromptRequest, SettingsOutcome};
 #[cfg(test)]
@@ -136,7 +136,7 @@ use crate::agent_tab::view::composer_status::{ComposerStatusBar, poll_git_branch
 use crate::agent_tab::view::progress_panel::ProgressPanel;
 use crate::agent_tab::view::recent_sessions::{ListControl, RecentSessionsMode, SessionHistoryUi};
 use crate::agent_tab::view::selection_menu::show_selected_text_menu;
-use crate::agent_tab::view::side_questions::side_questions_card;
+use crate::agent_tab::view::side_questions::{SideChatWindow, side_chat_window};
 use crate::agent_tab::workflows::WorkflowUi;
 
 #[derive(Clone)]
@@ -170,6 +170,9 @@ pub enum AgentPaneEvent {
     /// member's requests come from its room, so the Team that owns the room
     /// sends it and records the exchange where every member can see it.
     TeamPrompt(String),
+    /// This tab's side chat appeared, went away, or was minimized or
+    /// restored. The chrome's Side Chat control follows it.
+    SideChatActivity,
 }
 
 pub struct AgentPane {
@@ -188,6 +191,7 @@ pub struct AgentPane {
     input: Entity<TextareaState>,
     history_ui: SessionHistoryUi,
     progress_panel: ProgressPanel,
+    side_chat: SideChatWindow,
 
     /// Provider state and transitions, independent of widgets and rendering.
     session: Rc<RefCell<SessionController>>,
@@ -2123,8 +2127,9 @@ impl AgentPane {
         true
     }
 
-    /// Ask a question beside the conversation. The answer lands in the side
-    /// card above the composer, which opens with the question itself.
+    /// Ask a question beside the conversation. The answer lands in the Side
+    /// Chat window, which opens, or comes back from being minimized, with the
+    /// question itself.
     pub(crate) fn ask_side_question(&mut self, question: &str, cx: &mut Context<Self>) -> bool {
         let Some(session_host) = self.host.upgrade() else {
             return false;
@@ -2141,13 +2146,16 @@ impl AgentPane {
         let refusal = if question.is_empty() {
             t!("agent-side-needs-question").into_owned()
         } else {
-            match self
+            let outcome = self
                 .session
                 .borrow_mut()
-                .ask_side_question(question.to_owned())
-            {
+                .ask_side_question(question.to_owned());
+
+            match outcome {
                 SideQuestionOutcome::Asked => {
-                    cx.notify();
+                    self.side_chat.minimized = false;
+
+                    self.sync_side_chat(cx);
 
                     return true;
                 }
@@ -2167,36 +2175,68 @@ impl AgentPane {
         false
     }
 
-    pub(crate) fn close_side_questions(&mut self, cx: &mut Context<Self>) {
-        self.session.borrow_mut().close_side_questions();
+    /// Ask before discarding the side chat: closing drops every exchange, and
+    /// nothing of it was ever part of the conversation to find again.
+    pub(crate) fn confirm_close_side_chat(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let pane = cx.entity();
 
-        cx.notify();
+        window.open_alert_dialog(cx, move |alert, _, _| {
+            let pane = pane.clone();
+
+            alert
+                .confirm()
+                .title(t!("agent-side-close-title"))
+                .description(t!("agent-side-close-description").into_owned())
+                .on_ok(move |_, _, cx| {
+                    pane.update(cx, |pane, cx| pane.close_side_chat(cx));
+
+                    true
+                })
+        });
     }
 
-    /// Put side answer `index` into the composer at the cursor. It is only
-    /// placed there: sending it on to the conversation stays the user's call.
-    pub(crate) fn insert_side_answer(
-        &mut self,
-        index: usize,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let answer = match self
-            .session
+    fn close_side_chat(&mut self, cx: &mut Context<Self>) {
+        self.session.borrow_mut().close_side_questions();
+
+        self.side_chat.minimized = false;
+
+        self.sync_side_chat(cx);
+    }
+
+    /// Minimize the Side Chat window, or bring it back. Answers keep arriving
+    /// while it is minimized.
+    pub fn toggle_side_chat(&mut self, cx: &mut Context<Self>) {
+        if !self.session.borrow().side_questions().is_open() {
+            return;
+        }
+
+        self.side_chat.minimized = !self.side_chat.minimized;
+
+        self.sync_side_chat(cx);
+    }
+
+    /// Whether the Side Chat window is showing, or `None` while there is no
+    /// side chat to show.
+    pub fn side_chat_shown(&self) -> Option<bool> {
+        self.session
             .borrow()
             .side_questions()
-            .exchanges()
-            .get(index)
-            .map(|exchange| &exchange.answer)
-        {
-            Some(SideAnswer::Answered(answer)) => answer.clone(),
-            _ => return,
-        };
+            .is_open()
+            .then_some(!self.side_chat.minimized)
+    }
 
-        self.input
-            .update(cx, |input, cx| input.replace(&answer, window, cx));
+    /// Bring the side transcript up to date and tell the chrome, whose Side
+    /// Chat control follows whether the window exists and is showing.
+    fn sync_side_chat(&mut self, cx: &mut Context<Self>) {
+        self.side_chat.transcript.update(cx, |view, cx| {
+            view.sync_content();
 
-        self.focus(window, cx);
+            cx.notify();
+        });
+
+        self.emit_event(AgentPaneEvent::SideChatActivity, cx);
+
+        cx.notify();
     }
 
     /// Show what one search matched, in place of whatever the list held.
@@ -2261,6 +2301,12 @@ impl AgentPane {
 
         self.transcript
             .update(cx, |transcript, _| transcript.sync_content());
+
+        self.side_chat.transcript.update(cx, |transcript, cx| {
+            transcript.sync_content();
+
+            cx.notify();
+        });
 
         match effect {
             SessionEffect::Unchanged => {}
@@ -2801,6 +2847,18 @@ impl AgentPane {
             transcript
         });
 
+        // The side chat renders through its own view: a conversation's
+        // measured rows and scroll position belong to one list each. Like a
+        // child agent's view it has no owner, because branching and rewinding
+        // address the main conversation, which none of its prompts opened.
+        let side_transcript = cx.new(|cx| {
+            let mut transcript = TranscriptView::new(kind, cwd.clone());
+
+            transcript.attach_content(session.borrow().side_questions().conversation().clone(), cx);
+
+            transcript
+        });
+
         let mut this = Self {
             focus: cx.focus_handle(),
             input_history_scope,
@@ -2816,6 +2874,7 @@ impl AgentPane {
             owned_session: None,
             history_ui: SessionHistoryUi::default(),
             progress_panel: ProgressPanel::default(),
+            side_chat: SideChatWindow::new(side_transcript),
             prompts: QuestionPanel::default(),
             effort_drag: None,
             turn: TurnPresentation::default(),
@@ -2844,6 +2903,12 @@ impl AgentPane {
 
         cx.observe(host, |this, _, cx| {
             this.transcript.update(cx, |view, cx| {
+                view.sync_content();
+
+                cx.notify();
+            });
+
+            this.side_chat.transcript.update(cx, |view, cx| {
                 view.sync_content();
 
                 cx.notify();
@@ -3832,13 +3897,8 @@ impl Render for AgentPane {
             cx,
         );
 
-        let side_questions = {
-            let session = self.session.borrow();
-            let side = session.side_questions();
-
-            side.is_open()
-                .then(|| side_questions_card(side.exchanges(), cx))
-        };
+        let side_chat =
+            (self.side_chat_shown() == Some(true)).then(|| side_chat_window(&self.side_chat, cx));
 
         let approval = self.render_approval_panel(cx);
         let composer_free = !self.branch_flow_holds_composer();
@@ -3943,6 +4003,7 @@ impl Render for AgentPane {
             .rounded(UI_RADIUS - px(1.))
             .overflow_hidden()
             .track_focus(&self.focus)
+            .on_prepaint(self.side_chat.track_pane())
             // Escape force-stops the agent whenever the pane or composer has
             // focus. The input propagates Escape here when the editor did not
             // consume it (inline completion, IME), and transcript clicks focus
@@ -4002,7 +4063,6 @@ impl Render for AgentPane {
                                 .child(
                                     composer_card(cx)
                                         .debug_selector(|| "agent-progress-composer".into())
-                                        .children(side_questions)
                                         .children(approval)
                                         .children(questions)
                                         .children(self.attachments.render(cx))
@@ -4167,6 +4227,9 @@ impl Render for AgentPane {
                 .pb_3()
                 .pt_1()
             })
+            // The Side Chat window floats over the transcript and the composer
+            // but under the blocking layer, which must cover the whole pane.
+            .children(side_chat)
             // Painted last so it sits over the transcript and the composer.
             .children(blocking_layer)
             .into_any_element()

@@ -3002,6 +3002,13 @@ impl AppWindow {
 
                 return;
             }
+            // The Side Chat control reads the pane at render time, so this
+            // only has to repaint.
+            AgentPaneEvent::SideChatActivity => {
+                cx.notify();
+
+                return;
+            }
             // Addressed to the Team that owns the member's room; a member's
             // session is never a tab of its own.
             AgentPaneEvent::TeamPrompt(_) => return,
@@ -3114,6 +3121,16 @@ impl AppWindow {
                     running: pane.read(cx).running_background_tasks(),
                     open: self.panels.shows(RightPanelKind::BackgroundTasks, cx),
                 }),
+            side_chat: self
+                .active_agent()
+                .and_then(|pane| pane.read(cx).side_chat_shown()),
+        }
+    }
+
+    /// Minimize the active tab's Side Chat window, or bring it back.
+    pub(super) fn on_toggle_side_chat(&mut self, cx: &mut Context<Self>) {
+        if let Some(pane) = self.active_agent() {
+            pane.update(cx, |pane, cx| pane.toggle_side_chat(cx));
         }
     }
 

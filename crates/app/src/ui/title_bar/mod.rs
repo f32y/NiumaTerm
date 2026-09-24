@@ -52,6 +52,10 @@ pub(crate) struct TitleBarInputs {
     pub(crate) workflows: Option<PanelToggle>,
 
     pub(crate) background_tasks: Option<PanelToggle>,
+
+    /// Whether the active tab's Side Chat window is showing, absent until a
+    /// side question opens one.
+    pub(crate) side_chat: Option<bool>,
 }
 
 /// The middle of the bar.
@@ -115,6 +119,7 @@ impl WindowTitleBar {
             git_tab_active,
             workflows,
             background_tasks,
+            side_chat,
         } = inputs;
 
         let appearance = &cx.global::<AppSettings>().config().appearance;
@@ -258,6 +263,12 @@ impl WindowTitleBar {
                             .flex_none()
                             .occlude()
                             .child(background_tasks_button(toggle, cx))
+                    }))
+                    .children(side_chat.map(|shown| {
+                        div()
+                            .flex_none()
+                            .occlude()
+                            .child(side_chat_button(shown, cx))
                     })),
             )
     }
@@ -360,6 +371,17 @@ fn background_tasks_button(toggle: PanelToggle, cx: &mut Context<AppWindow>) -> 
         }))
 }
 
+/// Upper-right `Side Chat` control, shown while the active tab has a side
+/// chat. It minimizes the floating window and brings it back, so a window
+/// moved out of the way stays one click from its answers.
+fn side_chat_button(shown: bool, cx: &mut Context<AppWindow>) -> impl IntoElement {
+    toolbar_toggle("toggle-side-chat")
+        .checked(shown)
+        .icon(SideChatIcon)
+        .tooltip(t!("agent-side-chat"))
+        .on_click(cx.listener(|this, _: &bool, _, cx| this.on_toggle_side_chat(cx)))
+}
+
 fn title_bar_leading_region(width: f32) -> Div {
     // Sidebar alignment yields to the tab strip on narrow windows, while
     // the minimum width keeps every leading control reachable.
@@ -435,6 +457,16 @@ fn app_menu(menu: ModernMenu, shell: &Entity<AppWindow>, _cx: &mut App) -> Moder
         .icon(Icon::new(IconName::ArrowDown));
 
     menu
+}
+
+/// Titlebar Side Chat icon, backed by the project's `assets/icons/
+/// message-circle.svg`; the bundled icon set has no speech bubble.
+struct SideChatIcon;
+
+impl IconNamed for SideChatIcon {
+    fn path(self) -> SharedString {
+        "icons/message-circle.svg".into()
+    }
 }
 
 struct GitIcon;

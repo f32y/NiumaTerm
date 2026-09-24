@@ -120,6 +120,10 @@ pub struct AgentSession {
     closed: Rc<Cell<bool>>,
     binding_generation: Rc<Cell<u64>>,
     pub(super) team_launch: Option<TeamLaunch>,
+
+    /// Whether the side chat had content when last reported, so the chrome
+    /// hears only when it appears or goes away.
+    side_chat_open: Cell<bool>,
 }
 
 /// Closing this owner releases execution even while observers still exist.
@@ -278,6 +282,7 @@ impl AgentSession {
             closed: closed.clone(),
             binding_generation: binding_generation.clone(),
             team_launch,
+            side_chat_open: Cell::new(false),
         });
 
         let registry = cx.default_global::<SessionRegistry>().0.clone();
@@ -444,7 +449,21 @@ impl AgentSession {
             effect: RefCell::new(Some(effect)),
         });
 
+        self.sync_side_chat(cx);
+
         cx.notify();
+    }
+
+    /// Tell the chrome when the side chat gains its first exchange or loses
+    /// all of them. Clearing the conversation empties it from inside the
+    /// controller, so the check runs after every change rather than at the
+    /// few places that ask or close.
+    pub(crate) fn sync_side_chat(&self, cx: &mut Context<Self>) {
+        let open = self.controller.borrow().side_questions().is_open();
+
+        if self.side_chat_open.replace(open) != open {
+            cx.emit(AgentPaneEvent::SideChatActivity);
+        }
     }
 
     pub(crate) fn read_checkpoints(&mut self, request: CheckpointRead, cx: &mut Context<Self>) {
@@ -1199,6 +1218,8 @@ impl AgentSession {
         self.resume_on_ready = None;
 
         cx.emit(AgentPaneEvent::TitleSuggested(String::new()));
+
+        self.sync_side_chat(cx);
 
         self.start(None, false, move |_, _| drop(retiring), cx);
     }
