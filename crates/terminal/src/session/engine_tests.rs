@@ -10,7 +10,7 @@ use crate::block_store::{BlockStore, SegmentMeta};
 use crate::event::{
     BlockEvent, CommandCapture, EventListener, Msg, MsgSender, Request, TerminalEvent,
 };
-use crate::ghostty::{BlockHandle, GhosttyTerminal};
+use crate::ghostty::{BlockHandle, GhosttyTerminal, MouseReporter};
 use crate::render_buffer::{FrameStore, RenderBuffer};
 use crate::selection::SelectionType;
 use crate::session::page::PageCache;
@@ -91,6 +91,7 @@ pub(super) fn session_from_engine(
         TerminalSession {
             _worker: SessionWorker::detached_for_test(messenger.clone()),
             pages: RefCell::new(PageCache::default()),
+            mouse: RefCell::new(MouseReporter::new().unwrap()),
             render_buffer: Arc::new(FrameStore::new(buffer)),
             vt_modes: Arc::new(AtomicU32::new(0)),
             messenger,

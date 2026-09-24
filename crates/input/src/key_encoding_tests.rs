@@ -5,8 +5,8 @@
 use crate::event::ElementState;
 use crate::keyboard::{Key, KeyLocation, ModifiersState, NamedKey};
 use crate::{
-    KeyEncodeFlags, KeyInput, bracket_paste, build_key_sequence, encode_mouse_report,
-    encode_terminal_input, encode_terminal_key,
+    KeyEncodeFlags, KeyInput, bracket_paste, build_key_sequence, encode_terminal_input,
+    encode_terminal_key,
 };
 
 fn named(key: NamedKey) -> KeyInput {
@@ -425,29 +425,4 @@ fn bracket_paste_wraps_only_when_active() {
         b"\x1b[200~ls -la\x1b[201~".to_vec()
     );
     assert_eq!(bracket_paste(b"", true), b"\x1b[200~\x1b[201~".to_vec());
-}
-
-#[test]
-fn mouse_report_sgr_and_legacy() {
-    assert_eq!(
-        encode_mouse_report(true, 0, 0, true, 4, 2).unwrap(),
-        b"\x1b[<0;5;3M"
-    );
-    assert_eq!(
-        encode_mouse_report(true, 0, 0, false, 4, 2).unwrap(),
-        b"\x1b[<0;5;3m"
-    );
-    assert_eq!(
-        encode_mouse_report(true, 64, 16, true, 0, 0).unwrap(),
-        b"\x1b[<80;1;1M"
-    );
-    assert_eq!(
-        encode_mouse_report(false, 0, 0, true, 0, 0).unwrap(),
-        &[0x1b, b'[', b'M', 32, 33, 33]
-    );
-    assert_eq!(
-        encode_mouse_report(false, 0, 0, false, 0, 0).unwrap(),
-        &[0x1b, b'[', b'M', 35, 33, 33]
-    );
-    assert!(encode_mouse_report(false, 0, 0, true, 223, 0).is_none());
 }

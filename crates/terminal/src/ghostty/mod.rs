@@ -4,6 +4,7 @@ pub use libghostty_vt_sys::BlockHandle;
 
 pub use crate::ghostty::block::{AcquiredBlock, BlockRef};
 pub use crate::ghostty::error::{Error, Result};
+pub use crate::ghostty::mouse::{MouseAction, MouseButton, MouseReporter};
 pub use crate::ghostty::types::{
     CellText, CellWide, Color, Palette, PlacementScreenPos, RowCell, ScreenRowMeta, ScreenRowRead,
     ScrollbarInfo, SnapshotColors, SnapshotCursor, SnapshotPlacement, SnapshotStyle, Underline,
@@ -51,6 +52,7 @@ mod error;
 mod format;
 mod grid_read;
 mod kitty;
+mod mouse;
 mod render_state;
 mod types;
 

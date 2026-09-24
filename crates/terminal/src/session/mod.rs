@@ -31,9 +31,7 @@ use nmt_config::CursorShape;
 use nmt_config::colors::Colors;
 use nmt_input::event::ElementState;
 use nmt_input::keyboard::{Key, KeyLocation, ModifiersState};
-use nmt_input::{
-    KeyEncodeFlags, KeyInput, bracket_paste, encode_mouse_report, encode_terminal_input,
-};
+use nmt_input::{KeyEncodeFlags, KeyInput, bracket_paste, encode_terminal_input};
 use nmt_platform::process::ProcessTree;
 use nmt_platform::{
     AsyncPty, PtyOptions, WinsizeBuilder, create_managed_pty_with_env, create_pty_with_env,
@@ -46,7 +44,7 @@ use crate::clipboard::ClipboardType;
 use crate::event::{
     BlockEvent, BlockRange, Msg, MsgSender, ProgressReport, Query, Request, TextPiece, TextSource,
 };
-use crate::ghostty::{BlockHandle, ScreenRowRead};
+use crate::ghostty::{BlockHandle, MouseAction, MouseButton, MouseReporter, ScreenRowRead};
 use crate::graphics::{GraphicData, UpdateQueues};
 use crate::grid::{Column, Line, Pos};
 use crate::input::{TerminalKey, key_encode_flags, should_defer_to_ime};
@@ -115,6 +113,7 @@ pub struct InFlightBlock {
 pub struct TerminalSession {
     _worker: SessionWorker,
     pages: RefCell<PageCache>,
+    mouse: RefCell<MouseReporter>,
     render_buffer: SessionBuffer,
     vt_modes: Arc<AtomicU32>,
     messenger: MsgSender,
@@ -234,9 +233,17 @@ impl TerminalSession {
             )
         })?;
 
+        let mouse = MouseReporter::new().map_err(|error| {
+            EngineError::new(
+                EngineErrorCode::EngineInit,
+                format!("libghostty-vt mouse encoder init failed: {error}"),
+            )
+        })?;
+
         Ok(Self {
             _worker: handles.worker,
             pages: RefCell::new(PageCache::default()),
+            mouse: RefCell::new(mouse),
             render_buffer: handles.render_buffer,
             vt_modes: handles.vt_modes,
             messenger: handles.messenger,
@@ -515,29 +522,24 @@ impl TerminalSession {
         selection_type: SelectionType,
     ) -> bool {
         if let Some(mode) = self.app_mouse_mode(modifiers) {
-            return match kind {
-                SurfaceMouseEventKind::Down | SurfaceMouseEventKind::Up => {
-                    let Some(code) = button.and_then(mouse_button_code) else {
-                        return false;
-                    };
-
-                    self.report_mouse(
-                        mode,
-                        code,
-                        kind == SurfaceMouseEventKind::Down,
-                        cell.col,
-                        cell.row,
-                        modifiers,
-                    )
-                }
-                SurfaceMouseEventKind::Move => {
-                    let Some(code) = mouse_motion_code(mode, button) else {
-                        return false;
-                    };
-
-                    self.report_mouse(mode, code, true, cell.col, cell.row, modifiers)
-                }
+            let action = match kind {
+                SurfaceMouseEventKind::Down => MouseAction::Press,
+                SurfaceMouseEventKind::Up => MouseAction::Release,
+                SurfaceMouseEventKind::Move => MouseAction::Motion,
             };
+
+            // A press or release always names the button it belongs to.
+            if action != MouseAction::Motion && button.is_none() {
+                return false;
+            }
+
+            let button = button.map(|button| match button {
+                SurfaceMouseButton::Left => MouseButton::Left,
+                SurfaceMouseButton::Middle => MouseButton::Middle,
+                SurfaceMouseButton::Right => MouseButton::Right,
+            });
+
+            return self.report_mouse(mode, action, button, cell.col, cell.row, modifiers);
         }
 
         if button != Some(SurfaceMouseButton::Left) {
@@ -583,20 +585,24 @@ impl TerminalSession {
     fn report_mouse(
         &self,
         mode: Mode,
-        button: u8,
-        pressed: bool,
+        action: MouseAction,
+        button: Option<MouseButton>,
         col: u16,
         row: u16,
         modifiers: ModifiersState,
     ) -> bool {
-        let Some(msg) = encode_mouse_report(
-            mode.contains(Mode::SGR_MOUSE),
-            button,
-            mouse_report_mods(modifiers),
-            pressed,
-            col,
-            row,
-        ) else {
+        let snapshot = self.snapshot();
+
+        let grid = (
+            u16::try_from(snapshot.cols()).unwrap_or(u16::MAX),
+            u16::try_from(snapshot.rows()).unwrap_or(u16::MAX),
+        );
+
+        let Some(msg) = self
+            .mouse
+            .borrow_mut()
+            .encode(mode, action, button, modifiers, col, row, grid)
+        else {
             return false;
         };
 
@@ -725,9 +731,20 @@ impl TerminalSession {
         }
 
         if let Some(mode) = self.mouse_mode() {
-            let button = if lines > 0 { 64 } else { 65 };
+            let button = if lines > 0 {
+                MouseButton::WheelUp
+            } else {
+                MouseButton::WheelDown
+            };
 
-            return self.report_mouse(mode, button, true, cell.col, cell.row, modifiers);
+            return self.report_mouse(
+                mode,
+                MouseAction::Press,
+                Some(button),
+                cell.col,
+                cell.row,
+                modifiers,
+            );
         }
 
         if self.exited() {
@@ -946,45 +963,4 @@ pub enum SurfaceMouseEventKind {
     Down,
     Up,
     Move,
-}
-
-fn mouse_button_code(button: SurfaceMouseButton) -> Option<u8> {
-    match button {
-        SurfaceMouseButton::Left => Some(0),
-        SurfaceMouseButton::Middle => Some(1),
-        SurfaceMouseButton::Right => Some(2),
-    }
-}
-
-fn mouse_motion_code(mode: Mode, button: Option<SurfaceMouseButton>) -> Option<u8> {
-    let button = button.and_then(mouse_button_code);
-
-    if mode.contains(Mode::MOUSE_MOTION) {
-        // DECSET 1003 reports every move; no pressed button uses the X10
-        // no-button id 3, while a pressed button keeps its own id.
-        Some(32 + button.unwrap_or(3))
-    } else if mode.contains(Mode::MOUSE_DRAG) {
-        // DECSET 1002 reports moves only while a button is held.
-        button.map(|button| 32 + button)
-    } else {
-        None
-    }
-}
-
-fn mouse_report_mods(modifiers: ModifiersState) -> u8 {
-    let mut mods = 0;
-
-    if modifiers.shift_key() {
-        mods += 4;
-    }
-
-    if modifiers.alt_key() {
-        mods += 8;
-    }
-
-    if modifiers.control_key() {
-        mods += 16;
-    }
-
-    mods
 }

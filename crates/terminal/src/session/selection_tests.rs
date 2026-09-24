@@ -1,15 +1,9 @@
-use nmt_input::keyboard::ModifiersState;
-
 use crate::ghostty::GhosttyTerminal;
 use crate::grid::{Column, Line, Pos, Side};
 use crate::render_buffer::RenderBuffer;
 use crate::selection::{Selection, SelectionType};
 use crate::session::selection::{SurfaceSelection, block_selection_range, selection_screen_range};
-use crate::session::{
-    SurfaceCellSide, SurfaceMouseButton, SurfaceMouseEventKind, mouse_button_code,
-    mouse_motion_code, mouse_report_mods, paste_payload,
-};
-use crate::vt_modes::Mode;
+use crate::session::{SurfaceCellSide, SurfaceMouseEventKind, paste_payload};
 
 fn pos(row: i32, col: usize) -> Pos {
     Pos::new(Line(row), Column(col))
@@ -196,22 +190,5 @@ fn paste_payload_normalizes_and_guards() {
     assert_eq!(
         paste_payload("ls\x1b[201~rm", true).unwrap(),
         b"\x1b[200~lsrm\x1b[201~".to_vec()
-    );
-}
-
-#[test]
-fn mouse_helpers_match_xterm_codes() {
-    assert_eq!(mouse_button_code(SurfaceMouseButton::Left), Some(0));
-    assert_eq!(mouse_button_code(SurfaceMouseButton::Middle), Some(1));
-    assert_eq!(mouse_button_code(SurfaceMouseButton::Right), Some(2));
-    assert_eq!(
-        mouse_report_mods(ModifiersState::SHIFT | ModifiersState::CONTROL),
-        20
-    );
-    assert_eq!(mouse_report_mods(ModifiersState::ALT), 8);
-    assert_eq!(mouse_motion_code(Mode::MOUSE_MOTION, None), Some(35));
-    assert_eq!(
-        mouse_motion_code(Mode::MOUSE_DRAG, Some(SurfaceMouseButton::Right)),
-        Some(34)
     );
 }

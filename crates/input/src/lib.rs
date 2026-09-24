@@ -246,37 +246,6 @@ pub fn bracket_paste(body: &[u8], bracketed: bool) -> Vec<u8> {
     out
 }
 
-/// Encode a terminal mouse report in SGR (1006) or legacy X10 form.
-pub fn encode_mouse_report(
-    sgr: bool,
-    button: u8,
-    mods: u8,
-    pressed: bool,
-    col: u16,
-    row: u16,
-) -> Option<Vec<u8>> {
-    if sgr {
-        let c = if pressed { 'M' } else { 'm' };
-
-        Some(format!("\x1b[<{};{};{}{}", button + mods, col + 1, row + 1, c).into_bytes())
-    } else {
-        let b = if pressed { button + mods } else { 3 + mods };
-
-        if col >= 223 || row >= 223 {
-            return None;
-        }
-
-        Some(vec![
-            b'\x1b',
-            b'[',
-            b'M',
-            32 + b,
-            32 + 1 + col as u8,
-            32 + 1 + row as u8,
-        ])
-    }
-}
-
 /// Named keys whose terminal sequence overrides the generic encoder, mirroring
 /// rioterm's built-in `Action::Esc` binding rows exactly (modifiers matched for
 /// equality, mode gates as in `default_key_bindings`). `None` falls through to

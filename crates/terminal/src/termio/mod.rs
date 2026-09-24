@@ -200,6 +200,8 @@ fn ghostty_vt_modes(g: &GhosttyTerminal) -> vt_modes::Mode {
 
     m.set(Mode::UTF8_MOUSE, g.mode(gm::MOUSE_UTF8));
 
+    m.set(Mode::URXVT_MOUSE, g.mode(gm::MOUSE_URXVT));
+
     m.set(Mode::ALTERNATE_SCROLL, g.mode(gm::MOUSE_ALTERNATE_SCROLL));
 
     m.set(Mode::BRACKETED_PASTE, g.mode(gm::BRACKETED_PASTE));
