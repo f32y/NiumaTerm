@@ -346,6 +346,7 @@ fn pending_native_resize_keeps_output_live_and_preserves_input_order() {
     let mut state = PtyState::default();
     let mut cx = noop_cx();
     let mut buf = vec![0; READ_BUFFER_SIZE];
+
     let (finish_resize, resized) = oneshot::channel();
 
     machine.pty.writer.resize_completion = Some(resized);
@@ -1726,7 +1727,9 @@ fn prediction_cleanup_cannot_discard_completed_output() {
     for row in 0..rows {
         for cell in machine
             .ghostty
-            .read_block_row(handle, row)
+            .block_acquire(handle)
+            .unwrap()
+            .read_row(row, &machine.ghostty.color_palette())
             .unwrap()
             .unwrap()
             .cells

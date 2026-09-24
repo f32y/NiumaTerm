@@ -852,7 +852,10 @@ fn engine_rows_render_like_viewport_rows() {
 }
 
 fn engine_row(engine: &GhosttyTerminal, row: u32, colors: &BackgroundColors) -> TerminalLine {
-    let data = engine.read_screen_row(row).unwrap().unwrap();
+    let data = engine
+        .read_screen_row(row, &engine.color_palette())
+        .unwrap()
+        .unwrap();
 
     let mut builder = EngineRowBuilder::default();
 

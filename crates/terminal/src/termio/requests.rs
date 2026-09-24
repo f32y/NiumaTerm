@@ -170,13 +170,15 @@ fn read_page(
 
     match source {
         PageSource::Screen { .. } => {
+            let palette = engine.color_palette();
+
             for row in start..start.saturating_add(PAGE_ROWS) {
                 let Ok(row) = u32::try_from(row) else {
                     break;
                 };
 
                 let Some(row) = engine
-                    .read_screen_row(row)
+                    .read_screen_row(row, &palette)
                     .map_err(|error| RequestError::Engine(error.to_string()))?
                 else {
                     break;
@@ -202,9 +204,12 @@ fn read_page(
                 .saturating_add(PAGE_ROWS)
                 .min(acquired.block.row_count());
 
+            // The acquired snapshot reads without the engine lock and brings
+            // the palette its styles resolve against.
             for row in start..end {
-                let row = engine
-                    .read_block_row(handle, row)
+                let row = acquired
+                    .block
+                    .read_row(row, &acquired.palette)
                     .map_err(|error| RequestError::Engine(error.to_string()))?
                     .ok_or(RequestError::Unavailable)?;
 

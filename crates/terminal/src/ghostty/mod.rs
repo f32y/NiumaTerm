@@ -77,12 +77,12 @@ use libghostty_vt_sys::{
     TerminalScrollViewportValue as VtTerminalScrollViewportValue,
     TerminalScrollbar as VtTerminalScrollbar, ghostty_block_ref_cols, ghostty_kitty_graphics_image,
     ghostty_kitty_graphics_image_get, ghostty_terminal_block_acquire, ghostty_terminal_block_at,
-    ghostty_terminal_block_cols, ghostty_terminal_block_count, ghostty_terminal_block_grid_ref,
-    ghostty_terminal_block_row_count, ghostty_terminal_blocks_bytes, ghostty_terminal_clear_blocks,
-    ghostty_terminal_finish_block, ghostty_terminal_free, ghostty_terminal_get,
-    ghostty_terminal_grid_ref, ghostty_terminal_new, ghostty_terminal_point_from_grid_ref,
-    ghostty_terminal_remove_block, ghostty_terminal_resize, ghostty_terminal_scroll_viewport,
-    ghostty_terminal_set, ghostty_terminal_vt_write, sized as vt_sized,
+    ghostty_terminal_block_count, ghostty_terminal_block_row_count, ghostty_terminal_blocks_bytes,
+    ghostty_terminal_clear_blocks, ghostty_terminal_finish_block, ghostty_terminal_free,
+    ghostty_terminal_get, ghostty_terminal_grid_ref, ghostty_terminal_new,
+    ghostty_terminal_point_from_grid_ref, ghostty_terminal_remove_block, ghostty_terminal_resize,
+    ghostty_terminal_scroll_viewport, ghostty_terminal_set, ghostty_terminal_vt_write,
+    sized as vt_sized,
 };
 use nmt_config::CursorShape;
 #[cfg(test)]
@@ -769,16 +769,6 @@ impl GhosttyTerminal {
             .then_some(rows)
     }
 
-    /// The column count the block was frozen at (can differ from the live
-    /// terminal width after a resize). `None` for a stale handle.
-    pub fn block_cols(&self, handle: BlockHandle) -> Option<u16> {
-        let mut cols: u16 = 0;
-
-        (unsafe { ghostty_terminal_block_cols(self.terminal, handle, &mut cols) }
-            == VtResult::SUCCESS)
-            .then_some(cols)
-    }
-
     /// Total page-storage bytes of all finished blocks — the value the
     /// block byte budget is enforced against.
     pub fn blocks_bytes(&self) -> usize {
@@ -839,55 +829,6 @@ impl GhosttyTerminal {
             palette,
             placements,
         })
-    }
-
-    /// Walk one row of a finished block with styles — the frozen-block
-    /// counterpart of [`Self::read_screen_row_visit`]. Returns `None` for a
-    /// stale handle or a row at/beyond the block's logical row count.
-    /// Unlike active-screen refs, block refs stay valid until the block is
-    /// removed, but this still reads within one call (same visitor shape).
-    pub fn read_block_row_visit(
-        &self,
-        handle: BlockHandle,
-        row: usize,
-        palette: &[VtColorRgb; 256],
-        on_cell: impl FnMut(u16, CellText, CellWide, SnapshotStyle),
-    ) -> Result<Option<ScreenRowMeta>> {
-        let mut grid_ref = VtGridRef::default();
-
-        match unsafe { ghostty_terminal_block_grid_ref(self.terminal, handle, row, &mut grid_ref) }
-        {
-            VtResult::SUCCESS => {}
-            VtResult::NO_VALUE | VtResult::INVALID_VALUE => return Ok(None),
-            other => {
-                Error::from_code(other)?;
-
-                return Ok(None);
-            }
-        }
-
-        let cols = self.block_cols(handle).unwrap_or(self.cols);
-
-        Ok(Some(visit_row_cells(grid_ref, cols, palette, on_cell)?))
-    }
-
-    /// Materializing convenience over [`Self::read_block_row_visit`] — test-only.
-    pub fn read_block_row(&self, handle: BlockHandle, row: usize) -> Result<Option<ScreenRowRead>> {
-        let palette = self.color_palette();
-        let cols = self.block_cols(handle).unwrap_or(self.cols) as usize;
-
-        let mut cells = Vec::with_capacity(cols);
-
-        let meta = self.read_block_row_visit(handle, row, &palette, |x, text, wide, style| {
-            cells.push(RowCell {
-                x,
-                text,
-                wide,
-                style,
-            })
-        })?;
-
-        Ok(meta.map(|meta| ScreenRowRead { cells, meta }))
     }
 
     /// Export terminal text via the engine formatter. `selection = None`
@@ -976,20 +917,19 @@ impl GhosttyTerminal {
             .map(|(_, y)| y)
     }
 
-    /// Read one absolute `SCREEN` row into a materialized `Vec` — test-only
-    /// convenience over [`Self::read_screen_row_visit`].
-    pub fn read_screen_row(&self, row: u32) -> Result<Option<ScreenRowRead>> {
+    /// Read one absolute `SCREEN` row into a materialized `Vec`. The palette
+    /// is the caller's, so a page of rows copies it out of the engine once.
+    pub fn read_screen_row(&self, row: u32, palette: &Palette) -> Result<Option<ScreenRowRead>> {
         let mut cells = Vec::with_capacity(self.cols as usize);
 
-        let meta =
-            self.read_screen_row_visit(row, &self.color_palette(), |x, text, wide, style| {
-                cells.push(RowCell {
-                    x,
-                    text,
-                    wide,
-                    style,
-                })
-            })?;
+        let meta = self.read_screen_row_visit(row, palette, |x, text, wide, style| {
+            cells.push(RowCell {
+                x,
+                text,
+                wide,
+                style,
+            })
+        })?;
 
         Ok(meta.map(|meta| ScreenRowRead { cells, meta }))
     }

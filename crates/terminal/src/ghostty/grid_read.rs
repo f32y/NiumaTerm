@@ -85,9 +85,9 @@ fn grid_ref_hyperlink_uri(r: &VtGridRef) -> Option<String> {
 }
 
 /// Shared per-row cell walk over a resolved row `GridRef` — the body of
-/// [`GhosttyTerminal::read_screen_row_visit`], also used by finished-block reads
-/// ([`GhosttyTerminal::read_block_row_visit`]) where the ref comes from the block
-/// resolver instead of the active screen.
+/// [`GhosttyTerminal::read_screen_row_visit`], also used by finished-block
+/// reads ([`BlockRef::read_row_visit`](crate::ghostty::BlockRef::read_row_visit))
+/// where the ref comes from the acquired block instead of the active screen.
 pub(super) fn visit_row_cells(
     mut grid_ref: VtGridRef,
     cols: u16,

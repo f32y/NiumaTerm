@@ -12,8 +12,8 @@ use libghostty_vt_sys::{
 use crate::ghostty::GhosttyTerminal;
 use crate::ghostty::grid_read::visit_row_cells;
 use crate::ghostty::{
-    BlockHandle, CellText, CellWide, Error, Palette, PlacementScreenPos, Result, ScreenRowMeta,
-    SnapshotStyle,
+    BlockHandle, CellText, CellWide, Error, Palette, PlacementScreenPos, Result, RowCell,
+    ScreenRowMeta, ScreenRowRead, SnapshotStyle,
 };
 
 /// An acquired read reference to a finished block (engine-refcounted).
@@ -103,6 +103,23 @@ impl BlockRef {
         Ok(Some(visit_row_cells(
             grid_ref, self.cols, palette, on_cell,
         )?))
+    }
+
+    /// Materializing form of [`Self::read_row_visit`], read from the snapshot
+    /// without the engine lock.
+    pub fn read_row(&self, row: usize, palette: &Palette) -> Result<Option<ScreenRowRead>> {
+        let mut cells = Vec::with_capacity(self.cols as usize);
+
+        let meta = self.read_row_visit(row, palette, |x, text, wide, style| {
+            cells.push(RowCell {
+                x,
+                text,
+                wide,
+                style,
+            })
+        })?;
+
+        Ok(meta.map(|meta| ScreenRowRead { cells, meta }))
     }
 
     /// The snapshot's Kitty graphics storage handle, for placement

@@ -46,20 +46,36 @@ fn finish_block_freezes_and_reads_back() {
     assert_eq!(t.block_count(), 1);
     assert_eq!(t.block_at(0).map(|h| h.id), Some(handle.id));
     assert_eq!(t.block_row_count(handle), Some(2));
-    assert_eq!(t.block_cols(handle), Some(20));
+    assert_eq!(t.block_acquire(handle).map(|block| block.cols()), Some(20));
 
-    let row0 = t.read_block_row(handle, 0).unwrap().expect("row 0");
+    let row0 = t
+        .block_acquire(handle)
+        .unwrap()
+        .read_row(0, &t.color_palette())
+        .unwrap()
+        .expect("row 0");
+
     let text: String = row0.cells.iter().map(|c| c.text.as_str()).collect();
 
     assert_eq!(text, "hello");
     assert!(row0.cells[0].style.bold, "SGR captured in frozen block");
 
-    let row1 = t.read_block_row(handle, 1).unwrap().expect("row 1");
+    let row1 = t
+        .block_acquire(handle)
+        .unwrap()
+        .read_row(1, &t.color_palette())
+        .unwrap()
+        .expect("row 1");
+
     let text: String = row1.cells.iter().map(|c| c.text.as_str()).collect();
 
     assert_eq!(text, "world");
     assert!(
-        t.read_block_row(handle, 2).unwrap().is_none(),
+        t.block_acquire(handle)
+            .unwrap()
+            .read_row(2, &t.color_palette())
+            .unwrap()
+            .is_none(),
         "beyond logical rows"
     );
 
@@ -70,12 +86,21 @@ fn finish_block_freezes_and_reads_back() {
 
     t.write_vt(b"next");
 
-    let row = t.read_screen_row(0).unwrap().expect("active row");
+    let row = t
+        .read_screen_row(0, &t.color_palette())
+        .unwrap()
+        .expect("active row");
 
     assert!(row.cells[0].style.bold, "continuation SGR applies");
 
     // The frozen block never changes.
-    let row0 = t.read_block_row(handle, 0).unwrap().expect("row 0 again");
+    let row0 = t
+        .block_acquire(handle)
+        .unwrap()
+        .read_row(0, &t.color_palette())
+        .unwrap()
+        .expect("row 0 again");
+
     let text: String = row0.cells.iter().map(|c| c.text.as_str()).collect();
 
     assert_eq!(text, "hello");
@@ -264,13 +289,19 @@ fn block_reflows_on_resize() {
     t.resize(5, 5, 10, 20).unwrap();
 
     assert_eq!(t.block_row_count(handle), Some(3));
-    assert_eq!(t.block_cols(handle), Some(5));
+    assert_eq!(t.block_acquire(handle).map(|block| block.cols()), Some(5));
 
     let generation = t.block_at(0).map(|h| h.generation);
 
     assert_eq!(generation, Some(handle.generation + 1));
 
-    let row = t.read_block_row(handle, 1).unwrap().expect("row 1");
+    let row = t
+        .block_acquire(handle)
+        .unwrap()
+        .read_row(1, &t.color_palette())
+        .unwrap()
+        .expect("row 1");
+
     let text: String = row.cells.iter().map(|c| c.text.as_str()).collect();
 
     assert_eq!(text, "56789");
@@ -1929,8 +1960,16 @@ fn read_screen_row_reaches_scrollback_with_wrap_flag() {
 
     // Rows 0-1 are now in scrollback; the viewport must not move to read them.
     let offset_before = t.scrollbar().offset;
-    let row0 = t.read_screen_row(0).unwrap().expect("scrollback row 0");
-    let row1 = t.read_screen_row(1).unwrap().expect("scrollback row 1");
+
+    let row0 = t
+        .read_screen_row(0, &t.color_palette())
+        .unwrap()
+        .expect("scrollback row 0");
+
+    let row1 = t
+        .read_screen_row(1, &t.color_palette())
+        .unwrap()
+        .expect("scrollback row 1");
 
     assert_eq!(t.scrollbar().offset, offset_before, "viewport untouched");
 
@@ -1949,11 +1988,17 @@ fn read_screen_row_prompt_tag_and_hyperlinks() {
 
     t.write_vt(b"\x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\ text");
 
-    let prompt_row = t.read_screen_row(0).unwrap().expect("prompt row");
+    let prompt_row = t
+        .read_screen_row(0, &t.color_palette())
+        .unwrap()
+        .expect("prompt row");
 
     assert!(prompt_row.meta.prompt_start, "OSC 133;A row tagged");
 
-    let link_row = t.read_screen_row(1).unwrap().expect("link row");
+    let link_row = t
+        .read_screen_row(1, &t.color_palette())
+        .unwrap()
+        .expect("link row");
 
     assert!(!link_row.meta.prompt_start);
     assert_eq!(
@@ -1968,7 +2013,11 @@ fn read_screen_row_out_of_range_is_none() {
 
     t.write_vt(b"x");
 
-    assert!(t.read_screen_row(9999).unwrap().is_none());
+    assert!(
+        t.read_screen_row(9999, &t.color_palette())
+            .unwrap()
+            .is_none()
+    );
 }
 
 /// The configured line limit bounds the history the engine keeps, to page
