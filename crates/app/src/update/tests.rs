@@ -1,4 +1,4 @@
-use nmt_platform::windows::restart_manager::{AffectedApplication, ApplicationKind};
+use nmt_updater::windows::restart_manager::{AffectedApplication, ApplicationKind};
 
 use crate::update::file_users::display_names;
 

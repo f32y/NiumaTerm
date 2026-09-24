@@ -16,12 +16,12 @@ use std::process::Command;
 use std::time::Duration;
 use std::{fs, process};
 
-use nmt_platform::file_version::version_string;
-use nmt_platform::windows::self_update::{ReplaceFilesError, discard_previous, replace_files};
 use tracing::warn;
 
 use crate::AWAIT_EXIT_FLAG;
+use crate::windows::file_version::version_string;
 use crate::windows::releases::Release;
+use crate::windows::self_update::{ReplaceFilesError, discard_previous, replace_files};
 
 /// Why an update that was found could not be put in place. Each variant names
 /// the step that refused, because what a user can do about it differs: a

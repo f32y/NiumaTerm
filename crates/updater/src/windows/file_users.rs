@@ -4,13 +4,13 @@ mod tests;
 
 use std::path::{Path, PathBuf};
 
-use nmt_platform::windows::restart_manager::{
-    AffectedApplication, FileUsage, RestartManagerError, RestartManagerSession, SystemApi,
-};
 use tracing::warn;
 
 use crate::windows::InstallError;
 use crate::windows::install::Installation;
+use crate::windows::restart_manager::{
+    AffectedApplication, FileUsage, RestartManagerError, RestartManagerSession, SystemApi,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FileUsePromptReason {

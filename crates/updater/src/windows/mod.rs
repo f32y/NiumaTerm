@@ -9,10 +9,15 @@ pub use crate::windows::install::{InstallError, Installation};
 pub use crate::windows::releases::{Check, CheckError, CheckedRelease, Release};
 pub use crate::windows::status::Status;
 
+pub mod restart_manager;
+
 mod download;
 mod file_users;
+mod file_version;
 mod install;
+mod process_exit;
 mod releases;
+mod self_update;
 mod status;
 
 #[cfg(test)]
@@ -23,10 +28,10 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use nmt_config::update::UpdateConfig;
-use nmt_platform::windows::self_update::discard_previous;
 use tracing::warn;
 
 use crate::windows::file_users::ApplyOutcome;
+use crate::windows::self_update::discard_previous;
 
 const STAGING_DIRECTORY: &str = "update";
 
@@ -304,5 +309,5 @@ pub fn settle_previous_update(config_directory: &Path, install: &Path) {
 }
 
 pub fn wait_for_previous_instance(pid: u32) -> bool {
-    nmt_platform::wait_for_exit(pid, install::PREDECESSOR_TIMEOUT)
+    process_exit::wait_for_exit(pid, install::PREDECESSOR_TIMEOUT)
 }

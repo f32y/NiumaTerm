@@ -23,6 +23,7 @@ serde_json.workspace = true
 sha2.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+windows-sys.workspace = true
 zip.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]

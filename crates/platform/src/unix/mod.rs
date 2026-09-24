@@ -1,5 +1,4 @@
 #![cfg(unix)]
-pub use crate::unix::process_exit::wait_for_exit;
 pub use crate::unix::shell_integration::{
     is_shell_integration_registered, register_shell_integration, set_system_notification_enabled,
     shell_integration_dll_mismatched, system_notification_enabled, unregister_shell_integration,
@@ -24,7 +23,6 @@ mod clipboard;
 #[cfg(target_os = "macos")]
 mod macos;
 mod notifier;
-mod process_exit;
 mod shell_integration;
 
 use std::cell::Cell;

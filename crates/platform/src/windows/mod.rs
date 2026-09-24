@@ -1,4 +1,3 @@
-pub use crate::windows::process_exit::wait_for_exit;
 pub use crate::windows::readiness::SoftReady;
 pub use crate::windows::shell_integration::{
     is_shell_integration_registered, register_shell_integration, set_system_notification_enabled,
@@ -12,13 +11,10 @@ pub(crate) use crate::windows::powershell::{
 
 pub mod data_protection;
 pub mod environment;
-pub mod file_version;
 pub mod filesystem;
 pub mod ipc;
 pub mod powershell;
 pub mod process;
-pub mod restart_manager;
-pub mod self_update;
 pub mod shell_extension;
 pub mod window;
 
@@ -30,7 +26,6 @@ mod clipboard;
 mod conpty;
 mod notifier;
 mod pipes;
-mod process_exit;
 mod readiness;
 mod registered_wait;
 mod shell_integration;

@@ -1,13 +1,9 @@
 use std::cell::RefCell;
 use std::collections::VecDeque;
-use std::fs;
 use std::path::Path;
-use std::slice;
 use std::sync::Arc;
+use std::{fs, slice};
 
-use nmt_platform::windows::restart_manager::{
-    AffectedApplication, ApplicationKind, FileUsage, Operation, RebootReasons, RestartManagerError,
-};
 use parking_lot::Mutex;
 use tempfile::tempdir;
 
@@ -17,6 +13,9 @@ use crate::windows::file_users::{
 };
 use crate::windows::install::{InstallError, Installation, SHELL_EXTENSION_DLL};
 use crate::windows::releases::Release;
+use crate::windows::restart_manager::{
+    AffectedApplication, ApplicationKind, FileUsage, Operation, RebootReasons, RestartManagerError,
+};
 
 thread_local! {
     static NEXT_SESSION: RefCell<Option<Arc<Mutex<CloseState>>>> = const { RefCell::new(None) };

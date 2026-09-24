@@ -8,7 +8,7 @@ use gpui_component::dialog::{
     DIALOG_BUTTON_MIN_WIDTH, Dialog, DialogClose, DialogContent, DialogFooter,
 };
 use gpui_component::{ActiveTheme as _, WindowExt as _, v_flex};
-use nmt_platform::windows::restart_manager::{AffectedApplication, ApplicationKind};
+use nmt_updater::windows::restart_manager::{AffectedApplication, ApplicationKind};
 use nmt_updater::windows::{FileUsePrompt, FileUsePromptReason};
 use rust_i18n::t;
 
