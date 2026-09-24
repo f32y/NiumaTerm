@@ -108,9 +108,9 @@ pub enum TabBarStyle {
 pub enum TabShape {
     /// Pills with four rounded corners floating on the title bar, apart from
     /// the content below them.
-    #[default]
     Rounded,
     /// Tabs with rounded top corners that rest on the content edge.
+    #[default]
     Attached,
 }
 
