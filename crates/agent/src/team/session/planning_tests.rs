@@ -7,7 +7,7 @@ use crate::session::team_capabilities::ModeratorAdmission;
 use crate::team::attempt::{AttemptState, BudgetScope};
 use crate::team::budget::TurnPurpose;
 use crate::team::discussion::{
-    DiscussionMode, DiscussionState, ModeratorAction, PauseReason, StageKind,
+    ArrangementState, DiscussionMode, DiscussionState, ModeratorAction, PauseReason, StageKind,
 };
 use crate::team::model::{
     AttemptId, Author, ContextError, ContextLimits, DiscussionId, MemberId, UserInput,
@@ -820,4 +820,41 @@ fn user_inputs(session: &TeamSession) -> usize {
         .iter()
         .filter(|message| message.author == Author::User)
         .count()
+}
+
+/// A steered send whose delivery was unknown and is then accepted by the
+/// provider is running again: its arrangement is active and the
+/// uncertainty no longer holds the discussion.
+#[test]
+fn accepting_an_uncertain_attempt_makes_its_arrangement_active_again() {
+    let (_directory, mut session, alice, bob) = ready_team();
+
+    let id = fixed_discussion(&mut session, alice, bob);
+    let ids = session.advance_discussion(id, &ROOMY).unwrap();
+    let intent = session.store.room().attempts()[0].intent.clone();
+
+    session.dispatch(ids[0], |_| SendOutcome::Steered).unwrap();
+
+    let key = AttemptEventKey {
+        attempt: ids[0],
+        member: intent.recipient,
+        backend_generation: intent.backend_generation,
+    };
+
+    assert!(session.accept_attempt(key, "turn-1").unwrap());
+
+    let discussion = session.store.room().discussion(id).unwrap();
+
+    assert!(
+        discussion
+            .stages()
+            .iter()
+            .flat_map(|stage| stage.arrangements.iter())
+            .any(|entry| entry.state == ArrangementState::Active(ids[0]))
+    );
+    assert!(
+        !discussion
+            .pauses()
+            .contains(&PauseReason::UncertainAttempt(ids[0]))
+    );
 }

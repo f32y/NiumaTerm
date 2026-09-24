@@ -49,13 +49,35 @@ pub(super) fn accepts(attempt: &Attempt, provider_turn: &str) -> bool {
 }
 
 /// Record that the provider accepted attempt `index` as `provider_turn`, which
-/// is what counts its delivered context as given to the recipient.
+/// is what counts its delivered context as given to the recipient. A send
+/// whose delivery was uncertain is known to be running once accepted, so its
+/// arrangement is active again and the uncertainty no longer holds the
+/// discussion.
 pub(super) fn accept(room: &mut Room, index: usize, provider_turn: &str) -> Result<(), TeamError> {
     let attempt = &mut room.attempts[index];
+    let was_uncertain = attempt.state == AttemptState::Uncertain;
 
     attempt.provider_turn = Some(provider_turn.to_owned());
 
     attempt.state = AttemptState::Accepted;
+
+    let (id, operation, budget) = (attempt.id, attempt.intent.operation, attempt.intent.budget);
+
+    if was_uncertain && let BudgetScope::Discussion(discussion_id) = budget {
+        let discussion = room
+            .discussion_mut(discussion_id)
+            .ok_or(TeamError::Unavailable)?;
+
+        discussion.mark_operation(operation, ArrangementState::Active(id));
+
+        discussion.resolve_pause(&PauseReason::UncertainAttempt(id));
+
+        // As on completion, other pauses still hold the discussion, now with
+        // this turn running under them.
+        if !discussion.pauses.is_empty() {
+            discussion.settle_pause();
+        }
+    }
 
     Ok(())
 }
