@@ -24,6 +24,7 @@ nmt_runtime.workspace = true
 nmt_updater.workspace = true
 
 dirs.workspace = true
+dunce.workspace = true
 parking_lot.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

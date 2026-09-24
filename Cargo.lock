@@ -291,6 +291,7 @@ dependencies = [
  "chrono",
  "clap",
  "dirs",
+ "dunce",
  "futures",
  "gpui",
  "gpui-base",

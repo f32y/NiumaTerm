@@ -46,20 +46,12 @@ fn resolve_directory(path: path::PathBuf) -> Resolved {
         return Resolved::Unusable(display);
     }
 
-    Resolved::Directory(strip_verbatim_prefix(&resolved.to_string_lossy()))
-}
-
-/// Drop the `\\?\` extended-length prefix `canonicalize` adds on Windows.
-/// The prefix is correct for the API but is rejected by many shells and
-/// command-line tools, and it would also make the same directory look
-/// different from the plain path a saved snapshot holds.
-fn strip_verbatim_prefix(path: &str) -> String {
-    path.strip_prefix(r"\\?\")
-        .map(|stripped| match stripped.strip_prefix("UNC\\") {
-            Some(unc) => format!(r"\\{unc}"),
-            None => stripped.to_string(),
-        })
-        .unwrap_or_else(|| path.to_string())
+    // The extended-length prefix `canonicalize` adds on Windows is correct
+    // for the API but rejected by many shells and command-line tools, and it
+    // would make the same directory look different from the plain path a
+    // saved snapshot holds. `dunce` drops it wherever the plain form is
+    // equivalent, including for UNC shares.
+    Resolved::Directory(dunce::simplified(&resolved).to_string_lossy().into_owned())
 }
 
 /// Draft directory list behind the workspace-directory dialog. Owning the
