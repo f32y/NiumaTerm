@@ -184,346 +184,352 @@ impl QuestionState {
     }
 }
 
-impl Session {
-    pub(crate) fn restore_question_requests(&mut self, requests: Vec<QuestionRequest>) {
-        for request in requests {
-            if request.mode != QuestionMode::Async
-                || self
-                    .conversation
-                    .questions
-                    .pending
-                    .contains_key(&request.id)
-            {
-                continue;
-            }
-
-            let Some(item_id) = request.id.strip_prefix("message:") else {
-                continue;
-            };
-
-            self.conversation
+pub(super) fn restore_question_requests(session: &mut Session, requests: Vec<QuestionRequest>) {
+    for request in requests {
+        if request.mode != QuestionMode::Async
+            || session
+                .conversation
                 .questions
-                .seen_messages
-                .insert(item_id.to_string());
-
-            self.conversation.questions.pending.insert(
-                request.id.clone(),
-                PendingQuestion {
-                    request,
-                    source: QuestionSource::Message,
-                },
-            );
+                .pending
+                .contains_key(&request.id)
+        {
+            continue;
         }
-    }
 
-    pub(super) fn on_question_request(&mut self, rpc_id: u64, params: &Value) -> Vec<Event> {
-        let parsed = serde_json::from_value::<InputRequest>(params.clone())
-            .map_err(|error| format!("Invalid user-input request: {error}"))
-            .and_then(|request| {
-                let mut ids = HashSet::new();
-
-                if self.conversation.thread_id.as_deref() != Some(request.thread_id.as_str())
-                    || request.turn_id.is_empty()
-                    || request.item_id.is_empty()
-                    || request.questions.is_empty()
-                    || request.questions.iter().any(|question| {
-                        question.id.is_empty()
-                            || question.question.trim().is_empty()
-                            || !ids.insert(question.id.clone())
-                    })
-                {
-                    return Err("Invalid question identity or thread".to_string());
-                }
-
-                Ok(request)
-            });
-
-        let request = match parsed {
-            Ok(request) => request,
-            Err(message) => {
-                self.send(json!({"jsonrpc": "2.0", "id": rpc_id,
-                    "error": {"code": -32602, "message": message}}));
-
-                return Vec::new();
-            }
+        let Some(item_id) = request.id.strip_prefix("message:") else {
+            continue;
         };
 
-        let id = format!("request:{rpc_id}");
-
-        if self.conversation.questions.pending.contains_key(&id) {
-            return Vec::new();
-        }
-
-        let question_ids = request
+        session
+            .conversation
             .questions
-            .iter()
-            .map(|question| question.id.clone())
-            .collect();
+            .seen_messages
+            .insert(item_id.to_string());
 
-        let batch = QuestionRequest {
-            id: id.clone(),
-            mode: if request.is_blocking.unwrap_or(true) {
-                QuestionMode::Blocking
-            } else {
-                QuestionMode::Optional
-            },
-            questions: request
-                .questions
-                .into_iter()
-                .map(|question| {
-                    let options: Vec<QuestionOption> = question
-                        .options
-                        .unwrap_or_default()
-                        .into_iter()
-                        .map(|option| QuestionOption {
-                            label: option.label,
-                            description: Some(option.description),
-                        })
-                        .collect();
-
-                    let input = if question.is_secret {
-                        QuestionInput::Secret
-                    } else if question.is_other || options.is_empty() {
-                        QuestionInput::Text
-                    } else {
-                        QuestionInput::SelectionOnly
-                    };
-
-                    Question {
-                        header: Some(question.header),
-                        question: question.question,
-                        multi_select: false,
-                        options,
-                        input,
-                    }
-                })
-                .collect(),
-        };
-
-        self.conversation.questions.pending.insert(
-            id,
+        session.conversation.questions.pending.insert(
+            request.id.clone(),
             PendingQuestion {
-                request: batch.clone(),
-                source: QuestionSource::Request {
-                    rpc_id,
-                    turn_id: request.turn_id,
-                    question_ids,
-                    submitted: None,
-                },
+                request,
+                source: QuestionSource::Message,
             },
         );
+    }
+}
 
-        vec![Event::InputRequested(batch)]
+pub(super) fn on_question_request(
+    session: &mut Session,
+    rpc_id: u64,
+    params: &Value,
+) -> Vec<Event> {
+    let parsed = serde_json::from_value::<InputRequest>(params.clone())
+        .map_err(|error| format!("Invalid user-input request: {error}"))
+        .and_then(|request| {
+            let mut ids = HashSet::new();
+
+            if session.conversation.thread_id.as_deref() != Some(request.thread_id.as_str())
+                || request.turn_id.is_empty()
+                || request.item_id.is_empty()
+                || request.questions.is_empty()
+                || request.questions.iter().any(|question| {
+                    question.id.is_empty()
+                        || question.question.trim().is_empty()
+                        || !ids.insert(question.id.clone())
+                })
+            {
+                return Err("Invalid question identity or thread".to_string());
+            }
+
+            Ok(request)
+        });
+
+    let request = match parsed {
+        Ok(request) => request,
+        Err(message) => {
+            session.send(json!({"jsonrpc": "2.0", "id": rpc_id,
+                "error": {"code": -32602, "message": message}}));
+
+            return Vec::new();
+        }
+    };
+
+    let id = format!("request:{rpc_id}");
+
+    if session.conversation.questions.pending.contains_key(&id) {
+        return Vec::new();
     }
 
-    /// Message dismissal settles locally; submitted answers resolve through later events.
-    pub fn respond_input(
-        &mut self,
-        id: &str,
-        answers: Option<Vec<Vec<String>>>,
-        settings: &ThreadSettings,
-    ) -> Result<QuestionResponse, String> {
-        let pending = self
-            .conversation
+    let question_ids = request
+        .questions
+        .iter()
+        .map(|question| question.id.clone())
+        .collect();
+
+    let batch = QuestionRequest {
+        id: id.clone(),
+        mode: if request.is_blocking.unwrap_or(true) {
+            QuestionMode::Blocking
+        } else {
+            QuestionMode::Optional
+        },
+        questions: request
             .questions
-            .pending
-            .get(id)
-            .ok_or("This question is no longer pending")?;
-
-        if self
-            .conversation
-            .questions
-            .submissions
-            .values()
-            .any(|submission| submission.question_id == id)
-        {
-            return Err("These answers are already being submitted".to_string());
-        }
-
-        if let Some(answers) = answers.as_ref()
-            && (answers.len() != pending.request.questions.len()
-                || answers
-                    .iter()
-                    .zip(&pending.request.questions)
-                    .any(|(answers, question)| {
-                        answers.is_empty()
-                            || answers.iter().any(|answer| answer.trim().is_empty())
-                            || (!question.multi_select && answers.len() != 1)
-                            || (question.input == QuestionInput::SelectionOnly
-                                && answers.iter().any(|answer| {
-                                    !question
-                                        .options
-                                        .iter()
-                                        .any(|option| option.label == *answer)
-                                }))
-                    }))
-        {
-            return Err("Complete every question before submitting".to_string());
-        }
-
-        match &pending.source {
-            QuestionSource::Request {
-                rpc_id,
-                question_ids,
-                submitted,
-                ..
-            } => {
-                if submitted.is_some() {
-                    return Err("These answers are already being submitted".to_string());
-                }
-
-                let rpc_id = *rpc_id;
-
-                let resolution = if answers.is_some() {
-                    QuestionResolution::Submitted {
-                        message: None,
-                        started_turn: false,
-                    }
-                } else {
-                    QuestionResolution::Skipped
-                };
-
-                let values: HashMap<&str, Value> = question_ids
-                    .iter()
-                    .map(String::as_str)
-                    .zip(answers.unwrap_or_default())
-                    .map(|(id, answers)| (id, json!({"answers": answers})))
+            .into_iter()
+            .map(|question| {
+                let options: Vec<QuestionOption> = question
+                    .options
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|option| QuestionOption {
+                        label: option.label,
+                        description: Some(option.description),
+                    })
                     .collect();
 
-                let message =
-                    json!({"jsonrpc": "2.0", "id": rpc_id, "result": {"answers": values}});
-
-                self.try_send(message)?;
-
-                if let Some(PendingQuestion {
-                    source: QuestionSource::Request { submitted, .. },
-                    ..
-                }) = self.conversation.questions.pending.get_mut(id)
-                {
-                    *submitted = Some(resolution);
-                }
-
-                Ok(QuestionResponse::Pending)
-            }
-            QuestionSource::Message => {
-                let Some(answers) = answers else {
-                    self.conversation.questions.pending.remove(id);
-
-                    return Ok(QuestionResponse::Settled);
+                let input = if question.is_secret {
+                    QuestionInput::Secret
+                } else if question.is_other || options.is_empty() {
+                    QuestionInput::Text
+                } else {
+                    QuestionInput::SelectionOnly
                 };
 
-                let mut text: String = "Answers to your questions:\n".into();
-
-                for (index, (question, answers)) in
-                    pending.request.questions.iter().zip(answers).enumerate()
-                {
-                    text.push_str(&format!(
-                        "\n{}. {}\nAnswer: {}\n",
-                        index + 1,
-                        question.question,
-                        answers.join("; ")
-                    ));
+                Question {
+                    header: Some(question.header),
+                    question: question.question,
+                    multi_select: false,
+                    options,
+                    input,
                 }
+            })
+            .collect(),
+    };
 
-                let submission = AnswerSubmission {
-                    question_id: id.to_string(),
-                    text,
-                    settings: settings.clone(),
-                    steered: self.conversation.current_turn.is_some(),
-                };
+    session.conversation.questions.pending.insert(
+        id,
+        PendingQuestion {
+            request: batch.clone(),
+            source: QuestionSource::Request {
+                rpc_id,
+                turn_id: request.turn_id,
+                question_ids,
+                submitted: None,
+            },
+        },
+    );
 
-                self.send_question_message(submission)
-                    .map(|()| QuestionResponse::Pending)
-            }
-        }
+    vec![Event::InputRequested(batch)]
+}
+
+/// Message dismissal settles locally; submitted answers resolve through later events.
+pub(super) fn respond_input(
+    session: &mut Session,
+    id: &str,
+    answers: Option<Vec<Vec<String>>>,
+    settings: &ThreadSettings,
+) -> Result<QuestionResponse, String> {
+    let pending = session
+        .conversation
+        .questions
+        .pending
+        .get(id)
+        .ok_or("This question is no longer pending")?;
+
+    if session
+        .conversation
+        .questions
+        .submissions
+        .values()
+        .any(|submission| submission.question_id == id)
+    {
+        return Err("These answers are already being submitted".to_string());
     }
 
-    fn send_question_message(&mut self, submission: AnswerSubmission) -> Result<(), String> {
-        let thread_id = self
+    if let Some(answers) = answers.as_ref()
+        && (answers.len() != pending.request.questions.len()
+            || answers
+                .iter()
+                .zip(&pending.request.questions)
+                .any(|(answers, question)| {
+                    answers.is_empty()
+                        || answers.iter().any(|answer| answer.trim().is_empty())
+                        || (!question.multi_select && answers.len() != 1)
+                        || (question.input == QuestionInput::SelectionOnly
+                            && answers.iter().any(|answer| {
+                                !question
+                                    .options
+                                    .iter()
+                                    .any(|option| option.label == *answer)
+                            }))
+                }))
+    {
+        return Err("Complete every question before submitting".to_string());
+    }
+
+    match &pending.source {
+        QuestionSource::Request {
+            rpc_id,
+            question_ids,
+            submitted,
+            ..
+        } => {
+            if submitted.is_some() {
+                return Err("These answers are already being submitted".to_string());
+            }
+
+            let rpc_id = *rpc_id;
+
+            let resolution = if answers.is_some() {
+                QuestionResolution::Submitted {
+                    message: None,
+                    started_turn: false,
+                }
+            } else {
+                QuestionResolution::Skipped
+            };
+
+            let values: HashMap<&str, Value> = question_ids
+                .iter()
+                .map(String::as_str)
+                .zip(answers.unwrap_or_default())
+                .map(|(id, answers)| (id, json!({"answers": answers})))
+                .collect();
+
+            let message = json!({"jsonrpc": "2.0", "id": rpc_id, "result": {"answers": values}});
+
+            session.try_send(message)?;
+
+            if let Some(PendingQuestion {
+                source: QuestionSource::Request { submitted, .. },
+                ..
+            }) = session.conversation.questions.pending.get_mut(id)
+            {
+                *submitted = Some(resolution);
+            }
+
+            Ok(QuestionResponse::Pending)
+        }
+        QuestionSource::Message => {
+            let Some(answers) = answers else {
+                session.conversation.questions.pending.remove(id);
+
+                return Ok(QuestionResponse::Settled);
+            };
+
+            let mut text: String = "Answers to your questions:\n".into();
+
+            for (index, (question, answers)) in
+                pending.request.questions.iter().zip(answers).enumerate()
+            {
+                text.push_str(&format!(
+                    "\n{}. {}\nAnswer: {}\n",
+                    index + 1,
+                    question.question,
+                    answers.join("; ")
+                ));
+            }
+
+            let submission = AnswerSubmission {
+                question_id: id.to_string(),
+                text,
+                settings: settings.clone(),
+                steered: session.conversation.current_turn.is_some(),
+            };
+
+            send_question_message(session, submission).map(|()| QuestionResponse::Pending)
+        }
+    }
+}
+
+fn send_question_message(
+    session: &mut Session,
+    submission: AnswerSubmission,
+) -> Result<(), String> {
+    let thread_id = session
+        .conversation
+        .thread_id
+        .as_deref()
+        .ok_or("Codex is not connected")?
+        .to_string();
+
+    let input = codex_user_input(&submission.text, None, &[]);
+
+    let (method, mut params) = if submission.steered {
+        let turn_id = session
             .conversation
-            .thread_id
+            .current_turn
             .as_deref()
-            .ok_or("Codex is not connected")?
+            .ok_or("The active turn ended; submit again")?;
+
+        (
+            "turn/steer",
+            json!({"threadId": thread_id, "expectedTurnId": turn_id, "input": input}),
+        )
+    } else {
+        (
+            "turn/start",
+            turn_start_params(&thread_id, input, &submission.settings, &session.workspace),
+        )
+    };
+
+    let rpc_id = session.alloc_rpc_id();
+
+    params["clientUserMessageId"] =
+        json!(format!("nmt-question-{}-{rpc_id}", session.registration_id));
+
+    session
+        .try_send(json!({"jsonrpc": "2.0", "id": rpc_id, "method": method, "params": params}))?;
+
+    session
+        .conversation
+        .questions
+        .submissions
+        .insert(rpc_id, submission);
+
+    Ok(())
+}
+
+pub(super) fn on_question_response(
+    session: &mut Session,
+    rpc_id: u64,
+    message: &Value,
+) -> Option<Vec<Event>> {
+    let submission = session.conversation.questions.submissions.remove(&rpc_id)?;
+    let id = submission.question_id.clone();
+
+    if let Some(error) = message["error"].as_object() {
+        let error = error
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("Could not submit answers")
             .to_string();
 
-        let input = codex_user_input(&submission.text, None, &[]);
+        // Only an explicit rejection proves the first attempt was not accepted.
+        // Transport loss has an unknown outcome and must never trigger another send.
+        if submission.steered
+            && session.conversation.current_turn.is_none()
+            && error == "no active turn to steer"
+        {
+            let retry = AnswerSubmission {
+                steered: false,
+                ..submission
+            };
 
-        let (method, mut params) = if submission.steered {
-            let turn_id = self
-                .conversation
-                .current_turn
-                .as_deref()
-                .ok_or("The active turn ended; submit again")?;
-
-            (
-                "turn/steer",
-                json!({"threadId": thread_id, "expectedTurnId": turn_id, "input": input}),
-            )
-        } else {
-            (
-                "turn/start",
-                turn_start_params(&thread_id, input, &submission.settings, &self.workspace),
-            )
-        };
-
-        let rpc_id = self.alloc_rpc_id();
-
-        params["clientUserMessageId"] =
-            json!(format!("nmt-question-{}-{rpc_id}", self.registration_id));
-
-        self.try_send(json!({"jsonrpc": "2.0", "id": rpc_id, "method": method, "params": params}))?;
-
-        self.conversation
-            .questions
-            .submissions
-            .insert(rpc_id, submission);
-
-        Ok(())
-    }
-
-    pub(super) fn on_question_response(
-        &mut self,
-        rpc_id: u64,
-        message: &Value,
-    ) -> Option<Vec<Event>> {
-        let submission = self.conversation.questions.submissions.remove(&rpc_id)?;
-        let id = submission.question_id.clone();
-
-        if let Some(error) = message["error"].as_object() {
-            let error = error
-                .get("message")
-                .and_then(Value::as_str)
-                .unwrap_or("Could not submit answers")
-                .to_string();
-
-            // Only an explicit rejection proves the first attempt was not accepted.
-            // Transport loss has an unknown outcome and must never trigger another send.
-            if submission.steered
-                && self.conversation.current_turn.is_none()
-                && error == "no active turn to steer"
-            {
-                let retry = AnswerSubmission {
-                    steered: false,
-                    ..submission
-                };
-
-                return Some(match self.send_question_message(retry) {
-                    Ok(()) => Vec::new(),
-                    Err(message) => vec![Event::InputSubmissionFailed { id, message }],
-                });
-            }
-
-            return Some(vec![Event::InputSubmissionFailed { id, message: error }]);
+            return Some(match send_question_message(session, retry) {
+                Ok(()) => Vec::new(),
+                Err(message) => vec![Event::InputSubmissionFailed { id, message }],
+            });
         }
 
-        self.conversation.questions.pending.remove(&id);
-
-        Some(vec![Event::InputResolved {
-            id,
-            resolution: QuestionResolution::Submitted {
-                message: Some(submission.text),
-                started_turn: !submission.steered,
-            },
-        }])
+        return Some(vec![Event::InputSubmissionFailed { id, message: error }]);
     }
+
+    session.conversation.questions.pending.remove(&id);
+
+    Some(vec![Event::InputResolved {
+        id,
+        resolution: QuestionResolution::Submitted {
+            message: Some(submission.text),
+            started_turn: !submission.steered,
+        },
+    }])
 }

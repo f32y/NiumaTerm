@@ -47,7 +47,7 @@ use futures::future::{BoxFuture, FutureExt as _, ready};
 use serde_json::{Value, json};
 
 use crate::LaunchConfig;
-use crate::chat::TeamDecisionRequest;
+use crate::chat::{QuestionRequest, QuestionResponse, TeamDecisionRequest};
 use crate::codex::ProviderConfig;
 use crate::codex::app_server::background_tasks::{CodexTasks, ThreadScope, notification_thread_id};
 use crate::codex::app_server::compaction::is_legacy_compaction_notification;
@@ -65,6 +65,9 @@ use crate::codex::app_server::protocol::{
     parse_thread_summaries, resumed_thread_events, skills_list_request, stringify_command,
     thread_list_params, thread_name_request, thread_resume_params, turn_interrupt_request,
     turn_start_params,
+};
+use crate::codex::app_server::questions::{
+    on_question_request, on_question_response, respond_input, restore_question_requests,
 };
 #[cfg(test)]
 use crate::codex::app_server::skills::parse_skill_catalog;
@@ -881,7 +884,7 @@ impl Session {
     fn on_server_request(&mut self, rpc_id: u64, method: &str, message: &Value) -> Vec<Event> {
         match method {
             "item/tool/call" => self.on_team_decision(rpc_id, &message["params"]),
-            "item/tool/requestUserInput" => self.on_question_request(rpc_id, &message["params"]),
+            "item/tool/requestUserInput" => on_question_request(self, rpc_id, &message["params"]),
             "item/commandExecution/requestApproval" | "item/fileChange/requestApproval" => {
                 let params = &message["params"];
 
@@ -950,7 +953,7 @@ impl Session {
             Some(ControlOperation::ThreadName) | None => return Vec::new(),
         };
 
-        if let Some(events) = self.on_question_response(rpc_id, message) {
+        if let Some(events) = on_question_response(self, rpc_id, message) {
             return events;
         }
 
@@ -1591,5 +1594,22 @@ impl Session {
         }
 
         true
+    }
+}
+
+impl Session {
+    pub(crate) fn restore_question_requests(&mut self, requests: Vec<QuestionRequest>) {
+        restore_question_requests(self, requests);
+    }
+
+    /// Message dismissal settles locally; submitted answers resolve through
+    /// later events.
+    pub fn respond_input(
+        &mut self,
+        id: &str,
+        answers: Option<Vec<Vec<String>>>,
+        settings: &ThreadSettings,
+    ) -> Result<QuestionResponse, String> {
+        respond_input(self, id, answers, settings)
     }
 }
