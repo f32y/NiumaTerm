@@ -217,6 +217,50 @@ pub(super) fn tool_title(input: &Value) -> String {
     String::new()
 }
 
+/// One assistant content block, decoded the same way wherever a transcript
+/// is read from: the live stream, a stored conversation, or a child's.
+pub(crate) enum AssistantBlock<'a> {
+    Text(&'a str),
+    Thinking(&'a str),
+    ToolUse { id: &'a str, item: Item },
+}
+
+/// Text and thinking are trimmed, because the model often opens a block with
+/// blank lines that carry nothing, and the same message should read the same
+/// live and restored. Server-side and MCP tool calls are tool calls like any
+/// other.
+pub(crate) fn assistant_block(block: &Value) -> Option<AssistantBlock<'_>> {
+    match block["type"].as_str()? {
+        "text" => Some(AssistantBlock::Text(
+            block["text"].as_str().unwrap_or_default().trim(),
+        )),
+        "thinking" => Some(AssistantBlock::Thinking(
+            block["thinking"].as_str().unwrap_or_default().trim(),
+        )),
+        "tool_use" | "server_tool_use" | "mcp_tool_use" => {
+            let id = block["id"].as_str()?;
+
+            Some(AssistantBlock::ToolUse {
+                id,
+                item: tool_item(
+                    id,
+                    block["name"].as_str().unwrap_or("tool"),
+                    &block["input"],
+                ),
+            })
+        }
+        _ => None,
+    }
+}
+
+/// Whether an assistant message wraps an API failure rather than a reply. The
+/// stream marks it `is_api_error_message`, a stored conversation
+/// `isApiErrorMessage`; either way its text is the error message.
+pub(crate) fn is_api_error(message: &Value) -> bool {
+    message["is_api_error_message"].as_bool() == Some(true)
+        || message["isApiErrorMessage"].as_bool() == Some(true)
+}
+
 /// Decode child content while retaining tool starts until their results arrive.
 pub(crate) fn child_content_items(
     record: &Value,
@@ -224,50 +268,69 @@ pub(crate) fn child_content_items(
 ) -> Vec<Item> {
     let mut items = Vec::new();
 
+    let from_assistant = record["type"].as_str() != Some("user");
+    let api_error = is_api_error(record);
+
     for block in record["message"]["content"]
         .as_array()
         .into_iter()
         .flatten()
     {
-        let Some(id) = block["id"]
-            .as_str()
-            .or_else(|| block["tool_use_id"].as_str())
-            .map(str::to_owned)
-            .or_else(|| record["uuid"].as_str().map(str::to_owned))
-        else {
+        if block["type"].as_str() == Some("tool_result") {
+            if let Some(started) = block["tool_use_id"]
+                .as_str()
+                .and_then(|id| open_tools.remove(id))
+            {
+                items.push(complete_tool_item(started, block));
+            }
+
             continue;
+        }
+
+        // A user record's text is the parent's prompt to the child, which
+        // the child's row already names.
+        if !from_assistant {
+            continue;
+        }
+
+        let id = || {
+            block["id"]
+                .as_str()
+                .or_else(|| record["uuid"].as_str())
+                .map(str::to_owned)
         };
 
-        match block["type"].as_str() {
-            Some("text") if record["type"].as_str() != Some("user") => {
-                items.push(Item::AgentMessage {
-                    id,
-                    text: block["text"].as_str().map(str::to_owned),
-                    questions: None,
-                })
+        match assistant_block(block) {
+            Some(AssistantBlock::Text(text)) if api_error => {
+                if !text.is_empty() {
+                    items.push(Item::Error {
+                        text: text.to_owned(),
+                    });
+                }
             }
-            Some("text") => {}
-            Some("thinking") => items.push(Item::Reasoning {
-                id,
-                summary: block["thinking"].as_str().map(str::to_owned),
-            }),
-            Some("tool_use") => {
-                let item = tool_item(
-                    &id,
-                    block["name"].as_str().unwrap_or("tool"),
-                    &block["input"],
-                );
-
-                open_tools.insert(id, item.clone());
+            Some(AssistantBlock::Text(text)) => {
+                if let Some(id) = id() {
+                    items.push(Item::AgentMessage {
+                        id,
+                        text: Some(text.to_owned()),
+                        questions: None,
+                    });
+                }
+            }
+            Some(AssistantBlock::Thinking(summary)) => {
+                if let Some(id) = id() {
+                    items.push(Item::Reasoning {
+                        id,
+                        summary: Some(summary.to_owned()),
+                    });
+                }
+            }
+            Some(AssistantBlock::ToolUse { id, item }) => {
+                open_tools.insert(id.to_owned(), item.clone());
 
                 items.push(item);
             }
-            Some("tool_result") => {
-                if let Some(started) = open_tools.remove(&id) {
-                    items.push(complete_tool_item(started, block));
-                }
-            }
-            _ => {}
+            None => {}
         }
     }
 

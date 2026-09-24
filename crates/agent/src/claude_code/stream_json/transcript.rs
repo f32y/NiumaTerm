@@ -11,7 +11,8 @@ use crate::chat::{
     ContextComposition, ContextWindowUsage, Event, GenerationSample, Item, TokenUsageBreakdown,
 };
 use crate::claude_code::records::{
-    compaction_metadata, complete_tool_item, parse_compaction, tool_item,
+    AssistantBlock, assistant_block, compaction_metadata, complete_tool_item, is_api_error,
+    parse_compaction,
 };
 use crate::claude_code::stream_json::parse::{
     claude_context_window, context_window_usage, parse_claude_usage, update_claude_output,
@@ -347,9 +348,15 @@ impl TranscriptState {
             }
         }
 
+        // A message wrapping an API failure is synthesized without streamed
+        // blocks, and the turn's result reports the same failure, so its text
+        // is not shown a second time as a reply.
+        let api_error = is_api_error(message);
+
         for block in blocks {
-            match block["type"].as_str() {
-                Some("text") => {
+            match assistant_block(block) {
+                Some(AssistantBlock::Text(_)) if api_error => {}
+                Some(AssistantBlock::Text(text)) => {
                     let id = self
                         .open_texts
                         .pop_front()
@@ -357,11 +364,11 @@ impl TranscriptState {
 
                     events.push(Event::ItemCompleted(Item::AgentMessage {
                         id,
-                        text: block["text"].as_str().map(str::to_owned),
+                        text: Some(text.to_owned()),
                         questions: None,
                     }));
                 }
-                Some("thinking") => {
+                Some(AssistantBlock::Thinking(summary)) => {
                     let id = self
                         .open_thinkings
                         .pop_front()
@@ -369,25 +376,15 @@ impl TranscriptState {
 
                     events.push(Event::ItemCompleted(Item::Reasoning {
                         id,
-                        summary: block["thinking"].as_str().map(str::to_owned),
+                        summary: Some(summary.to_owned()),
                     }));
                 }
-                Some("tool_use") | Some("server_tool_use") | Some("mcp_tool_use") => {
-                    let Some(id) = block["id"].as_str() else {
-                        continue;
-                    };
-
-                    let item = tool_item(
-                        id,
-                        block["name"].as_str().unwrap_or("tool"),
-                        &block["input"],
-                    );
-
+                Some(AssistantBlock::ToolUse { id, item }) => {
                     self.pending_tools.insert(id.to_string(), item.clone());
 
                     events.push(Event::ItemStarted(item));
                 }
-                _ => {}
+                None => {}
             }
         }
 

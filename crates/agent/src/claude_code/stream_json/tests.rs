@@ -2124,3 +2124,17 @@ fn a_resumed_launch_carries_both_the_session_id_and_the_directories() {
         Some(&[r"C:\Work\web".to_string()][..])
     );
 }
+
+/// The CLI synthesizes a message around an API failure and reports the same
+/// failure in the turn result, so the message's text is not also a reply.
+#[test]
+fn an_api_error_message_is_not_shown_as_a_reply() {
+    let mut transcript = TranscriptState::default();
+
+    let events = transcript.on_assistant(&json!({
+        "is_api_error_message": true,
+        "message": {"content": [{"type": "text", "text": "API Error: overloaded"}]},
+    }));
+
+    assert!(events.is_empty());
+}

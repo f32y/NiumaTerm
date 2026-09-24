@@ -7,7 +7,8 @@ use tracing::warn;
 
 use crate::chat::{Compaction, Item, ReplayItem, ReplayTurn};
 use crate::claude_code::records::{
-    compaction_metadata, complete_tool_item, parse_compaction, tool_item,
+    AssistantBlock, assistant_block, compaction_metadata, complete_tool_item, is_api_error,
+    parse_compaction,
 };
 use crate::claude_code::sessions::index::TranscriptIndex;
 use crate::claude_code::sessions::titles::{
@@ -231,15 +232,13 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
                     continue;
                 };
 
-                let is_api_error = record["isApiErrorMessage"].as_bool() == Some(true);
+                let api_error = is_api_error(record);
 
                 for block in blocks {
-                    match block["type"].as_str() {
-                        Some("text") => {
-                            let text = block["text"].as_str().unwrap_or_default().trim();
-
+                    match assistant_block(block) {
+                        Some(AssistantBlock::Text(text)) => {
                             if !text.is_empty() {
-                                let item = if is_api_error {
+                                let item = if api_error {
                                     Item::Error {
                                         text: text.to_string(),
                                     }
@@ -258,9 +257,7 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
                                 items.push(ReplayItem { item, at });
                             }
                         }
-                        Some("thinking") => {
-                            let summary = block["thinking"].as_str().unwrap_or_default().trim();
-
+                        Some(AssistantBlock::Thinking(summary)) => {
                             if summary.is_empty() {
                                 continue;
                             }
@@ -281,22 +278,12 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
                                 },
                             });
                         }
-                        Some("tool_use") | Some("server_tool_use") | Some("mcp_tool_use") => {
-                            let Some(id) = block["id"].as_str() else {
-                                continue;
-                            };
-
-                            let item = tool_item(
-                                id,
-                                block["name"].as_str().unwrap_or("tool"),
-                                &block["input"],
-                            );
-
+                        Some(AssistantBlock::ToolUse { id, item }) => {
                             pending_tools.insert(id.to_string(), items.len());
 
                             items.push(ReplayItem { item, at });
                         }
-                        _ => {}
+                        None => {}
                     }
                 }
             }
