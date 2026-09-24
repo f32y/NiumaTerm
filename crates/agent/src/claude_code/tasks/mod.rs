@@ -33,7 +33,6 @@ mod shells;
 #[cfg(test)]
 mod tests;
 
-use std::collections::HashMap;
 use std::time::SystemTime;
 
 use serde_json::Value;
@@ -82,13 +81,6 @@ pub(crate) struct ClaudeTasks {
     /// Task, tool-use, and agent identifiers mapped onto the canonical id of
     /// the row they describe.
     aliases: AliasTable,
-
-    /// Process run each task was first seen in. A task still shown as running
-    /// from an earlier run cannot be alive in the current process.
-    created_epoch: HashMap<String, u64>,
-
-    /// Advanced by each `init`, which the CLI emits once per process.
-    epoch: u64,
 
     /// The conversations of this session's child agents.
     children: ChildTranscripts,
@@ -221,8 +213,6 @@ impl ClaudeTasks {
 
         self.aliases.clear();
 
-        self.created_epoch.clear();
-
         self.children.clear();
 
         self.shells.clear();
@@ -350,12 +340,6 @@ impl ClaudeTasks {
     }
 
     fn apply(&mut self, canonical: &str, update: BackgroundTaskUpdate) -> bool {
-        let epoch = self.epoch;
-
-        self.created_epoch
-            .entry(canonical.to_owned())
-            .or_insert(epoch);
-
         let Some(registry) = self.registry.as_mut() else {
             return false;
         };
@@ -397,7 +381,7 @@ impl ClaudeTasks {
         match subtype {
             // The CLI emits `init` once per process, so it is the only
             // reliable process boundary in the stream.
-            "init" => self.advance_epoch(),
+            "init" => self.stop_active_tasks(),
             "hook_started" | "hook_response" => self.observe_hook(message),
             "background_tasks_changed" => self.observe_background_snapshot(message),
             _ if LIFECYCLE_RECORDS.contains(&subtype) => self.observe_lifecycle(subtype, message),
@@ -405,12 +389,9 @@ impl ClaudeTasks {
         }
     }
 
-    /// A new process cannot still be running the children of the previous one.
-    fn advance_epoch(&mut self) -> bool {
-        self.epoch += 1;
-
-        let epoch = self.epoch;
-
+    /// The CLI emits `init` once per process, and a new process cannot still
+    /// be running the children of the previous one.
+    fn stop_active_tasks(&mut self) -> bool {
         let Some(snapshot) = self.snapshot() else {
             return false;
         };
@@ -420,11 +401,6 @@ impl ClaudeTasks {
             .into_iter()
             .filter(|task| task.state.is_active())
             .map(|task| task.key.id)
-            .filter(|id| {
-                self.created_epoch
-                    .get(id)
-                    .is_none_or(|created| *created < epoch)
-            })
             .collect();
 
         let mut changed = false;
