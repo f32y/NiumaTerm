@@ -46,10 +46,6 @@ use crate::claude_code::stream_json::control::{
     ControlState, PendingApproval, PendingControlOperation, PendingQuestions,
     merge_question_answers, parse_questions,
 };
-#[cfg(test)]
-use crate::claude_code::stream_json::control::{
-    fail_pending_control_operations, resolve_pending_control_operation,
-};
 use crate::claude_code::stream_json::parse::{
     approval_description, claude_result_error, compaction_progress, initialize_command_catalog,
     legacy_command_catalog, parse_models, slash_command_text, ui_owns_slash_command,
@@ -273,9 +269,11 @@ impl Session {
             },
         }))?;
 
-        session.control.record_admitted(
+        session.control.admit(
             INIT_REQUEST_ID.to_string(),
             RequestClass::Query,
+            None,
+            PendingControlOperation::Init,
             Instant::now(),
         );
 
@@ -484,12 +482,13 @@ impl Session {
         };
 
         for id in control_ids {
-            self.control
-                .record_admitted(id.clone(), RequestClass::Mutation, Instant::now());
-
-            self.control.attach_input(&id, ticket.clone());
-
-            self.control.track(id, PendingControlOperation::Other);
+            self.control.admit(
+                id,
+                RequestClass::Mutation,
+                Some(ticket.clone()),
+                PendingControlOperation::Other,
+                Instant::now(),
+            );
         }
 
         if settings.model.is_some() {
@@ -572,14 +571,11 @@ impl Session {
             return false;
         }
 
-        let Ok(request_id) = self.send_control(json!({"subtype": "get_context_usage"})) else {
-            return false;
-        };
-
-        self.control
-            .track(request_id, PendingControlOperation::ContextComposition);
-
-        true
+        self.send_control(
+            json!({"subtype": "get_context_usage"}),
+            PendingControlOperation::ContextComposition,
+        )
+        .is_ok()
     }
 
     /// Ask the CLI to name this conversation. The CLI summarizes `description`
@@ -611,18 +607,15 @@ impl Session {
             return false;
         }
 
-        let Ok(request_id) = self.send_control(json!({
-            "subtype": "generate_session_title",
-            "description": description,
-            "persist": true,
-        })) else {
-            return false;
-        };
-
-        self.control
-            .track(request_id, PendingControlOperation::SessionTitle);
-
-        true
+        self.send_control(
+            json!({
+                "subtype": "generate_session_title",
+                "description": description,
+                "persist": true,
+            }),
+            PendingControlOperation::SessionTitle,
+        )
+        .is_ok()
     }
 
     /// Give the conversation the name the user typed. The CLI records it with
@@ -641,7 +634,10 @@ impl Session {
         }
 
         if self
-            .send_control(json!({"subtype": "rename_session", "title": title}))
+            .send_control(
+                json!({"subtype": "rename_session", "title": title}),
+                PendingControlOperation::Other,
+            )
             .is_err()
         {
             return false;
@@ -669,15 +665,13 @@ impl Session {
             };
         }
 
-        let request_id = match self.send_control(file_rewind_request(user_message_id)) {
-            Ok(id) => id,
-            Err(message) => return SlashCommandOutcome::Rejected { message },
-        };
-
-        self.control
-            .track(request_id, PendingControlOperation::FileRewind);
-
-        SlashCommandOutcome::Accepted
+        match self.send_control(
+            file_rewind_request(user_message_id),
+            PendingControlOperation::FileRewind,
+        ) {
+            Ok(_) => SlashCommandOutcome::Accepted,
+            Err(message) => SlashCommandOutcome::Rejected { message },
+        }
     }
 
     /// Resolve operations that can no longer receive a control response after
@@ -763,17 +757,22 @@ impl Session {
     pub(crate) fn poll_timeouts(&mut self, now: Instant) -> Vec<Event> {
         let mut events = Vec::new();
 
-        for (id, class, ticket) in self.control.expired(now) {
-            let cancelled = ticket.as_ref().is_some_and(|ticket| ticket.cancel());
+        for expired in self.control.expired(now) {
+            let cancelled = expired.input.as_ref().is_some_and(|ticket| ticket.cancel());
 
             let message = if cancelled {
                 "Claude request expired before writing and was cancelled; it was not sent."
                     .to_string()
             } else {
-                class.timeout_message("Claude")
+                expired.class.timeout_message("Claude")
             };
 
-            if cancelled && ticket.as_ref().is_some_and(|ticket| ticket.is_batch()) {
+            if cancelled
+                && expired
+                    .input
+                    .as_ref()
+                    .is_some_and(|ticket| ticket.is_batch())
+            {
                 self.process.abort();
 
                 events.extend(self.control.close(&message));
@@ -783,7 +782,7 @@ impl Session {
                 break;
             }
 
-            if id == INIT_REQUEST_ID {
+            if expired.operation == PendingControlOperation::Init {
                 events.extend(self.control.close(&message));
 
                 events.push(Event::Error {
@@ -794,7 +793,7 @@ impl Session {
                 break;
             }
 
-            if !cancelled && let Some(effort_events) = self.control.expire_effort(&id) {
+            if !cancelled && let Some(effort_events) = self.control.expire_effort(&expired.id) {
                 events.extend(effort_events);
 
                 events.push(Event::Error {
@@ -805,18 +804,7 @@ impl Session {
                 continue;
             }
 
-            let result = self.on_control_response(
-                &json!({"response": {"request_id": id, "subtype": "error", "error": message}}),
-            );
-
-            if result.is_empty() {
-                events.push(Event::Error {
-                    message,
-                    fatal: false,
-                });
-            } else {
-                events.extend(result);
-            }
+            events.extend(self.control.fail_expired(expired, &message));
         }
 
         events
@@ -853,7 +841,11 @@ impl Session {
 
     /// Interrupt the running turn (the Esc/Ctrl-C equivalent).
     pub fn interrupt(&mut self) -> bool {
-        self.send_control(json!({"subtype": "interrupt"})).is_ok()
+        self.send_control(
+            json!({"subtype": "interrupt"}),
+            PendingControlOperation::Other,
+        )
+        .is_ok()
     }
 
     /// Stop one child agent, leaving this session's own turn running. Returns
@@ -868,8 +860,11 @@ impl Session {
             return false;
         };
 
-        self.send_control(json!({"subtype": "stop_task", "task_id": task_id}))
-            .is_ok()
+        self.send_control(
+            json!({"subtype": "stop_task", "task_id": task_id}),
+            PendingControlOperation::Other,
+        )
+        .is_ok()
     }
 
     /// The CLI's session id, known immediately for a resumed process and
@@ -1045,7 +1040,11 @@ impl Session {
             .unwrap_or_default()
     }
 
-    fn send_control(&mut self, request: Value) -> Result<String, String> {
+    fn send_control(
+        &mut self,
+        request: Value,
+        operation: PendingControlOperation,
+    ) -> Result<String, String> {
         let class = match request["subtype"].as_str() {
             Some("get_context_usage") => RequestClass::Query,
             Some("interrupt" | "stop_task") => RequestClass::Control,
@@ -1061,13 +1060,13 @@ impl Session {
             .write_tracked(vec![message])
             .map_err(|error| error.to_string())?;
 
-        self.control
-            .record_admitted(request_id.clone(), class, Instant::now());
-
-        self.control.attach_input(&request_id, ticket);
-
-        self.control
-            .track(request_id.clone(), PendingControlOperation::Other);
+        self.control.admit(
+            request_id.clone(),
+            class,
+            Some(ticket),
+            operation,
+            Instant::now(),
+        );
 
         Ok(request_id)
     }
@@ -1301,10 +1300,6 @@ impl Session {
     fn on_control_response(&mut self, message: &Value) -> Vec<Event> {
         let response = &message["response"];
 
-        if let Some(id) = response["request_id"].as_str() {
-            self.control.complete(id);
-        }
-
         if response["request_id"].as_str() != Some(INIT_REQUEST_ID) {
             let Some(event) = self.control.resolve(response) else {
                 return Vec::new();
@@ -1319,16 +1314,18 @@ impl Session {
             return vec![event];
         }
 
+        self.control.complete(INIT_REQUEST_ID);
+
         if response["subtype"].as_str() == Some("error") {
             let error = response["error"]
                 .as_str()
                 .unwrap_or("unknown Claude control error")
                 .to_string();
 
+            // A failed initialize means the CLI rejected this client.
             return vec![Event::Error {
                 message: error,
-                // A failed initialize means the CLI rejected this client.
-                fatal: response["request_id"].as_str() == Some(INIT_REQUEST_ID),
+                fatal: true,
             }];
         }
 
@@ -1341,7 +1338,7 @@ impl Session {
         // resolved at spawn reaches the CLI as `--model`, so it is already
         // applied here; a launch that named none starts on the catalog's
         // "default" entry.
-        if response["request_id"].as_str() == Some(INIT_REQUEST_ID) && !self.ready {
+        if !self.ready {
             let permission =
                 Some(configured_permission_mode().unwrap_or_else(|| "default".to_string()));
 

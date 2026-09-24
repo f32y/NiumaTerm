@@ -5,7 +5,7 @@ use std::time::Instant;
 use crate::chat::{ContextComposition, Item, TokenUsageBreakdown};
 use crate::claude_code::stream_json::*;
 use crate::subprocess::InputTicket;
-use crate::subprocess::requests::{PendingRequests, RequestClass};
+use crate::subprocess::requests::RequestClass;
 use crate::workspace::AgentWorkspace;
 
 #[test]
@@ -36,11 +36,7 @@ fn retiring_control_state_cancels_pending_writes_but_preserves_cleanup() {
             PendingControlOperation::Other,
         ),
     ] {
-        state.record_admitted(id.into(), class, Instant::now());
-
-        state.attach_input(id, ticket);
-
-        state.track(id.into(), operation);
+        state.admit(id.into(), class, Some(ticket), operation, Instant::now());
     }
 
     state.cancel_generated_title();
@@ -73,11 +69,19 @@ fn request_deadlines_wake_without_output_and_release_the_delivery_on_close() {
         let _ = tx.send(());
     }));
 
-    state.record_admitted("slow".into(), RequestClass::Mutation, Instant::now());
+    state.admit(
+        "slow".into(),
+        RequestClass::Mutation,
+        None,
+        PendingControlOperation::Other,
+        Instant::now(),
+    );
 
-    state.record_admitted(
+    state.admit(
         "due".into(),
         RequestClass::Query,
+        None,
+        PendingControlOperation::Other,
         Instant::now() - Duration::from_secs(31),
     );
 
@@ -86,7 +90,7 @@ fn request_deadlines_wake_without_output_and_release_the_delivery_on_close() {
     let expired = state.expired(Instant::now());
 
     assert_eq!(expired.len(), 1);
-    assert_eq!(expired[0].0, "due");
+    assert_eq!(expired[0].id, "due");
 
     state.complete("slow");
 
@@ -153,9 +157,11 @@ fn a_blocked_stdout_delivery_does_not_block_request_deadlines() {
 
     reading.recv_timeout(Duration::from_secs(3)).unwrap();
 
-    session.control.record_admitted(
+    session.control.admit(
         "overdue".into(),
         RequestClass::Query,
+        None,
+        PendingControlOperation::Other,
         Instant::now() - Duration::from_secs(31),
     );
 
@@ -180,17 +186,25 @@ fn large_pending_control_sets_keep_independent_deadlines() {
     for index in 0..2048 {
         state.check_connected().unwrap();
 
-        state.record_admitted(index.to_string(), RequestClass::Query, now);
-
-        state.track(index.to_string(), PendingControlOperation::Other);
+        state.admit(
+            index.to_string(),
+            RequestClass::Query,
+            None,
+            PendingControlOperation::Other,
+            now,
+        );
     }
 
     for index in 2048..2064 {
         state.check_connected().unwrap();
 
-        state.record_admitted(index.to_string(), RequestClass::Control, now);
-
-        state.track(index.to_string(), PendingControlOperation::Other);
+        state.admit(
+            index.to_string(),
+            RequestClass::Control,
+            None,
+            PendingControlOperation::Other,
+            now,
+        );
     }
 
     assert!(state.check_connected().is_ok());
@@ -200,10 +214,8 @@ fn large_pending_control_sets_keep_independent_deadlines() {
 
     assert_eq!(expired.len(), 16);
 
-    for (id, class, _) in expired {
-        assert_eq!(class, RequestClass::Control);
-
-        state.resolve(&json!({"request_id": id, "subtype": "error", "error": class.timeout_message("Claude")}));
+    for expired in expired {
+        assert_eq!(expired.class, RequestClass::Control);
     }
 
     assert!(state.check_connected().is_ok());
@@ -231,7 +243,13 @@ fn control_cancellation_matches_prompt_ids_and_close_settles_once() {
 
     let (id, _) = control.request(json!({"subtype": "rewind_files"}));
 
-    control.track(id.clone(), PendingControlOperation::FileRewind);
+    control.admit(
+        id.clone(),
+        RequestClass::Mutation,
+        None,
+        PendingControlOperation::FileRewind,
+        Instant::now(),
+    );
 
     assert!(control.cancel_prompt("unknown").is_empty());
     assert_eq!(
@@ -273,7 +291,13 @@ fn turn_completion_preserves_session_requests_and_retires_prompts() {
 
     let (id, _) = control.request(json!({"subtype": "generate_session_title"}));
 
-    control.track(id.clone(), PendingControlOperation::SessionTitle);
+    control.admit(
+        id.clone(),
+        RequestClass::Mutation,
+        None,
+        PendingControlOperation::SessionTitle,
+        Instant::now(),
+    );
 
     assert_eq!(
         control.finish_turn(),
@@ -462,7 +486,13 @@ fn control_responses_do_not_fall_through_or_revive_cancelled_titles() {
     ] {
         let (id, _) = session.control.request(json!({}));
 
-        session.control.track(id.clone(), operation);
+        session.control.admit(
+            id.clone(),
+            RequestClass::Mutation,
+            None,
+            operation,
+            Instant::now(),
+        );
 
         let response = json!({"type": "control_response", "response": {"request_id": id, "subtype": "error", "error": "unsupported"}});
 
@@ -472,9 +502,13 @@ fn control_responses_do_not_fall_through_or_revive_cancelled_titles() {
 
     let (id, _) = session.control.request(json!({}));
 
-    session
-        .control
-        .track(id.clone(), PendingControlOperation::Other);
+    session.control.admit(
+        id.clone(),
+        RequestClass::Mutation,
+        None,
+        PendingControlOperation::Other,
+        Instant::now(),
+    );
 
     let response = json!({"type": "control_response", "response": {"request_id": id, "subtype": "error", "error": "denied"}});
 
@@ -486,19 +520,13 @@ fn control_responses_do_not_fall_through_or_revive_cancelled_titles() {
 
     let ticket = InputTicket::queued_for_test(false);
 
-    session.control.record_admitted(
+    session.control.admit(
         "queued-restore".into(),
         RequestClass::Mutation,
+        Some(ticket.clone()),
+        PendingControlOperation::FileRewind,
         Instant::now(),
     );
-
-    session
-        .control
-        .attach_input("queued-restore", ticket.clone());
-
-    session
-        .control
-        .track("queued-restore".into(), PendingControlOperation::FileRewind);
 
     session.control.complete(INIT_REQUEST_ID);
 
@@ -509,9 +537,13 @@ fn control_responses_do_not_fall_through_or_revive_cancelled_titles() {
 
     let (id, _) = session.control.request(json!({}));
 
-    session
-        .control
-        .track(id.clone(), PendingControlOperation::SessionTitle);
+    session.control.admit(
+        id.clone(),
+        RequestClass::Mutation,
+        None,
+        PendingControlOperation::SessionTitle,
+        Instant::now(),
+    );
 
     session
         .control
@@ -535,26 +567,25 @@ fn control_responses_do_not_fall_through_or_revive_cancelled_titles() {
 
     session.control.complete(INIT_REQUEST_ID);
 
-    session.control.track(
-        "restore-timeout".into(),
-        PendingControlOperation::FileRewind,
-    );
-
-    session.control.record_admitted(
+    session.control.admit(
         "restore-timeout".into(),
         RequestClass::Mutation,
+        None,
+        PendingControlOperation::FileRewind,
+        Instant::now(),
+    );
+
+    session.control.admit(
+        "effort-timeout".into(),
+        RequestClass::Mutation,
+        None,
+        PendingControlOperation::Other,
         Instant::now(),
     );
 
     session
         .control
         .record_effort("effort-timeout".into(), "high".into());
-
-    session.control.record_admitted(
-        "effort-timeout".into(),
-        RequestClass::Mutation,
-        Instant::now(),
-    );
 
     let timeout_events = session.poll_timeouts(Instant::now() + Duration::from_secs(301));
 
@@ -954,11 +985,13 @@ fn pending_queries_do_not_block_an_atomic_settings_and_prompt_batch() {
     for index in 0..256 {
         let id = format!("pending-{index}");
 
-        session
-            .control
-            .record_admitted(id.clone(), RequestClass::Query, now);
-
-        session.control.track(id, PendingControlOperation::Other);
+        session.control.admit(
+            id,
+            RequestClass::Query,
+            None,
+            PendingControlOperation::Other,
+            now,
+        );
     }
 
     assert_eq!(
@@ -1135,28 +1168,34 @@ fn file_rewind_request_matches_the_sdk_control_shape() {
     );
 }
 
+fn pending_control(id: &str, operation: PendingControlOperation) -> ControlState {
+    let mut control = ControlState::default();
+
+    control.admit(
+        id.to_string(),
+        RequestClass::Mutation,
+        None,
+        operation,
+        Instant::now(),
+    );
+
+    control
+}
+
 #[test]
 fn file_rewind_control_response_is_correlated_by_request_id() {
-    let mut pending = PendingRequests::new(1);
-
-    pending.track("nmt-7".to_string(), PendingControlOperation::FileRewind);
+    let mut control = pending_control("nmt-7", PendingControlOperation::FileRewind);
 
     assert_eq!(
-        resolve_pending_control_operation(
-            &mut pending,
-            &json!({"request_id": "other", "subtype": "success"})
-        ),
+        control.resolve(&json!({"request_id": "other", "subtype": "success"})),
         None
     );
-    assert!(pending.operations.contains_key("nmt-7"));
+    assert!(control.contains(&PendingControlOperation::FileRewind));
     assert_eq!(
-        resolve_pending_control_operation(
-            &mut pending,
-            &json!({"request_id": "nmt-7", "subtype": "success"})
-        ),
+        control.resolve(&json!({"request_id": "nmt-7", "subtype": "success"})),
         Some(Event::FileRewindCompleted { error: None })
     );
-    assert!(pending.operations.is_empty());
+    assert!(!control.contains(&PendingControlOperation::FileRewind));
 }
 
 #[test]
@@ -1168,9 +1207,7 @@ fn file_rewind_rejection_and_malformed_responses_are_nonfatal_results() {
             "Claude returned a malformed control response.",
         ),
     ] {
-        let mut pending = PendingRequests::new(1);
-
-        pending.track("nmt-8".to_string(), PendingControlOperation::FileRewind);
+        let mut control = pending_control("nmt-8", PendingControlOperation::FileRewind);
 
         let response = if subtype == "error" {
             json!({
@@ -1183,28 +1220,26 @@ fn file_rewind_rejection_and_malformed_responses_are_nonfatal_results() {
         };
 
         assert_eq!(
-            resolve_pending_control_operation(&mut pending, &response),
+            control.resolve(&response),
             Some(Event::FileRewindCompleted {
                 error: Some(expected.to_string()),
             })
         );
-        assert!(pending.operations.is_empty());
+        assert!(!control.contains(&PendingControlOperation::FileRewind));
     }
 }
 
 #[test]
 fn process_exit_fails_and_clears_pending_file_rewinds() {
-    let mut pending = PendingRequests::new(1);
-
-    pending.track("nmt-9".to_string(), PendingControlOperation::FileRewind);
+    let mut control = pending_control("nmt-9", PendingControlOperation::FileRewind);
 
     assert_eq!(
-        fail_pending_control_operations(pending.close(), "Claude exited."),
+        control.close("Claude exited."),
         vec![Event::FileRewindCompleted {
             error: Some("Claude exited.".into()),
         }]
     );
-    assert!(pending.operations.is_empty());
+    assert!(!control.contains(&PendingControlOperation::FileRewind));
 }
 
 #[test]
@@ -1588,14 +1623,9 @@ fn a_context_usage_response_becomes_a_composition_breakdown() {
         },
     });
 
-    let mut pending = PendingRequests::new(1);
+    let mut control = pending_control("nmt-3", PendingControlOperation::ContextComposition);
 
-    pending.track(
-        "nmt-3".to_string(),
-        PendingControlOperation::ContextComposition,
-    );
-
-    let event = resolve_pending_control_operation(&mut pending, &response);
+    let event = control.resolve(&response);
 
     let Some(Event::ContextCompositionUpdated(composition)) = event else {
         panic!("expected a composition update, got {event:?}");
@@ -1620,7 +1650,7 @@ fn a_context_usage_response_becomes_a_composition_breakdown() {
     );
     assert!(composition.segments[2].deferred);
     assert!(
-        pending.operations.is_empty(),
+        !control.contains(&PendingControlOperation::ContextComposition),
         "the request is no longer outstanding"
     );
 }
@@ -1633,17 +1663,12 @@ fn a_failed_context_usage_request_leaves_the_previous_breakdown_alone() {
         "error": "context usage unavailable",
     });
 
-    let mut pending = PendingRequests::new(1);
-
-    pending.track(
-        "nmt-3".to_string(),
-        PendingControlOperation::ContextComposition,
-    );
+    let mut control = pending_control("nmt-3", PendingControlOperation::ContextComposition);
 
     // Nothing is waiting on this, and the accounting beside it is still
     // accurate, so a failure reports nothing rather than blanking the card.
-    assert!(resolve_pending_control_operation(&mut pending, &response).is_none());
-    assert!(pending.operations.is_empty());
+    assert!(control.resolve(&response).is_none());
+    assert!(!control.contains(&PendingControlOperation::ContextComposition));
 }
 
 #[test]
@@ -1654,14 +1679,9 @@ fn a_composition_without_categories_is_not_published() {
         "response": {"totalTokens": 100, "categories": []},
     });
 
-    let mut pending = PendingRequests::new(1);
+    let mut control = pending_control("nmt-3", PendingControlOperation::ContextComposition);
 
-    pending.track(
-        "nmt-3".to_string(),
-        PendingControlOperation::ContextComposition,
-    );
-
-    assert!(resolve_pending_control_operation(&mut pending, &response).is_none());
+    assert!(control.resolve(&response).is_none());
 }
 
 /// A resumed conversation replays nothing through the protocol, so no

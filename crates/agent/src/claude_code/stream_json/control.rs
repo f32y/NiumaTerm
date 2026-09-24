@@ -12,26 +12,43 @@ use crate::chat::{
     ContextComposition, ContextSegment, Event, Question, QuestionOption, QuestionResolution,
 };
 use crate::subprocess::InputTicket;
-use crate::subprocess::requests::{DeadlineTimer, PendingRequests, RequestClass};
+use crate::subprocess::requests::{DeadlineTimer, RequestClass};
 
-struct Deadline {
+/// One request the CLI has not answered yet: when it expires, the queued
+/// write it may still be waiting in, and what its answer completes.
+struct PendingControl {
     at: Instant,
     class: RequestClass,
     input: Option<InputTicket>,
+    operation: PendingControlOperation,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum PendingControlOperation {
+    /// The initialize handshake; losing it ends the session.
+    Init,
+    /// An effort change. Its outcome is settled in submission order by
+    /// `EffortState`, so the table only keeps its deadline.
+    Effort,
     Other,
     FileRewind,
     ContextComposition,
     SessionTitle,
 }
 
+/// A request that ran out of time, with what is needed to settle it.
+pub(super) struct ExpiredControl {
+    pub(super) id: String,
+    pub(super) class: RequestClass,
+    pub(super) input: Option<InputTicket>,
+    pub(super) operation: PendingControlOperation,
+}
+
 pub(super) struct ControlState {
     timer: Option<DeadlineTimer>,
-    requests: PendingRequests<String, PendingControlOperation>,
-    deadlines: HashMap<String, Deadline>,
+    next_id: u64,
+    closed: bool,
+    pending: HashMap<String, PendingControl>,
     effort: EffortState,
     pub(super) pending_approval: Option<PendingApproval>,
     pub(super) pending_questions: Option<PendingQuestions>,
@@ -41,8 +58,9 @@ impl Default for ControlState {
     fn default() -> Self {
         Self {
             timer: None,
-            requests: PendingRequests::new(1),
-            deadlines: HashMap::new(),
+            next_id: 1,
+            closed: false,
+            pending: HashMap::new(),
             effort: EffortState::default(),
             pending_approval: None,
             pending_questions: None,
@@ -61,51 +79,62 @@ impl ControlState {
         if let Some(timer) = &self.timer {
             timer
                 .handle()
-                .set(self.deadlines.values().map(|deadline| deadline.at).min());
+                .set(self.pending.values().map(|pending| pending.at).min());
         }
     }
 
     pub(super) fn check_connected(&self) -> Result<(), String> {
-        if self.requests.is_closed() {
+        if self.closed {
             return Err("Claude is not connected".into());
         }
 
         Ok(())
     }
 
-    pub(super) fn record_admitted(&mut self, id: String, class: RequestClass, now: Instant) {
-        self.deadlines.insert(
+    /// Record a request the writer accepted. The deadline starts at
+    /// admission: a request that times out can still be waiting in the
+    /// writer, which is why the queued write is kept beside it.
+    pub(super) fn admit(
+        &mut self,
+        id: String,
+        class: RequestClass,
+        input: Option<InputTicket>,
+        operation: PendingControlOperation,
+        now: Instant,
+    ) {
+        if self.closed {
+            return;
+        }
+
+        self.pending.insert(
             id,
-            Deadline {
+            PendingControl {
                 at: now + class.timeout(),
                 class,
-                input: None,
+                input,
+                operation,
             },
         );
 
         self.refresh_timer();
     }
 
-    pub(super) fn attach_input(&mut self, id: &str, ticket: InputTicket) {
-        if let Some(deadline) = self.deadlines.get_mut(id) {
-            deadline.input = Some(ticket);
-        }
-    }
-
     pub(super) fn complete(&mut self, id: &str) {
-        self.deadlines.remove(id);
+        self.pending.remove(id);
 
         self.refresh_timer();
     }
 
-    pub(super) fn expired(
-        &mut self,
-        now: Instant,
-    ) -> Vec<(String, RequestClass, Option<InputTicket>)> {
+    pub(super) fn expired(&mut self, now: Instant) -> Vec<ExpiredControl> {
         let expired = self
-            .deadlines
-            .extract_if(|_, deadline| deadline.at <= now)
-            .map(|(id, deadline)| (id, deadline.class, deadline.input))
+            .pending
+            .extract_if(|_, pending| pending.at <= now)
+            .map(|(id, pending)| ExpiredControl {
+                id,
+                class: pending.class,
+                input: pending.input,
+                operation: pending.operation,
+            })
             .collect();
 
         self.refresh_timer();
@@ -117,6 +146,29 @@ impl ControlState {
         self.effort
             .contains(id)
             .then(|| self.effort.expire(id).into_iter().collect())
+    }
+
+    /// Settle an expired request whose answer can no longer be applied: a
+    /// rejected effort change, a failed file restore, or otherwise one
+    /// non-fatal error naming the timeout.
+    pub(super) fn fail_expired(&mut self, expired: ExpiredControl, message: &str) -> Vec<Event> {
+        let mut events: Vec<Event> = if self.effort.contains(&expired.id) {
+            self.effort
+                .resolve(&expired.id, Some(message.to_string()))
+                .into_iter()
+                .collect()
+        } else {
+            fail_pending_control_operations([expired.operation], message)
+        };
+
+        if events.is_empty() {
+            events.push(Event::Error {
+                message: message.to_string(),
+                fatal: false,
+            });
+        }
+
+        events
     }
 
     pub(super) fn with_effort(value: Option<String>) -> Self {
@@ -131,15 +183,21 @@ impl ControlState {
     }
 
     pub(super) fn record_effort(&mut self, id: String, value: String) {
-        if !self.requests.is_closed() {
-            self.requests.finish(&id);
-
-            self.effort.record(id, value);
+        if self.closed {
+            return;
         }
+
+        if let Some(pending) = self.pending.get_mut(&id) {
+            pending.operation = PendingControlOperation::Effort;
+        }
+
+        self.effort.record(id, value);
     }
 
     pub(super) fn request(&mut self, request: Value) -> (String, Value) {
-        let request_id = format!("nmt-{}", self.requests.alloc_id());
+        let request_id = format!("nmt-{}", self.next_id);
+
+        self.next_id += 1;
 
         let message = json!({
             "type": "control_request", "request_id": request_id, "request": request,
@@ -148,55 +206,51 @@ impl ControlState {
         (request_id, message)
     }
 
-    pub(super) fn track(&mut self, id: String, operation: PendingControlOperation) {
-        self.requests.track(id, operation);
-    }
-
     pub(super) fn contains(&self, operation: &PendingControlOperation) -> bool {
-        self.requests
-            .operations
+        self.pending
             .values()
-            .any(|pending| pending == operation)
+            .any(|pending| pending.operation == *operation)
     }
 
     pub(super) fn has_active_request(&self) -> bool {
         self.effort.has_pending()
             || self.pending_approval.is_some()
             || self.pending_questions.is_some()
-            || self
-                .requests
-                .operations
-                .values()
-                .any(|operation| !matches!(operation, PendingControlOperation::Other))
+            || self.pending.values().any(|pending| {
+                matches!(
+                    pending.operation,
+                    PendingControlOperation::FileRewind
+                        | PendingControlOperation::ContextComposition
+                        | PendingControlOperation::SessionTitle
+                )
+            })
     }
 
     pub(super) fn resolve(&mut self, response: &Value) -> Option<Event> {
-        if let Some(id) = response["request_id"].as_str() {
-            self.complete(id);
-        }
+        let id = response["request_id"].as_str()?;
 
-        if let Some(id) = response["request_id"].as_str()
-            && self.effort.contains(id)
-        {
+        let pending = self.pending.remove(id);
+
+        self.refresh_timer();
+
+        if self.effort.contains(id) {
             return self.effort.resolve(id, control_response_error(response));
         }
 
-        resolve_pending_control_operation(&mut self.requests, response)
+        operation_resolved(pending?.operation, response)
     }
 
     pub(super) fn cancel_generated_title(&mut self) {
-        self.requests.operations.retain(|id, operation| {
-            if matches!(operation, PendingControlOperation::SessionTitle) {
-                if let Some(deadline) = self.deadlines.remove(id)
-                    && let Some(input) = deadline.input
-                {
-                    input.cancel();
-                }
-
-                false
-            } else {
-                true
+        self.pending.retain(|_, pending| {
+            if pending.operation != PendingControlOperation::SessionTitle {
+                return true;
             }
+
+            if let Some(input) = pending.input.take() {
+                input.cancel();
+            }
+
+            false
         });
 
         self.refresh_timer();
@@ -249,14 +303,18 @@ impl ControlState {
     }
 
     pub(super) fn close(&mut self, message: &str) -> Vec<Event> {
-        let pending = self.requests.close();
+        self.closed = true;
 
-        for deadline in self.deadlines.drain().map(|(_, deadline)| deadline) {
-            if deadline.class != RequestClass::Control
-                && let Some(input) = deadline.input
+        let mut operations = Vec::new();
+
+        for (_, pending) in self.pending.drain() {
+            if pending.class != RequestClass::Control
+                && let Some(input) = pending.input
             {
                 input.cancel();
             }
+
+            operations.push(pending.operation);
         }
 
         self.timer.take();
@@ -265,13 +323,13 @@ impl ControlState {
 
         events.extend(self.effort.close(message));
 
-        events.extend(fail_pending_control_operations(pending, message));
+        events.extend(fail_pending_control_operations(operations, message));
 
         events
     }
 
     pub(super) fn is_closed(&self) -> bool {
-        self.requests.is_closed()
+        self.closed
     }
 }
 
@@ -368,18 +426,13 @@ pub(super) fn parse_questions(input: &Value) -> Vec<Question> {
         .collect()
 }
 
-pub(super) fn resolve_pending_control_operation(
-    pending: &mut PendingRequests<String, PendingControlOperation>,
-    response: &Value,
-) -> Option<Event> {
-    let Value::String(request_id) = &response["request_id"] else {
-        return None;
-    };
-
-    let operation = pending.finish(request_id)?;
+fn operation_resolved(operation: PendingControlOperation, response: &Value) -> Option<Event> {
     let error = control_response_error(response);
 
     match operation {
+        // The handshake answer is read by the session itself, and an effort
+        // answer is settled by the ordered effort state before reaching here.
+        PendingControlOperation::Init | PendingControlOperation::Effort => None,
         PendingControlOperation::Other => error.map(|message| Event::Error {
             message,
             fatal: false,
@@ -466,14 +519,16 @@ fn parse_context_composition(payload: &Value) -> Option<ContextComposition> {
     })
 }
 
-pub(super) fn fail_pending_control_operations(
-    pending: HashMap<String, PendingControlOperation>,
+fn fail_pending_control_operations(
+    operations: impl IntoIterator<Item = PendingControlOperation>,
     message: &str,
 ) -> Vec<Event> {
-    pending
-        .into_values()
+    operations
+        .into_iter()
         .filter_map(|operation| match operation {
-            PendingControlOperation::Other => None,
+            PendingControlOperation::Init
+            | PendingControlOperation::Effort
+            | PendingControlOperation::Other => None,
             PendingControlOperation::FileRewind => Some(Event::FileRewindCompleted {
                 error: Some(message.to_string()),
             }),
