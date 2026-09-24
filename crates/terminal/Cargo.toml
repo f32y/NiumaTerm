@@ -28,23 +28,11 @@ nmt_runtime.workspace = true
 
 base64.workspace = true
 bitflags.workspace = true
-bytemuck.workspace = true
-cursor-icon.workspace = true
-dirs.workspace = true
-flate2.workspace = true
 image_rs.workspace = true
-lazy_static.workspace = true
 memchr.workspace = true
 parking_lot.workspace = true
-rapidhash.workspace = true
-regex.workspace = true
 rustc-hash.workspace = true
-serde.workspace = true
-smallvec.workspace = true
-toml.workspace = true
 tracing.workspace = true
-unicode-width.workspace = true
-url.workspace = true
 futures.workspace = true
 tokio.workspace = true
 

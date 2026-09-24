@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use tokio::time::timeout;
-use tungstenite::{Message, accept};
+use tokio_tungstenite::tungstenite::{Message, accept};
 
 use crate::dsh::api::ApiClient;
 use crate::dsh::events::{Downlinks, PassedEvent, Streams};

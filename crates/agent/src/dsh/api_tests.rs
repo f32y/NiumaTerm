@@ -4,8 +4,8 @@ use std::thread;
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use tungstenite::accept_hdr;
-use tungstenite::handshake::server::Request;
+use tokio_tungstenite::tungstenite::handshake::server::Request;
+use tokio_tungstenite::tungstenite::{accept_hdr, connect};
 
 use crate::dsh::api::{ApiClient, CallError};
 use crate::dsh::catalogs;
@@ -121,7 +121,7 @@ fn startup_token_authenticates_rpc_and_stream_without_corrupting_the_path() {
         "session-1"
     );
 
-    let _ = tungstenite::connect(client.stream_request().unwrap()).unwrap();
+    let _ = connect(client.stream_request().unwrap()).unwrap();
 
     server.join().unwrap();
 }

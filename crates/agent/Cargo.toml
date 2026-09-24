@@ -35,7 +35,6 @@ reqwest = { workspace = true, features = [
     "rustls-tls-native-roots",
     "system-proxy",
 ] }
-tungstenite.workspace = true
 tokio.workspace = true
 tokio-tungstenite.workspace = true
 tokio-util.workspace = true

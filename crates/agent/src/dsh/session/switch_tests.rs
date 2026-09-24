@@ -5,7 +5,7 @@ use std::thread;
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use tungstenite::{Message, accept};
+use tokio_tungstenite::tungstenite::{Message, accept};
 
 use crate::dsh::api::ApiClient;
 use crate::dsh::session::switch::{SwitchSlot, Switching, Target, switch_conversation};

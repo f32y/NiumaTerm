@@ -30,7 +30,6 @@ tracing-subscriber.workspace = true
 tracing-appender.workspace = true
 
 anyhow.workspace = true
-base64.workspace = true
 serde.workspace = true
 chrono.workspace = true
 clap.workspace = true
@@ -43,7 +42,6 @@ gpui.workspace = true
 gpui_tokio.workspace = true
 tokio.workspace = true
 gpui-component.workspace = true
-lsp-types.workspace = true
 gpui-kit-assets.workspace = true
 rust-embed.workspace = true
 # Kitty graphics: construct GPUI `RenderImage` frames from decoded pixels. Same
@@ -51,13 +49,11 @@ rust-embed.workspace = true
 image_rs.workspace = true
 
 percent-encoding.workspace = true
-raw-window-handle.workspace = true
 tree-sitter.workspace = true
 tree-sitter-language.workspace = true
 gpui-base.workspace = true
 ropey.workspace = true
 vte.workspace = true
-tempfile.workspace = true
 uuid.workspace = true
 rust-i18n.workspace = true
 rand.workspace = true
@@ -76,6 +72,7 @@ gpui_macos.workspace = true
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
+tempfile.workspace = true
 # The same font source GPUI's text system selects families through, so a
 # default face can be checked against what the host actually has.
 font-kit.workspace = true

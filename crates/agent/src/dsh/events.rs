@@ -16,9 +16,9 @@ use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio::sync::oneshot;
 use tokio::task::AbortHandle;
 use tokio::time::{sleep, timeout};
+use tokio_tungstenite::tungstenite::{Error, Message};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 use tracing::warn;
-use tungstenite::{Error, Message};
 
 use crate::dsh::api::{ApiClient, CallError};
 use crate::dsh::host::Host;

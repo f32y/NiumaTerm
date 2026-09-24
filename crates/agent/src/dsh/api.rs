@@ -11,8 +11,8 @@ use reqwest::redirect::Policy;
 use reqwest::{Client, StatusCode, Url};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use tungstenite::client::IntoClientRequest as _;
-use tungstenite::handshake::client::Request;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
+use tokio_tungstenite::tungstenite::handshake::client::Request;
 use uuid::Uuid;
 
 const CALL_TIMEOUT: Duration = Duration::from_secs(30);
