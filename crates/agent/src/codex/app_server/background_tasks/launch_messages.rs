@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use indexmap::IndexMap;
 use serde_json::Value;
 
 use crate::chat::Item;
@@ -9,8 +10,9 @@ const MAX_PENDING_MESSAGES: usize = 64;
 #[derive(Default)]
 pub(super) struct LaunchMessages {
     confirmed: HashMap<String, String>,
-    pending: HashMap<String, String>,
-    pending_order: Vec<String>,
+
+    /// Messages for children not yet proven to belong here, oldest first.
+    pending: IndexMap<String, String>,
 }
 
 impl LaunchMessages {
@@ -18,16 +20,12 @@ impl LaunchMessages {
         self.confirmed.clear();
 
         self.pending.clear();
-
-        self.pending_order.clear();
     }
 
     pub(super) fn confirm(&mut self, thread_id: &str) {
-        let Some(message) = self.pending.remove(thread_id) else {
+        let Some(message) = self.pending.shift_remove(thread_id) else {
             return;
         };
-
-        self.pending_order.retain(|held| held != thread_id);
 
         self.confirmed
             .entry(thread_id.to_owned())
@@ -84,15 +82,11 @@ impl LaunchMessages {
             return false;
         }
 
-        self.pending.insert(thread_id.to_owned(), message);
-
-        self.pending_order.push(thread_id.to_owned());
-
-        while self.pending_order.len() > MAX_PENDING_MESSAGES {
-            let oldest = self.pending_order.remove(0);
-
-            self.pending.remove(&oldest);
+        if self.pending.len() >= MAX_PENDING_MESSAGES {
+            self.pending.shift_remove_index(0);
         }
+
+        self.pending.insert(thread_id.to_owned(), message);
 
         true
     }

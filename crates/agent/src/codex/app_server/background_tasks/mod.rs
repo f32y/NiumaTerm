@@ -14,6 +14,7 @@ mod tests;
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use indexmap::IndexMap;
 use serde_json::{Value, json};
 
 use crate::background_task::{
@@ -63,10 +64,8 @@ pub(super) struct CodexTasks {
     /// Only the newest candidate per thread is kept: a child update can arrive
     /// before its spawn item, but unrelated thread content must never reach the
     /// parent conversation.
-    pending: HashMap<String, BackgroundTaskUpdate>,
-
-    /// Insertion order of `pending`, so the oldest candidate can be evicted.
-    pending_order: Vec<String>,
+    /// Kept in arrival order, so the oldest candidate is evicted first.
+    pending: IndexMap<String, BackgroundTaskUpdate>,
 
     launch_messages: LaunchMessages,
 
@@ -106,8 +105,6 @@ impl CodexTasks {
         self.parents.clear();
 
         self.pending.clear();
-
-        self.pending_order.clear();
 
         self.launch_messages.clear();
 
@@ -245,14 +242,8 @@ impl CodexTasks {
     }
 
     fn hold_pending(&mut self, thread_id: &str, update: BackgroundTaskUpdate) {
-        if !self.pending.contains_key(thread_id) {
-            if self.pending_order.len() >= MAX_PENDING_THREADS {
-                let oldest = self.pending_order.remove(0);
-
-                self.pending.remove(&oldest);
-            }
-
-            self.pending_order.push(thread_id.to_owned());
+        if !self.pending.contains_key(thread_id) && self.pending.len() >= MAX_PENDING_THREADS {
+            self.pending.shift_remove_index(0);
         }
 
         self.pending.insert(thread_id.to_owned(), update);
@@ -260,11 +251,9 @@ impl CodexTasks {
 
     /// Move a held candidate into the registry once its relationship is proven.
     fn drain_pending(&mut self, thread_id: &str) -> bool {
-        let Some(update) = self.pending.remove(thread_id) else {
+        let Some(update) = self.pending.shift_remove(thread_id) else {
             return false;
         };
-
-        self.pending_order.retain(|held| held != thread_id);
 
         self.record(thread_id, update, true)
     }

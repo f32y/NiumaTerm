@@ -4152,6 +4152,7 @@ dependencies = [
  "getrandom 0.4.3",
  "hex",
  "image",
+ "indexmap",
  "nmt_platform",
  "nmt_profile",
  "nmt_runtime",

@@ -17,8 +17,7 @@ mod disk;
 #[cfg(test)]
 mod tests;
 
-use std::collections::HashMap;
-
+use indexmap::IndexMap;
 use serde_json::Value;
 
 use crate::background_task::replace_text;
@@ -34,21 +33,15 @@ use crate::workflow::{
 pub(crate) struct ClaudeWorkflows {
     session_id: Option<String>,
 
-    /// Runs by `task_id`, in first-seen order via `order`.
-    runs: HashMap<String, WorkflowRun>,
-
-    order: Vec<String>,
+    /// Runs by `task_id`, in first-seen order.
+    runs: IndexMap<String, WorkflowRun>,
 }
 
 impl ClaudeWorkflows {
     pub(crate) fn snapshot(&self) -> Option<WorkflowSnapshot> {
         let session_id = self.session_id.clone()?;
 
-        let runs = self
-            .order
-            .iter()
-            .filter_map(|task_id| self.runs.get(task_id).cloned())
-            .collect();
+        let runs = self.runs.values().cloned().collect();
 
         Some(WorkflowSnapshot { session_id, runs })
     }
@@ -63,8 +56,6 @@ impl ClaudeWorkflows {
         self.session_id = Some(session_id.to_owned());
 
         self.runs.clear();
-
-        self.order.clear();
 
         true
     }
@@ -111,8 +102,6 @@ impl ClaudeWorkflows {
         if self.runs.contains_key(task_id) {
             return false;
         }
-
-        self.order.push(task_id.to_owned());
 
         self.runs.insert(
             task_id.to_owned(),
@@ -239,8 +228,6 @@ impl ClaudeWorkflows {
             if self.runs.contains_key(&run.task_id) {
                 continue;
             }
-
-            self.order.push(run.task_id.clone());
 
             self.runs.insert(run.task_id.clone(), run);
 

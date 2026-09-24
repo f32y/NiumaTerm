@@ -7,7 +7,7 @@ use crate::background_task::{
     BackgroundTaskKey, BackgroundTaskKind, BackgroundTaskRefs, BackgroundTaskState,
 };
 use crate::chat::Item;
-use crate::claude_code::tasks::shells::{MAX_OUTPUT_BYTES, shell_items};
+use crate::claude_code::tasks::shells::{MAX_OUTPUT_BYTES, ShellIndex, shell_items};
 use crate::claude_code::tasks::{ClaudeTasks, ShellDetail};
 
 const SESSION: &str = "sess-1";
@@ -1092,4 +1092,24 @@ fn a_command_with_nothing_written_yet_shows_no_output() {
     let (_, output, _) = command_item(&detail(None, BackgroundTaskState::Working));
 
     assert_eq!(output, None);
+}
+
+/// A shell the background snapshot keeps re-listing takes one slot, so it
+/// cannot push another shell's command and description out of the table.
+#[test]
+fn a_relisted_shell_does_not_evict_another_shells_metadata() {
+    let mut shells = ShellIndex::default();
+
+    shells.remember_shell(&json!({"task_id": "first", "description": "Build"}));
+
+    for _ in 0..1_000 {
+        shells.reserve_shell_meta("second");
+    }
+
+    assert_eq!(
+        shells
+            .meta("first")
+            .and_then(|meta| meta.description.as_deref()),
+        Some("Build")
+    );
 }

@@ -5,8 +5,7 @@
 //! reduction's own state, which is what lets the reducer above stay about
 //! sequencing rather than about record shapes.
 
-use std::collections::{HashMap, VecDeque};
-
+use indexmap::IndexMap;
 use serde_json::Value;
 
 use crate::background_task::{BackgroundTaskRefs, BackgroundTaskState};
@@ -135,17 +134,15 @@ pub(crate) fn sidechain_preview(message: &Value) -> Option<String> {
 /// inventing identifiers.
 const MAX_ALIASES: usize = 512;
 
+/// Aliases in the order they were first recorded, so the oldest goes first.
 #[derive(Default)]
 pub(super) struct AliasTable {
-    aliases: HashMap<String, String>,
-    order: VecDeque<String>,
+    aliases: IndexMap<String, String>,
 }
 
 impl AliasTable {
     pub(super) fn clear(&mut self) {
         self.aliases.clear();
-
-        self.order.clear();
     }
 
     /// The canonical id this identifier was recorded against, if any.
@@ -161,13 +158,9 @@ impl AliasTable {
                 continue;
             }
 
-            if self.order.len() >= MAX_ALIASES
-                && let Some(oldest) = self.order.pop_front()
-            {
-                self.aliases.remove(&oldest);
+            if self.aliases.len() >= MAX_ALIASES {
+                self.aliases.shift_remove_index(0);
             }
-
-            self.order.push_back(id.clone());
 
             self.aliases.insert(id.clone(), canonical.to_owned());
         }
