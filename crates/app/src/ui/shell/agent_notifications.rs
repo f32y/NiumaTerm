@@ -1,9 +1,21 @@
 use std::sync::OnceLock;
+use std::time;
 
+use gpui::Context;
+use nmt_agent::{
+    AgentMonitor, AgentNotification, AgentRoute, MonitorMutation, request_native_delivery,
+};
+use nmt_platform::{
+    NativeNotification, remove_notification, show_notification, system_notification_enabled,
+};
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio::task::spawn_blocking;
+use tracing::warn;
 
-use crate::ui::shell::*;
+use crate::cli::CliAction;
+use crate::tabs::TabId;
+use crate::ui::settings::AppSettings;
+use crate::ui::shell::{AppWindow, PendingAgentResume};
 
 pub(super) struct AgentNotificationState {
     pub(super) agent_monitor: AgentMonitor,

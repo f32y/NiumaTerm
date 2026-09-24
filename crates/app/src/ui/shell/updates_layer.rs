@@ -1,11 +1,19 @@
+use std::{collections, time};
+
+use gpui::prelude::*;
+use gpui::{AnyElement, Context, Entity, SharedString, px};
+use gpui_component::notification::Notification;
+use gpui_component::{Icon, IconNamed, v_flex};
 use nmt_agent::update::{ProviderKind, UpdatePhase};
 use rust_i18n::t;
 
+use crate::agent_updates;
 use crate::agent_updates::{
-    FocusedVisibleLifetime, NotificationPrimaryAction, UpdateNotificationView,
+    AgentUpdates, FocusedVisibleLifetime, NotificationPrimaryAction, UpdateNotificationView,
 };
 use crate::ui::notification_card::{NotificationAction, NotificationCard};
-use crate::ui::shell::*;
+use crate::ui::shell::AppWindow;
+use crate::ui::shell::actions::ShowSettings;
 #[cfg(windows)]
 use crate::update::UpdateNotification;
 

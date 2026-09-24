@@ -1,4 +1,13 @@
-use crate::ui::shell::*;
+use gpui::{AppContext as _, Context, Entity, Window};
+use gpui_component::Root;
+
+use crate::agent_usage::AgentUsageView;
+use crate::ui::git_status::GitStatusModel;
+use crate::ui::shell::AppWindow;
+use crate::ui::tab_bar::{TabStrip, VerticalTabList};
+use crate::ui::title_bar::WindowTitleBar;
+use crate::ui::token_usage::TokenUsageView;
+use crate::usage_sources::daily_source;
 
 pub(super) struct ShellChrome {
     /// Tab-strip view state (scroll + active-tab reveal) and its renderer.

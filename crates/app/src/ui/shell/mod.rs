@@ -44,33 +44,25 @@ use gpui::{
     WindowHandle, WindowId, WindowOptions, div, img, point, px, size, transparent_black,
 };
 use gpui_component::modern_menu::dispatch_modern_menu_key;
-use gpui_component::notification::Notification;
 use gpui_component::resizable::PANEL_MIN_SIZE;
-use gpui_component::{
-    ActiveTheme, Icon, IconNamed, Root, Theme as ComponentTheme, WindowExt, v_flex,
-};
+use gpui_component::{ActiveTheme, Root, Theme as ComponentTheme, WindowExt};
 use nmt_agent::chat::SessionSummary;
 use nmt_agent::team::model::RoomId;
 use nmt_agent::{
-    AgentActivityPolicy, AgentEvent, AgentMonitor, AgentNotification, AgentRoute,
-    AgentRuntimeStatus, AgentWorkspace, MonitorMutation, agent_process, request_native_delivery,
+    AgentActivityPolicy, AgentEvent, AgentMonitor, AgentRoute, AgentRuntimeStatus, AgentWorkspace,
+    agent_process,
 };
 use nmt_config::local_state::{WindowLocalState, WindowState};
 use nmt_config::system::WarnBeforeTerminatingShell;
 use nmt_config::{config_dir_path, get};
+use nmt_platform::default_shell_name;
 use nmt_platform::filesystem::path_identity;
 use nmt_platform::window::native_active_state;
-use nmt_platform::{
-    NativeNotification, default_shell_name, remove_notification, show_notification,
-    system_notification_enabled,
-};
 use rust_i18n::t;
-use tracing::warn;
 
 use crate::agent_updates::AgentUpdates;
-use crate::agent_usage::AgentUsageView;
-use crate::cli::CliAction;
 use crate::tabs::{Tab, TabId, TabManager};
+use crate::ui;
 use crate::ui::background_tasks::BackgroundTasksView;
 use crate::ui::git_sidebar::GitSidebar;
 use crate::ui::git_status::GitStatusModel;
@@ -102,17 +94,14 @@ use crate::ui::shell::workspace_dirs::{
 use crate::ui::tab_bar::{TabStrip, VerticalTabList, WorkspaceTabs};
 use crate::ui::terminal_launch::spawn_default_pane;
 use crate::ui::terminal_layout::TerminalLayout;
-use crate::ui::title_bar::{PanelToggle, TitleBarInputs, TitleCenter, WindowTitleBar};
-use crate::ui::token_usage::TokenUsageView;
+use crate::ui::title_bar::{PanelToggle, TitleBarInputs, TitleCenter};
 use crate::ui::workflows::WorkflowsView;
 use crate::ui::workspace_sidebar;
 use crate::ui::workspace_sidebar::{Sidebar, SidebarUsage, WorkspaceChrome};
-use crate::usage_sources::daily_source;
 use crate::workspace::{
     ProgressTally, TerminalActivity, WorkspaceId, WorkspaceKind, WorkspaceManager, WorkspaceRoots,
     best_match, exact_match,
 };
-use crate::{agent_updates, ui};
 
 /// Open terminal windows in creation order, plus the last closed window's
 /// state for saving on quit or restoring when the application is reopened.
