@@ -1,6 +1,17 @@
+use gpui::Entity;
+use gpui_component::setting::{
+    NumberFieldOptions, SettingField, SettingGroup, SettingItem, SettingPage,
+};
+use nmt_config::appearance::MAX_TAB_WIDTH;
 use rust_i18n::t;
 
-use crate::ui::settings::*;
+use crate::ui;
+use crate::ui::settings::fields::{
+    background_image_field, background_image_opacity_field, background_opacity_field,
+    settings_choice, settings_number, settings_switch, tab_shape_field,
+};
+use crate::ui::settings::state::{AppSettings, MIN_TAB_WIDTH, SettingsEditing, WindowBackdrop};
+use crate::ui::settings::theme_gallery::theme_list;
 
 pub(super) fn appearance_page(
     editing: Entity<SettingsEditing>,

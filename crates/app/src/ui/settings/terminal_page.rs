@@ -1,6 +1,8 @@
+use gpui_component::setting::{SettingGroup, SettingItem, SettingPage};
 use rust_i18n::t;
 
-use crate::ui::settings::*;
+use crate::ui::settings::fields::{settings_choice, settings_switch};
+use crate::ui::settings::state::{InputStyle, input_style_label};
 
 pub(super) fn terminal_page() -> SettingPage {
     let waterfall_key: &str = InputStyle::Waterfall.into();

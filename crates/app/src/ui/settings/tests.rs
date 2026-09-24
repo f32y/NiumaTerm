@@ -7,21 +7,39 @@ use std::{fs, io};
 use app::agent_tab::AgentKind;
 use app::terminal_tab::settings::TerminalSettings;
 use gpui::{
-    Context, Entity, InteractiveElement as _, IntoElement, ListAlignment, ListOffset, ListState,
-    ScrollDelta, ScrollWheelEvent, StatefulInteractiveElement as _, TestAppContext, div, list,
-    point, px, size,
+    AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, ListAlignment,
+    ListOffset, ListState, ParentElement as _, ScrollDelta, ScrollWheelEvent,
+    StatefulInteractiveElement as _, Styled as _, TestAppContext, Window,
+    WindowBackgroundAppearance, div, list, point, px, size,
 };
 use gpui_component::Root;
-use nmt_config::Config;
-use nmt_config::appearance::SmoothScrollingMode;
+use gpui_component::setting::{SelectIndex, SettingsState};
+use nmt_agent::update::{ProviderKind, UpdatePhase};
+use nmt_config::appearance::{MAX_TAB_WIDTH, SmoothScrollingMode};
 use nmt_config::builtin_themes::{THEMES as BUILTIN_THEMES, get as builtin_theme_source};
 use nmt_config::profile::ProfilesConfig;
 use nmt_config::theme::Theme as ConfigTheme;
 use nmt_config::theme_catalog::theme_families;
+use nmt_config::{Config, CursorShape};
 use nmt_platform::default_shell;
 
+use crate::ui::settings::agent_page::{installation_update_title, installation_version_text};
+use crate::ui::settings::opacity::{
+    effective_background_image_layer_opacity, effective_background_opacity,
+    effective_surface_background_opacity, window_background_appearance_for,
+};
+use crate::ui::settings::state::{
+    AgentProfile, AgentProfileLauncher, AppSettings, DEFAULT_AGENT_TRANSCRIPT_FONT_SIZE,
+    DEFAULT_BACKGROUND_IMAGE_OPACITY, DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT,
+    DEFAULT_TAB_WIDTH, DEFAULT_UI_FONT, EnvVar, InputStyle, MIN_TAB_WIDTH, Profile,
+    SettingsEditing, WindowBackdrop, agent_kind_display_label, builtin_agent_profile,
+    clamp_agent_transcript_font_size, clamp_background_image_opacity, clamp_background_opacity,
+    clamp_git_interval, clamp_tab_width, clamp_terminal_font_size, clamp_terminal_line_height,
+    terminal_font_or_default, ui_font_or_default,
+};
+use crate::ui::settings::terminal_bridge::install_terminal_settings;
 use crate::ui::settings::theme::ui_theme_config;
-use crate::ui::settings::*;
+use crate::ui::settings::{OpenSettings, SettingsSurface, new_settings_view, save_settings_to};
 
 struct SettingsHost(SettingsSurface);
 

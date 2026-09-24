@@ -15,21 +15,28 @@ use gpui::{
     StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::dialog::Dialog;
-use gpui_component::input::InputState;
+use gpui_component::dialog::{DIALOG_BUTTON_MIN_WIDTH, Dialog, DialogClose, DialogFooter};
+use gpui_component::input::{Input, InputEvent, InputState};
+use gpui_component::label::Label;
 use gpui_component::list::{List, ListDelegate, ListItem, ListState};
+use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_component::modern_menu::ModernMenuExt as _;
+use gpui_component::scroll::ScrollableElement as _;
+use gpui_component::switch::Switch;
 use gpui_component::{
-    ActiveTheme as _, Icon, IconName, IndexPath, Sizable as _, WindowExt as _, h_flex,
+    ActiveTheme as _, Icon, IconName, IndexPath, Sizable as _, WindowExt as _, h_flex, v_flex,
 };
 use rust_i18n::t;
 
-use crate::ui::settings::state::{AgentProfile, AppSettings};
-use crate::ui::settings::table::{
-    TABLE_HEADER_HEIGHT, TABLE_OPERATION_BUTTON, TABLE_ROW_HEIGHT, TrashIcon, table_frame,
-    table_header,
+use crate::ui::settings::card::{card_row, card_text_input, description_hint};
+use crate::ui::settings::state::{
+    AgentProfile, AgentProfileLauncher, AppSettings, EnvVar, agent_kind_display_label,
+    builtin_agent_profile,
 };
-use crate::ui::settings::*;
+use crate::ui::settings::table::{
+    ENV_OPERATION_COLUMN, TABLE_HEADER_HEIGHT, TABLE_OPERATION_BUTTON, TABLE_ROW_HEIGHT, TrashIcon,
+    table_frame, table_header, table_row,
+};
 
 /// Column widths shared by the header and the rows, so the two line up
 /// without either having to measure the other.

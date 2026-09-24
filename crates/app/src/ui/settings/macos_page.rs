@@ -1,14 +1,17 @@
 use futures::StreamExt as _;
 use futures::channel::mpsc;
 use gpui::prelude::FluentBuilder as _;
-use gpui::{Context, Entity, IntoElement, Render, Window};
-use gpui_component::v_flex;
+use gpui::{Context, Entity, IntoElement, ParentElement as _, Render, Styled as _, Window};
+use gpui_component::button::{Button, ButtonVariants as _};
+use gpui_component::label::Label;
+use gpui_component::setting::{SettingField, SettingGroup, SettingItem};
+use gpui_component::{Disableable as _, v_flex};
 use nmt_platform::macos_notifications::{
     NotificationPermission, notification_permission, request_notification_permission,
 };
 use rust_i18n::t;
 
-use crate::ui::settings::*;
+use crate::ui::settings::fields::settings_switch;
 
 pub(super) fn macos_group() -> SettingGroup {
     SettingGroup::new()

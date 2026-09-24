@@ -6,21 +6,14 @@
 //! The settings workspace owns its page state and theme watcher until it closes,
 //! when the window returns to the previously active workspace.
 
-pub use nmt_config::appearance::MAX_TAB_WIDTH;
-
-pub use crate::ui::settings::state::{
-    AgentProfile, AgentProfileLauncher, AppSettings, CollapseRows, EnvVar, InputStyle,
-    MIN_TAB_WIDTH, ModelListStyle, Profile, SettingsEditing, TabBarStyle, WindowBackdrop,
-};
+pub use crate::ui::settings::state::{AgentProfile, AppSettings, SettingsEditing, TabBarStyle};
 
 pub(crate) use crate::ui::settings::opacity::{
     background_image_layer_opacity, main_view_background_opacity, window_background_appearance,
 };
 pub(crate) use crate::ui::settings::state::builtin_agent_profile;
 #[cfg(test)]
-pub(crate) use crate::ui::settings::state::{
-    DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT, DEFAULT_UI_FONT,
-};
+pub(crate) use crate::ui::settings::state::{DEFAULT_FONT_FAMILY, DEFAULT_UI_FONT};
 pub(crate) use crate::ui::settings::terminal_bridge::{
     install_agent_settings, install_terminal_settings,
 };
@@ -54,79 +47,28 @@ use std::path::PathBuf;
 
 use app::design::SETTINGS_NAV_WIDTH;
 use app::utils::background_write_reply;
-#[cfg(test)]
-use gpui::WindowBackgroundAppearance;
-use gpui::{
-    App, AppContext as _, Context, Entity, FileDialogFilter, IntoElement as _, ParentElement as _,
-    PathPromptOptions, SharedString, Styled as _, Task, Window, relative,
-};
-use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::dialog::{DIALOG_BUTTON_MIN_WIDTH, DialogClose, DialogFooter};
-use gpui_component::group_box::{GroupBox, GroupBoxVariants as _};
-use gpui_component::input::{Input, InputEvent};
-use gpui_component::label::Label;
-use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
+use gpui::{App, AppContext as _, Context, Entity, Styled as _, Task, Window};
+use gpui_component::button::Button;
 use gpui_component::notification::{Notification, NotificationType};
-use gpui_component::scroll::ScrollableElement as _;
-use gpui_component::setting::{
-    NumberFieldOptions, SelectIndex, SettingField, SettingGroup, SettingItem, SettingPage,
-    Settings, SettingsState, SettingsView,
-};
-use gpui_component::switch::Switch;
-use gpui_component::{
-    ActiveTheme as _, Disableable as _, Sizable as _, Theme, WindowExt as _, h_flex, v_flex,
-};
-use nmt_agent::HookInstallStatus;
-use nmt_agent::update::{DiscoverySupport, InstallationKey, ProviderKind, UpdatePhase};
-#[cfg(test)]
-use nmt_config::CursorShape;
+use gpui_component::setting::{SelectIndex, Settings, SettingsState, SettingsView};
+use gpui_component::{Theme, WindowExt as _};
 use nmt_config::config_file_path;
-use nmt_config::system::{NewlineShortcut, WarnBeforeTerminatingShell};
 #[cfg(windows)]
-use nmt_platform::{
-    is_shell_integration_registered, register_shell_integration, set_system_notification_enabled,
-    shell_integration_dll_mismatched, system_notification_enabled, unregister_shell_integration,
-};
+use nmt_platform::shell_integration_dll_mismatched;
 use rust_i18n::t;
 use tracing::warn;
 
-#[cfg(windows)]
-use crate::PlatformHandle;
 use crate::agent_updates::AgentUpdates;
 use crate::ui::composition::sidebar_surface;
 use crate::ui::settings::about_page::about_page;
 use crate::ui::settings::agent_page::agent_page;
-#[cfg(test)]
-use crate::ui::settings::agent_page::{installation_update_title, installation_version_text};
-use crate::ui::settings::agent_profile_page::{agent_profile_list, open_agent_profile_dialog};
 use crate::ui::settings::appearance_page::appearance_page;
-use crate::ui::settings::card::{card_row, card_text_input, description_hint};
-use crate::ui::settings::fields::{
-    background_image_field, background_image_opacity_field, background_opacity_field,
-    settings_choice, settings_number, settings_switch, tab_shape_field,
-};
 use crate::ui::settings::hooks::{AgentHooks, Hook};
-#[cfg(test)]
-use crate::ui::settings::opacity::{
-    effective_background_image_layer_opacity, effective_background_opacity,
-    effective_surface_background_opacity, window_background_appearance_for,
-};
 use crate::ui::settings::profiles_page::profiles_page;
-#[cfg(test)]
-use crate::ui::settings::state::{
-    DEFAULT_AGENT_TRANSCRIPT_FONT_SIZE, DEFAULT_BACKGROUND_IMAGE_OPACITY, DEFAULT_TAB_WIDTH,
-    clamp_agent_transcript_font_size, clamp_background_image_opacity, clamp_background_opacity,
-    clamp_git_interval, clamp_tab_width, clamp_terminal_font_size, clamp_terminal_line_height,
-    terminal_font_or_default, ui_font_or_default,
-};
-use crate::ui::settings::state::{agent_kind_display_label, input_style_label};
 use crate::ui::settings::system_page::system_page;
-use crate::ui::settings::table::{ENV_OPERATION_COLUMN, table_row};
 use crate::ui::settings::terminal_page::terminal_page;
 use crate::ui::settings::theme::watch_themes;
-use crate::ui::settings::theme_gallery::theme_list;
 use crate::ui::shell::AppWindow;
-use crate::{agent_updates, ui};
 
 const APP_VERSION: &str = env!("NIUMATERM_VERSION");
 const APP_INTERNAL_VERSION: &str = env!("NIUMATERM_INTERNAL_VERSION");

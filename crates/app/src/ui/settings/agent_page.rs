@@ -1,8 +1,18 @@
 use std::borrow::Cow;
 
+use gpui::{App, IntoElement as _};
+use gpui_component::Disableable as _;
+use gpui_component::button::{Button, ButtonVariants as _};
+use gpui_component::setting::{SettingField, SettingGroup, SettingItem, SettingPage};
+use nmt_agent::HookInstallStatus;
+use nmt_agent::update::{DiscoverySupport, InstallationKey, ProviderKind, UpdatePhase};
 use rust_i18n::t;
 
-use crate::ui::settings::*;
+use crate::agent_updates;
+use crate::ui::settings::card::card_row;
+use crate::ui::settings::fields::{settings_choice, settings_switch};
+use crate::ui::settings::hooks::Hook;
+use crate::ui::settings::state::{AgentProfile, AppSettings, CollapseRows, ModelListStyle};
 
 fn agent_hook_item(name: Cow<'static, str>, hook: Hook, cx: &App) -> SettingItem {
     let detected = hook

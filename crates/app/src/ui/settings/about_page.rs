@@ -1,8 +1,18 @@
+use gpui::{App, Styled as _};
+#[cfg(windows)]
+use gpui::{IntoElement as _, ParentElement as _};
+use gpui_component::Disableable as _;
+use gpui_component::button::{Button, ButtonVariants as _};
+use gpui_component::label::Label;
+use gpui_component::setting::{SettingField, SettingGroup, SettingItem, SettingPage};
+#[cfg(windows)]
+use gpui_component::{ActiveTheme as _, h_flex, v_flex};
 #[cfg(windows)]
 use nmt_updater::windows::{CheckError, Status};
 use rust_i18n::t;
 
-use crate::ui::settings::*;
+use crate::ui::settings::fields::{settings_choice, settings_switch};
+use crate::ui::settings::{APP_INTERNAL_VERSION, APP_VERSION, RELEASE_PAGE_URL};
 use crate::update;
 
 pub(super) fn about_page() -> SettingPage {

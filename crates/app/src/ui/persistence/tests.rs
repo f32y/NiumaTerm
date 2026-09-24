@@ -1,13 +1,13 @@
 use gpui::TestAppContext;
 use nmt_config::Config;
 use nmt_config::local_state::TabState;
-use nmt_config::profile::ProfilesConfig;
+use nmt_config::profile::{Profile, ProfilesConfig};
 
 use crate::ui::persistence::{
     legacy_generated_tab_title, resolve_restored_launch, restore_tabs, restore_team_tab,
     session_state,
 };
-use crate::ui::settings::{AppSettings, Profile};
+use crate::ui::settings::AppSettings;
 use crate::ui::shell::TabSurface;
 use crate::workspace::{WorkspaceId, WorkspaceManager, WorkspaceRoots};
 

@@ -1,10 +1,26 @@
 #[cfg(any(windows, test))]
 use anyhow::Result;
+use gpui::SharedString;
+#[cfg(any(windows, test))]
+use gpui_component::setting::SettingField;
+use gpui_component::setting::{SettingGroup, SettingItem, SettingPage};
+use nmt_config::system::{NewlineShortcut, WarnBeforeTerminatingShell};
+#[cfg(windows)]
+use nmt_platform::{
+    is_shell_integration_registered, register_shell_integration, set_system_notification_enabled,
+    system_notification_enabled, unregister_shell_integration,
+};
 use rust_i18n::t;
+#[cfg(any(windows, test))]
+use tracing::warn;
 
+#[cfg(windows)]
+use crate::PlatformHandle;
+use crate::ui::settings::fields::{settings_choice, settings_switch};
 #[cfg(target_os = "macos")]
 use crate::ui::settings::macos_page::macos_group;
-use crate::ui::settings::*;
+#[cfg(any(windows, test))]
+use crate::ui::settings::state::AppSettings;
 
 pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
     let page = SettingPage::new(t!("settings-system-title"))
