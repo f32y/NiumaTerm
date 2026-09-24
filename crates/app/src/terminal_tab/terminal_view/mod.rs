@@ -107,7 +107,7 @@ impl Element for TerminalView {
         let bottom_slack = self.pane.update(cx, |pane, cx| {
             pane.set_content_bounds(bounds, cell, cx);
 
-            pane.model.viewport.bottom_slack()
+            pane.model.viewport().bottom_slack()
         });
 
         TerminalPrepaint {

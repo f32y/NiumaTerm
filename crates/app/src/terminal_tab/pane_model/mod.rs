@@ -87,7 +87,6 @@ pub(super) struct PaneController {
 
     pub scrollbar: ScrollbarActivity,
     links: LinkHover,
-    pub viewport: Viewport,
     clipboard: Box<dyn ClipboardAccess>,
 }
 
@@ -121,7 +120,6 @@ impl PaneController {
             selection_origin: None,
             scrollbar: ScrollbarActivity::default(),
             links: LinkHover::default(),
-            viewport: Viewport::default(),
             clipboard,
         }
     }
@@ -144,8 +142,6 @@ impl PaneController {
         self.frame_cache
             .rebuild(self.source.frame(previous.as_ref(), &self.theme));
 
-        self.update_viewport();
-
         if self.links.enabled
             && let Some(position) = self.links.position()
         {
@@ -155,8 +151,11 @@ impl PaneController {
         }
     }
 
-    pub(super) fn update_viewport(&mut self) {
-        self.viewport = if self.block_list_mode() {
+    /// The scroll geometry the pointer, cursor and scrollbar code reads, built
+    /// from what owns each part: the list mirror and the frozen hit map in
+    /// block-list mode, the displayed frame and the cell metrics otherwise.
+    pub(super) fn viewport(&self) -> Viewport {
+        if self.block_list_mode() {
             Viewport::BlockList {
                 scroll_px: self.block_list.scrollbar.0,
                 max_scroll_px: self.block_list.scrollbar.1,
@@ -172,7 +171,7 @@ impl PaneController {
                     bottom_slack(&frame, cell.height_px, self.settings.fixed_bottom())
                 }),
             }
-        };
+        }
     }
 
     pub(super) fn drain_host_events(&mut self) -> Vec<HostEvent> {
@@ -276,8 +275,6 @@ impl PaneController {
 
         self.frozen.set_active_top(self.block_list.active_top);
 
-        self.update_viewport();
-
         Some(ListPlan {
             ops,
             history_rows,
@@ -301,8 +298,6 @@ impl PaneController {
 
         if let Some(top) = record.active_top {
             self.frozen.set_active_top(top);
-
-            self.update_viewport();
         }
     }
 
@@ -382,8 +377,6 @@ impl PaneController {
         self.content_size = (width, height);
         self.cell_metrics = Some(cell);
 
-        self.update_viewport();
-
         let resized = self.source.resize_for_content(width, height, cell);
 
         if resized {
@@ -413,8 +406,6 @@ impl PaneController {
 
     pub(super) fn begin_block_list_frame(&mut self) {
         self.frozen.begin_frame(self.block_list.active_top);
-
-        self.update_viewport();
     }
 
     pub(super) fn hovered_link(&self) -> Option<&LinkHit> {
@@ -485,7 +476,7 @@ impl PaneController {
                 (RowSource::Screen(row as i64), col as usize)
             }
             None => {
-                let (cell, _) = self.viewport.cell_at(position, cell_metrics);
+                let (cell, _) = self.viewport().cell_at(position, cell_metrics);
 
                 (
                     RowSource::Screen(viewport_top? as i64 + cell.row as i64),
@@ -518,7 +509,7 @@ impl PaneController {
                         return self.frozen.row_top(usize::MAX, usize::try_from(row).ok()?);
                     }
 
-                    Some(self.viewport.cursor_y(
+                    Some(self.viewport().cursor_y(
                         (row - top).min(u16::MAX as i64) as u16,
                         cell_metrics.height_px,
                     ))
@@ -688,7 +679,7 @@ impl PaneController {
             return MouseOutcome::Ignored;
         };
 
-        let (cell, side) = self.viewport.cell_at(input.position, metrics);
+        let (cell, side) = self.viewport().cell_at(input.position, metrics);
 
         let handled = if self.block_list_mode()
             && !self
@@ -769,7 +760,7 @@ impl PaneController {
             return outcome;
         };
 
-        let (cell, _) = self.viewport.cell_at(position, metrics);
+        let (cell, _) = self.viewport().cell_at(position, metrics);
 
         outcome.handled = self.source.session.apply_scroll(cell, lines, modifiers);
 
@@ -796,15 +787,13 @@ impl PaneController {
     }
 
     pub(super) fn scroll_to_latest(&mut self) -> ScrollOutcome {
-        if !self.viewport.is_scrolled() {
+        if !self.viewport().is_scrolled() {
             return ScrollOutcome::Ignored;
         }
 
-        match self.viewport {
+        match self.viewport() {
             Viewport::BlockList { .. } => {
                 self.block_list.scrollbar.0 = self.block_list.scrollbar.1;
-
-                self.update_viewport();
 
                 ScrollOutcome::List(ListOp::ScrollToEnd)
             }
@@ -813,11 +802,11 @@ impl PaneController {
     }
 
     pub(super) fn scroll_thumb_to(&mut self, thumb_top: f32) -> ScrollOutcome {
-        let Some(target) = self.viewport.thumb_target(thumb_top) else {
+        let Some(target) = self.viewport().thumb_target(thumb_top) else {
             return ScrollOutcome::Ignored;
         };
 
-        match &self.viewport {
+        match self.viewport() {
             Viewport::BlockList { .. } => self.scroll_list_to(target as f32),
             Viewport::Grid { .. } => {
                 let accepted = if thumb_top >= 1.0 {
@@ -853,8 +842,6 @@ impl PaneController {
         );
 
         self.block_list.scrollbar.0 = target.min(self.block_list.scrollbar.1);
-
-        self.update_viewport();
 
         ScrollOutcome::List(op)
     }

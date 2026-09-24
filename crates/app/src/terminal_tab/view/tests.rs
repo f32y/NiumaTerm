@@ -282,8 +282,6 @@ fn typing_respects_scroll_setting_for_key_and_ime_input(cx: &mut TestAppContext)
                     pane.model.settings.scroll_to_bottom_when_typing = scroll_when_typing;
                     pane.model.block_list.scrollbar = (24.0, 120.0);
 
-                    pane.model.update_viewport();
-
                     if ime {
                         pane.replace_text_in_range(None, "text", window, cx);
                     } else {
@@ -302,7 +300,7 @@ fn typing_respects_scroll_setting_for_key_and_ime_input(cx: &mut TestAppContext)
                         );
                     }
 
-                    assert_eq!(pane.model.viewport.is_scrolled(), !scroll_when_typing);
+                    assert_eq!(pane.model.viewport().is_scrolled(), !scroll_when_typing);
                 })
             });
         }
@@ -314,11 +312,9 @@ fn typing_respects_scroll_setting_for_key_and_ime_input(cx: &mut TestAppContext)
 
             pane.model.block_list.scrollbar = (24.0, 120.0);
 
-            pane.model.update_viewport();
-
             pane.replace_text_in_range(None, "rejected", window, cx);
 
-            assert!(pane.model.viewport.is_scrolled());
+            assert!(pane.model.viewport().is_scrolled());
         })
     });
 }

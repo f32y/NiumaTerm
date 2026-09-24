@@ -63,7 +63,7 @@ async fn settings_refresh_colors_metrics_and_layout_without_repeating_cursor_req
 
     model.begin_frame();
 
-    assert_eq!(model.viewport.cursor_y(0, cell.height_px), 100.0);
+    assert_eq!(model.viewport().cursor_y(0, cell.height_px), 100.0);
     assert!(!model.frame_cache.needs_rebuild());
     assert_eq!(
         model.cell_metrics_or_measure(|| panic!("cached metrics must be reused")),

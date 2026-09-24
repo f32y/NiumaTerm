@@ -283,17 +283,15 @@ fn pending_repaint_retains_shared_grid_coordinates_and_coalesces_wakes() {
 
     model.settings.input_style = InputStyle::FixedBottom;
 
-    model.update_viewport();
-
     let cell = model.cell_metrics.unwrap();
 
-    assert_eq!(model.viewport.bottom_slack(), 90.0);
+    assert_eq!(model.viewport().bottom_slack(), 90.0);
     assert!(model.invalidate());
     assert!(!model.invalidate());
-    assert_eq!(model.viewport.cursor_y(0, cell.height_px), 90.0);
+    assert_eq!(model.viewport().cursor_y(0, cell.height_px), 90.0);
     assert_eq!(
         model
-            .viewport
+            .viewport()
             .cell_at(LocalPoint { x: 32.0, y: 90.0 }, cell)
             .0,
         SurfaceCell { col: 4, row: 0 }
@@ -302,7 +300,7 @@ fn pending_repaint_retains_shared_grid_coordinates_and_coalesces_wakes() {
 
     model.begin_frame();
 
-    assert_eq!(model.viewport.bottom_slack(), 90.0);
+    assert_eq!(model.viewport().bottom_slack(), 90.0);
     assert!(model.invalidate());
 }
 
@@ -320,7 +318,7 @@ fn block_frame_reset_discards_visible_records_and_retains_live_origin() {
 
     assert!(model.frozen.row_top(3, 0).is_none());
     assert!(model.frozen.separators().is_empty());
-    assert_eq!(model.viewport.cursor_y(0, 18.0), 90.0);
+    assert_eq!(model.viewport().cursor_y(0, 18.0), 90.0);
 
     let tail = FrozenView {
         active_top: 54.0,
@@ -336,7 +334,7 @@ fn block_frame_reset_discards_visible_records_and_retains_live_origin() {
 
     model.record_frame(FrameRecord::from_live_view(&tail, &layout, -18.0));
 
-    assert_eq!(model.viewport.cursor_y(0, 18.0), 36.0);
+    assert_eq!(model.viewport().cursor_y(0, 18.0), 36.0);
 
     let chrome = &model.frozen.chrome()[0];
 
@@ -348,7 +346,7 @@ fn block_frame_reset_discards_visible_records_and_retains_live_origin() {
     model.begin_block_list_frame();
 
     assert!(model.frozen.chrome().is_empty());
-    assert_eq!(model.viewport.cursor_y(0, 18.0), 90.0);
+    assert_eq!(model.viewport().cursor_y(0, 18.0), 90.0);
 }
 
 #[test]
@@ -431,8 +429,6 @@ fn frozen_selection_obeys_mouse_reporting_and_drag_threshold() {
 
         model.frozen.push_row(18.0, 0, 1, 40);
 
-        model.update_viewport();
-
         assert!(matches!(
             (
                 reporting,
@@ -503,8 +499,6 @@ fn key_outcomes_distinguish_accepted_input_from_read_only_rejection() {
 
     model.block_list.scrollbar = (24.0, 120.0);
 
-    model.update_viewport();
-
     assert!(matches!(
         model.send_key(&TerminalKey {
             key: "escape",
@@ -516,14 +510,14 @@ fn key_outcomes_distinguish_accepted_input_from_read_only_rejection() {
         KeyOutcome::Written
     ));
     assert!(
-        model.viewport.is_scrolled(),
+        model.viewport().is_scrolled(),
         "the host chooses when accepted input scrolls the view"
     );
     assert!(matches!(
         model.scroll_to_latest(),
         ScrollOutcome::List(ListOp::ScrollToEnd)
     ));
-    assert!(!model.viewport.is_scrolled());
+    assert!(!model.viewport().is_scrolled());
     assert!(matches!(model.scroll_to_latest(), ScrollOutcome::Ignored));
 
     model.source.session.mark_read_only();
@@ -672,8 +666,6 @@ fn end_scrolls_history_but_modified_end_and_alternate_screen_reach_the_pty() {
 
         model.block_list.scrollbar = (24.0, 120.0);
 
-        model.update_viewport();
-
         let outcome = model.key_down(&TerminalKey {
             key: "end",
             key_char: None,
@@ -766,8 +758,6 @@ fn scrollbar_grab_preserves_offset_and_track_click_centers_the_thumb() {
 
     model.content_size.1 = 100.0;
     model.block_list.scrollbar = (0.0, 100.0);
-
-    model.update_viewport();
 
     assert!(matches!(
         model.scrollbar_mouse_down(LocalPoint { x: 0.0, y: 20.0 }, 0.0, 0.5),

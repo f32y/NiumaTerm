@@ -845,7 +845,7 @@ impl EntityInputHandler for TerminalPane {
         // `element_bounds` is the terminal leaf's content rect (padding already
         // excluded), so the cursor cell offsets from its origin directly — plus
         // the inter-block gap offset for the cursor's row.
-        let cursor_y = self.model.viewport.cursor_y(cursor.row, cell.height_px);
+        let cursor_y = self.model.viewport().cursor_y(cursor.row, cell.height_px);
 
         Some(Bounds::new(
             point(
@@ -957,7 +957,7 @@ impl Render for TerminalPane {
             window.request_animation_frame();
         }
 
-        let scrollbar_info = self.model.viewport.scrollbar_info();
+        let scrollbar_info = self.model.viewport().scrollbar_info();
 
         // Keep the transparent track hit-testable so hovering the scrollbar
         // region can reveal it after the activity fade has completed.
