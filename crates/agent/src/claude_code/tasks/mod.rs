@@ -277,10 +277,6 @@ impl ClaudeTasks {
             kind: shell.then_some(BackgroundTaskKind::Shell),
             state,
             display_name: text_field(record, &["description"]),
-            // A shell has no agent type to report, and writing its task type
-            // into that field would only describe the row as the protocol
-            // spells it rather than as anything a reader recognizes.
-            agent_type: task_type.filter(|_| !shell).map(str::to_owned),
             // `summary` is the child's own account of what it did; the last
             // tool it ran is the best live substitute while it is working.
             status: text_field(record, &["summary", "last_tool_name"]),
@@ -290,7 +286,6 @@ impl ClaudeTasks {
             completed_at: state
                 .filter(|state| state.is_terminal())
                 .map(|_| SystemTime::now()),
-            updated_at: Some(SystemTime::now()),
             ..BackgroundTaskUpdate::default()
         };
 
@@ -321,7 +316,6 @@ impl ClaudeTasks {
             BackgroundTaskUpdate {
                 state: Some(BackgroundTaskState::Done),
                 completed_at: Some(SystemTime::now()),
-                updated_at: Some(SystemTime::now()),
                 ..BackgroundTaskUpdate::default()
             },
         )
@@ -441,7 +435,6 @@ impl ClaudeTasks {
                 BackgroundTaskUpdate {
                     state: Some(BackgroundTaskState::Stopped),
                     completed_at: Some(SystemTime::now()),
-                    updated_at: Some(SystemTime::now()),
                     ..BackgroundTaskUpdate::default()
                 },
             );
@@ -516,12 +509,8 @@ impl ClaudeTasks {
                     // launched child is visible immediately.
                     state: Some(BackgroundTaskState::Starting),
                     display_name: text_field(input, &["description", "name", "title"]),
-                    agent_type: text_field(input, &["subagent_type", "agent_type", "agent"])
-                        .or_else(|| Some(name.to_owned())),
                     objective: objective.clone(),
-                    model: text_field(input, &["model"]),
                     started_at: Some(SystemTime::now()),
-                    updated_at: Some(SystemTime::now()),
                     ..BackgroundTaskUpdate::default()
                 },
             );
@@ -588,7 +577,6 @@ impl ClaudeTasks {
                         }),
                         status: result_text(block),
                         completed_at: Some(SystemTime::now()),
-                        updated_at: Some(SystemTime::now()),
                         ..BackgroundTaskUpdate::default()
                     },
                 );
@@ -630,7 +618,6 @@ impl ClaudeTasks {
                 state,
                 status: preview.clone(),
                 last_preview: preview,
-                updated_at: Some(SystemTime::now()),
                 ..BackgroundTaskUpdate::default()
             },
         )

@@ -86,13 +86,11 @@ fn a_spawn_item_confirms_the_child_and_applies_its_held_update() {
 
     assert_eq!(child.state, BackgroundTaskState::Working);
     assert_eq!(child.objective.as_deref(), Some("review the diff"));
-    assert_eq!(child.model.as_deref(), Some("gpt-5-codex"));
     assert_eq!(child.parent_session, BackgroundTaskKey::codex(ROOT));
     assert_eq!(
         child.refs,
         BackgroundTaskRefs::Codex {
             thread_id: "thr_child".into(),
-            parent_thread_id: Some(ROOT.into()),
         }
     );
 }
@@ -551,7 +549,6 @@ fn descendant_requests_page_through_subagent_spawns() {
 
     assert_eq!(restored.state, BackgroundTaskState::Stopped);
     assert_eq!(restored.display_name.as_deref(), Some("swift-otter"));
-    assert_eq!(restored.agent_type.as_deref(), Some("reviewer"));
     assert_eq!(restored.objective.as_deref(), Some("review the diff"));
     assert!(restored.started_at.is_some());
     assert!(restored.completed_at.is_some());
@@ -567,10 +564,8 @@ fn descendant_requests_page_through_subagent_spawns() {
         nested.refs,
         BackgroundTaskRefs::Codex {
             thread_id: "thr_b".into(),
-            parent_thread_id: Some("thr_a".into()),
         }
     );
-    assert_eq!(nested.depth, Some(2));
 }
 
 #[test]

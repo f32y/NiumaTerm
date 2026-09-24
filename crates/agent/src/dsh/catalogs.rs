@@ -92,7 +92,7 @@ pub(crate) fn subagent_snapshot(
         .into_iter()
         .flatten()
         .filter(|entry| entry["kind"].as_str() == Some("child"))
-        .filter_map(|entry| task_summary(entry, &parent_session, parent_session_id, activity))
+        .filter_map(|entry| task_summary(entry, &parent_session, activity))
         .collect();
 
     BackgroundTaskSnapshot {
@@ -106,7 +106,6 @@ pub(crate) fn subagent_snapshot(
 fn task_summary(
     entry: &Value,
     parent_session: &BackgroundTaskKey,
-    parent_session_id: &str,
     activity: u64,
 ) -> Option<BackgroundTaskSummary> {
     let id = entry["id"].as_str()?;
@@ -120,13 +119,9 @@ fn task_summary(
     Some(BackgroundTaskSummary {
         key: BackgroundTaskKey::deepseek(id),
         parent_session: parent_session.clone(),
-        refs: BackgroundTaskRefs::DeepSeek {
-            parent_session_id: parent_session_id.to_string(),
-            continuable,
-        },
+        refs: BackgroundTaskRefs::DeepSeek { continuable },
         kind: BackgroundTaskKind::Agent,
         display_name: entry["label"].as_str().map(str::to_string),
-        agent_type: None,
         objective: None,
         status: None,
         state: if running {
@@ -136,12 +131,7 @@ fn task_summary(
         },
         sequence: activity,
         started_at: None,
-        updated_at: None,
         completed_at: None,
-        model: None,
-        // The catalog covers the direct level only, so every row here
-        // is one step below the conversation that asked for it.
-        depth: Some(1),
         last_preview: None,
         // Interrupting reaches a continuable child through its parent's
         // authority; a one-shot child is one execution with nothing to
@@ -184,26 +174,19 @@ pub(crate) fn job_rows(
             Some(BackgroundTaskSummary {
                 key: BackgroundTaskKey::deepseek(id),
                 parent_session: parent_session.clone(),
-                refs: BackgroundTaskRefs::DeepSeek {
-                    parent_session_id: parent_session_id.to_string(),
-                    continuable: false,
-                },
+                refs: BackgroundTaskRefs::DeepSeek { continuable: false },
                 kind: if kind == Some("bash") {
                     BackgroundTaskKind::Shell
                 } else {
                     BackgroundTaskKind::Agent
                 },
                 display_name: job["label"].as_str().map(str::to_string),
-                agent_type: kind.filter(|kind| *kind != "bash").map(str::to_string),
                 objective: None,
                 status: job["detail"].as_str().map(str::to_string),
                 state,
                 sequence: activity,
                 started_at: job["startedAt"].as_u64().map(epoch_millis),
-                updated_at: None,
                 completed_at: job["finishedAt"].as_u64().map(epoch_millis),
-                model: None,
-                depth: Some(1),
                 last_preview: None,
                 can_stop: false,
             })

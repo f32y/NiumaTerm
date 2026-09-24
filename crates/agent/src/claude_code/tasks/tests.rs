@@ -75,7 +75,6 @@ fn a_task_launch_creates_a_starting_row_before_any_child_activity() {
 
     assert_eq!(task.state, BackgroundTaskState::Starting);
     assert_eq!(task.display_name.as_deref(), Some("Review the diff"));
-    assert_eq!(task.agent_type.as_deref(), Some("code-reviewer"));
     assert_eq!(
         task.objective.as_deref(),
         Some("Read the changed files and report issues")
@@ -819,10 +818,6 @@ fn a_backgrounded_command_becomes_a_stoppable_shell_row() {
 
     // The command is what the row is about, so it reads as the row detail.
     assert_eq!(task.objective.as_deref(), Some("cargo build"));
-
-    // A shell has no agent type; naming its protocol type there would only
-    // describe the row as the stream spells it.
-    assert_eq!(task.agent_type, None);
     assert!(task.can_stop);
 }
 

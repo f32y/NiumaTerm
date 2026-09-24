@@ -223,31 +223,6 @@ impl CodexTasks {
         }
     }
 
-    /// Depth of a confirmed descendant below the selected root; direct children
-    /// are depth 1. `None` when the chain is not fully known yet.
-    fn depth_of(&self, thread_id: &str) -> Option<u32> {
-        let root = self.root()?;
-
-        let mut seen = HashSet::new();
-        let mut current = thread_id.to_owned();
-        let mut depth = 1;
-
-        loop {
-            let parent = self.parents.get(&current)?;
-
-            if parent == root {
-                return Some(depth);
-            }
-
-            if !seen.insert(current.clone()) {
-                return None;
-            }
-
-            current = parent.clone();
-            depth += 1;
-        }
-    }
-
     /// Apply an update for a thread whose relationship to the root is known, or
     /// hold it as the newest candidate when it is not.
     fn record(
@@ -262,15 +237,8 @@ impl CodexTasks {
             return false;
         }
 
-        let depth = self.depth_of(thread_id);
-
         let Some(registry) = self.registry.as_mut() else {
             return false;
-        };
-
-        let update = BackgroundTaskUpdate {
-            depth: update.depth.or(depth),
-            ..update
         };
 
         registry.apply(BackgroundTaskKey::codex(thread_id), update)
@@ -326,7 +294,6 @@ impl CodexTasks {
 
         let is_spawn = item["tool"].as_str() == Some("spawnAgent");
         let prompt = text_field(item, &["prompt"]);
-        let model = text_field(item, &["model"]);
         let states = &item["agentsStates"];
 
         let mut receivers: Vec<String> = item["receiverThreadIds"]
@@ -363,14 +330,11 @@ impl CodexTasks {
             let mut update = BackgroundTaskUpdate {
                 refs: Some(BackgroundTaskRefs::Codex {
                     thread_id: thread_id.clone(),
-                    parent_thread_id: sender.clone(),
                 }),
                 state: collab_agent_state(state),
                 // `message` carries the child's completion summary or its error
                 // text, which is the most useful one-line status available.
                 status: text_field(state, &["message"]),
-                model: model.clone(),
-                updated_at: Some(SystemTime::now()),
                 ..BackgroundTaskUpdate::default()
             };
 
@@ -422,14 +386,12 @@ impl CodexTasks {
         let update = BackgroundTaskUpdate {
             refs: Some(BackgroundTaskRefs::Codex {
                 thread_id: thread_id.clone(),
-                parent_thread_id: self.root().map(str::to_owned),
             }),
             state,
             started_at: (state == Some(BackgroundTaskState::Working)).then(SystemTime::now),
             completed_at: state
                 .is_some_and(BackgroundTaskState::is_terminal)
                 .then(SystemTime::now),
-            updated_at: Some(SystemTime::now()),
             ..BackgroundTaskUpdate::default()
         };
 
@@ -456,7 +418,6 @@ impl CodexTasks {
             "turn/started" => BackgroundTaskUpdate {
                 state: Some(BackgroundTaskState::Working),
                 started_at: Some(SystemTime::now()),
-                updated_at: Some(SystemTime::now()),
                 ..BackgroundTaskUpdate::default()
             },
             "turn/completed" => {
@@ -469,7 +430,6 @@ impl CodexTasks {
                 BackgroundTaskUpdate {
                     state: Some(state),
                     completed_at: Some(SystemTime::now()),
-                    updated_at: Some(SystemTime::now()),
                     status: params["turn"]["error"]["message"]
                         .as_str()
                         .map(str::to_owned),
@@ -485,7 +445,6 @@ impl CodexTasks {
 
                 BackgroundTaskUpdate {
                     state: Some(state),
-                    updated_at: Some(SystemTime::now()),
                     completed_at: state.is_terminal().then(SystemTime::now),
                     ..BackgroundTaskUpdate::default()
                 }
@@ -497,7 +456,6 @@ impl CodexTasks {
 
                 BackgroundTaskUpdate {
                     last_preview: item_preview(item),
-                    updated_at: Some(SystemTime::now()),
                     ..BackgroundTaskUpdate::default()
                 }
             }
@@ -508,7 +466,6 @@ impl CodexTasks {
                     .or_else(|| params["message"].as_str())
                     .map(str::to_owned),
                 completed_at: Some(SystemTime::now()),
-                updated_at: Some(SystemTime::now()),
                 ..BackgroundTaskUpdate::default()
             },
             _ => return turn_changed,
@@ -570,7 +527,6 @@ impl CodexTasks {
             thread_id,
             BackgroundTaskUpdate {
                 state: Some(state),
-                updated_at: Some(SystemTime::now()),
                 completed_at: state.is_terminal().then(SystemTime::now),
                 ..BackgroundTaskUpdate::default()
             },
@@ -685,13 +641,10 @@ impl CodexTasks {
             let update = BackgroundTaskUpdate {
                 refs: Some(BackgroundTaskRefs::Codex {
                     thread_id: id.clone(),
-                    parent_thread_id: parent,
                 }),
                 state,
                 display_name: text_field(thread, &["name", "agentNickname"]),
-                agent_type: text_field(thread, &["agentRole"]),
                 objective: text_field(thread, &["preview"]),
-                depth: self.depth_of(&id),
                 started_at: unix_seconds(thread, &["createdAt"]),
                 // The listing has no completion timestamp, so a terminal row
                 // borrows the thread's last activity as its end time.
@@ -699,7 +652,6 @@ impl CodexTasks {
                     .is_some_and(BackgroundTaskState::is_terminal)
                     .then_some(last_active)
                     .flatten(),
-                updated_at: last_active,
                 ..BackgroundTaskUpdate::default()
             };
 

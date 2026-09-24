@@ -54,9 +54,7 @@ pub struct WorkflowAgent {
 
     pub label: Option<String>,
     pub phase_index: Option<u64>,
-    pub phase_title: Option<String>,
     pub agent_type: Option<String>,
-    pub isolation: Option<String>,
     pub model: Option<String>,
     pub state: WorkflowAgentState,
     pub tokens: Option<u64>,
@@ -67,8 +65,6 @@ pub struct WorkflowAgent {
     pub reused: bool,
 
     pub error: Option<String>,
-    pub prompt_preview: Option<String>,
-    pub result_preview: Option<String>,
 }
 
 /// One workflow run as the view shows it.

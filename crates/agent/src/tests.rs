@@ -519,10 +519,6 @@ fn aggregation_counts_routes_and_prioritizes_needs_input() {
 
     assert_eq!(projection.status, AgentRuntimeStatus::NeedsInput);
     assert_eq!(projection.unread_count, 2);
-    assert_eq!(
-        projection.latest_unread_text.as_deref(),
-        Some("Agent update")
-    );
 
     monitor.remove_route(&a);
 
@@ -554,10 +550,6 @@ fn tab_activation_keeps_split_sibling_unread_until_exact_acknowledgement() {
     assert_eq!(tab_one.unread_count, 2);
     assert_eq!(tab_two_projection.unread_count, 1);
     assert_eq!(workspace.unread_count, 3);
-    assert_eq!(
-        workspace.latest_unread_text.as_deref(),
-        Some("latest unread")
-    );
 
     let left_id = monitor.notification(&tab_one_left).unwrap().id.clone();
 

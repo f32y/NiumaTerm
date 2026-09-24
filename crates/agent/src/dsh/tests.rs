@@ -714,10 +714,7 @@ fn the_child_catalog_becomes_rows_that_can_be_opened() {
     // parent as well as which of the two child kinds it is.
     assert_eq!(
         first.refs,
-        BackgroundTaskRefs::DeepSeek {
-            parent_session_id: SESSION.to_string(),
-            continuable: true,
-        }
+        BackgroundTaskRefs::DeepSeek { continuable: true }
     );
 }
 

@@ -214,7 +214,6 @@ fn a_restored_row_creates_a_task_that_live_updates_never_reported() {
             state: Some(BackgroundTaskState::Done),
             refs: Some(BackgroundTaskRefs::Codex {
                 thread_id: "child-restored".into(),
-                parent_thread_id: Some("parent-thread".into()),
             }),
             ..BackgroundTaskUpdate::default()
         },
@@ -228,7 +227,6 @@ fn a_restored_row_creates_a_task_that_live_updates_never_reported() {
         summary.refs,
         BackgroundTaskRefs::Codex {
             thread_id: "child-restored".into(),
-            parent_thread_id: Some("parent-thread".into()),
         }
     );
 }

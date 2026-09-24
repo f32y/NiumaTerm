@@ -163,8 +163,6 @@ fn phases_and_agents_arrive_from_the_progress_array() {
 
     assert_eq!(run.agents[0].state, WorkflowAgentState::Done);
     assert_eq!(run.agents[0].tokens, Some(15_577));
-    assert_eq!(run.agents[0].result_preview.as_deref(), Some("ok"));
-    assert_eq!(run.agents[0].phase_title.as_deref(), Some("Ok"));
     assert_eq!(run.agents[1].state, WorkflowAgentState::Running);
 
     // Unreported details stay absent instead of being defaulted.
@@ -571,7 +569,6 @@ fn a_journal_refresh_advances_agents_the_stream_has_not_settled() {
 
     assert_eq!(run.run_id.as_deref(), Some(RUN_ID));
     assert_eq!(run.agents[0].state, WorkflowAgentState::Done);
-    assert_eq!(run.agents[0].result_preview.as_deref(), Some("ok"));
 
     // A journal `started` line moves a queued agent forward, never backward.
     assert_eq!(run.agents[1].state, WorkflowAgentState::Running);

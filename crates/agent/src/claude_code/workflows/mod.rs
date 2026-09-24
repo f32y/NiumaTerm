@@ -225,10 +225,6 @@ impl ClaudeWorkflows {
                 agent.state = observed;
                 changed = true;
             }
-
-            if let Some(result) = entry.result {
-                changed |= replace_text(&mut agent.result_preview, &Some(result));
-            }
         }
 
         changed
@@ -305,17 +301,13 @@ pub(crate) fn parse_progress(progress: &Value) -> (Vec<WorkflowPhase>, Vec<Workf
                     agent_id: text_field(entry, &["agentId"]),
                     label: text_field(entry, &["label"]),
                     phase_index: entry["phaseIndex"].as_u64(),
-                    phase_title: text_field(entry, &["phaseTitle"]),
                     agent_type: text_field(entry, &["agentType"]),
-                    isolation: text_field(entry, &["isolation"]),
                     model: text_field(entry, &["model"]),
                     state: agent_state(entry),
                     tokens: entry["tokens"].as_u64(),
                     tool_calls: entry["toolCalls"].as_u64(),
                     reused: entry["cached"].as_bool().unwrap_or(false),
                     error: text_field(entry, &["error"]),
-                    prompt_preview: text_field(entry, &["promptPreview"]),
-                    result_preview: text_field(entry, &["resultPreview"]),
                 });
             }
             _ => {}

@@ -91,7 +91,6 @@ pub struct AgentNotification {
     pub route: AgentRoute,
     pub title: String,
     pub body: String,
-    pub order: u64,
     pub read: bool,
     pub native_tag: String,
     pub native_group: String,
@@ -117,14 +116,12 @@ impl MonitorMutation {
 pub struct AgentProjection {
     pub status: AgentRuntimeStatus,
     pub unread_count: usize,
-    pub latest_unread_text: Option<String>,
 }
 
 pub struct AgentMonitor {
     process_instance: String,
     panes: HashMap<AgentRoute, AgentPaneState>,
     notifications: HashMap<AgentRoute, AgentNotification>,
-    next_notification_order: u64,
 }
 
 impl AgentMonitor {
@@ -133,7 +130,6 @@ impl AgentMonitor {
             process_instance: process_instance.into(),
             panes: HashMap::new(),
             notifications: HashMap::new(),
-            next_notification_order: 0,
         }
     }
 
@@ -428,32 +424,20 @@ impl AgentMonitor {
     pub fn project<'a>(&self, routes: impl IntoIterator<Item = &'a AgentRoute>) -> AgentProjection {
         let mut status = AgentRuntimeStatus::Idle;
         let mut unread_count = 0;
-        let mut latest: Option<&AgentNotification> = None;
 
         for route in routes {
             if let Some(state) = self.panes.get(route) {
                 status = higher_status(status, state.status);
             }
 
-            if let Some(notification) = self.notifications.get(route).filter(|n| !n.read) {
+            if self.notifications.get(route).is_some_and(|n| !n.read) {
                 unread_count += 1;
-
-                if latest.is_none_or(|current| notification.order > current.order) {
-                    latest = Some(notification);
-                }
             }
         }
 
         AgentProjection {
             status,
             unread_count,
-            latest_unread_text: latest.map(|notification| {
-                if notification.body.is_empty() {
-                    notification.title.clone()
-                } else {
-                    notification.body.clone()
-                }
-            }),
         }
     }
 
@@ -466,7 +450,6 @@ impl AgentMonitor {
         let state = self.panes.get_mut(route).expect("live route");
 
         state.notification_generation = state.notification_generation.wrapping_add(1).max(1);
-        self.next_notification_order = self.next_notification_order.wrapping_add(1).max(1);
 
         // Process-global on purpose, despite making the reducer impure: the
         // native_tag derived from it keys Windows toast replacement, and tags
@@ -484,7 +467,6 @@ impl AgentMonitor {
             route: route.clone(),
             title,
             body,
-            order: self.next_notification_order,
             read: false,
             native_tag: format!("{process_order:016x}"),
             native_group: "NiumaTerm".into(),

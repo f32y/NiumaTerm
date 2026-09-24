@@ -152,9 +152,7 @@ impl WorkflowTracker {
             agent_id: data["childId"].as_str().map(str::to_string),
             label: data["label"].as_str().map(str::to_string),
             phase_index,
-            phase_title: phase,
             agent_type: None,
-            isolation: None,
             model: None,
             // A member is published only once its session exists, so it is
             // already under way when this arrives.
@@ -163,8 +161,6 @@ impl WorkflowTracker {
             tool_calls: None,
             reused: false,
             error: None,
-            prompt_preview: None,
-            result_preview: None,
         });
 
         // The first member is what turns a declared run into a running one.

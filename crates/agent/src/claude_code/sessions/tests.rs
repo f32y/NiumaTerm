@@ -728,7 +728,6 @@ fn task_history_restores_completed_and_failed_children() {
         tasks[0].update.display_name.as_deref(),
         Some("Review the diff")
     );
-    assert_eq!(tasks[0].update.agent_type.as_deref(), Some("code-reviewer"));
     assert!(tasks[0].update.started_at.is_some());
     assert!(tasks[0].update.completed_at.is_some());
     assert_eq!(tasks[1].id, "toolu_bad");
@@ -1161,16 +1160,6 @@ fn a_child_conversation_is_read_from_its_own_file_and_linked_by_metadata() {
         &tasks[0].items[0],
         Item::UserMessage { text: Some(text) } if text == "find the popup component"
     ));
-    assert_eq!(
-        tasks[0].update.agent_type.as_deref(),
-        Some("code-reviewer"),
-        "the launch that started the child describes it better than the file"
-    );
-    assert_eq!(
-        tasks[0].update.depth,
-        Some(1),
-        "spawn depth is only recorded beside the conversation"
-    );
 
     fs::remove_dir_all(&root).ok();
 }

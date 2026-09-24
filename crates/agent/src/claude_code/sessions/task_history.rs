@@ -141,18 +141,8 @@ fn attach_child_transcripts(project: &Path, session_id: &str, tasks: &mut [Resto
             task.items = parse_child_replay(BufReader::new(file));
         }
 
-        if task.update.agent_type.is_none() {
-            task.update.agent_type = text_field(&meta, &["agentType"]);
-        }
-
         if task.update.display_name.is_none() {
             task.update.display_name = text_field(&meta, &["description"]);
-        }
-
-        if task.update.depth.is_none() {
-            task.update.depth = meta["spawnDepth"]
-                .as_u64()
-                .and_then(|d| u32::try_from(d).ok());
         }
     }
 }
@@ -242,12 +232,12 @@ fn collect_launches(
             continue;
         }
 
-        let Some(name) = block["name"]
+        if !block["name"]
             .as_str()
-            .filter(|name| LAUNCH_TOOLS.contains(name))
-        else {
+            .is_some_and(|name| LAUNCH_TOOLS.contains(&name))
+        {
             continue;
-        };
+        }
 
         let Some(tool_use_id) = block["id"].as_str() else {
             continue;
@@ -272,12 +262,8 @@ fn collect_launches(
                 }),
                 state: Some(BackgroundTaskState::Starting),
                 display_name: text_field(input, &["description", "name", "title"]),
-                agent_type: text_field(input, &["subagent_type", "agent_type", "agent"])
-                    .or_else(|| Some(name.to_owned())),
                 objective: text_field(input, &["prompt", "task", "instructions"]),
-                model: text_field(input, &["model"]),
                 started_at: timestamp(record),
-                updated_at: timestamp(record),
                 ..BackgroundTaskUpdate::default()
             },
         });
@@ -311,7 +297,6 @@ fn collect_results(record: &Value, tasks: &mut [RestoredTask], index: &HashMap<S
         });
 
         update.completed_at = timestamp(record);
-        update.updated_at = timestamp(record).or(update.updated_at);
     }
 }
 
@@ -336,10 +321,6 @@ fn enrich_from_sidechain(
 
     task.update.status = Some(preview.clone());
     task.update.last_preview = Some(preview);
-
-    if let Some(observed) = timestamp(record) {
-        task.update.updated_at = Some(observed);
-    }
 }
 
 /// Transcript items for one persisted sidechain record, using the same item
@@ -392,10 +373,6 @@ fn collect_lifecycle(record: &Value, tasks: &mut [RestoredTask], index: &HashMap
 
     if let Some(status) = text_field(record, &["summary", "last_tool_name"]) {
         update.status = Some(status);
-    }
-
-    if let Some(observed) = timestamp(record) {
-        update.updated_at = Some(observed);
     }
 }
 

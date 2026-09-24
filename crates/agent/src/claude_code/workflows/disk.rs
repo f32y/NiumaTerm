@@ -456,16 +456,12 @@ fn restore_interrupted_agents(dir: &Path) -> Vec<WorkflowAgent> {
             },
             agent_id: Some(agent_id),
             phase_index: None,
-            phase_title: None,
             agent_type: None,
-            isolation: None,
             model: None,
             tokens: None,
             tool_calls: None,
             reused: false,
             error: None,
-            prompt_preview: None,
-            result_preview: None,
         })
         .collect()
 }

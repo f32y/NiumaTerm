@@ -216,7 +216,7 @@ pub fn terminfo_exists(terminfo: &str) -> bool {
     false
 }
 
-pub fn create_termp(utf8: bool) -> libc::termios {
+fn create_termp() -> libc::termios {
     // musl libc does not provide c_ispeed and c_ospeed fields in struct termios.
     #[cfg(target_os = "linux")]
     let mut term = libc::termios {
@@ -261,12 +261,11 @@ pub fn create_termp(utf8: bool) -> libc::termios {
         c_ospeed: Default::default(),
     };
 
+    // The PTY always carries UTF-8: the engine decodes it and every shell
+    // launched through it is given a UTF-8 locale.
     #[cfg(not(target_os = "freebsd"))]
     {
-        // Enable utf8 support if requested
-        if utf8 {
-            term.c_iflag |= libc::IUTF8;
-        }
+        term.c_iflag |= libc::IUTF8;
     }
 
     // Set supported terminal characters
@@ -402,7 +401,7 @@ fn queue_bootstrap(main: libc::c_int, child: libc::c_int, bootstrap: &str) -> Re
 
     // Hand the session the echo it expects, now that the one write that had to
     // stay invisible is already in the queue.
-    let restored = create_termp(true);
+    let restored = create_termp();
 
     // SAFETY: `child` is the pty's terminal side, open for the whole call.
     if unsafe { libc::tcsetattr(child, libc::TCSANOW, &restored) } != 0 {
@@ -443,7 +442,7 @@ pub fn create_pty_with_env(options: PtyOptions<'_>) -> Result<Pty, Error> {
         ws_ypixel: height as libc::c_ushort,
     };
 
-    let mut term = create_termp(true);
+    let mut term = create_termp();
 
     if bootstrap.is_some() {
         term.c_lflag &= !libc::ECHO;

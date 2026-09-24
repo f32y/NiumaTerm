@@ -10,17 +10,13 @@ fn agent(index: u64, phase_index: Option<u64>) -> WorkflowAgent {
         agent_id: Some(format!("agent-{index}")),
         label: Some(format!("step-{index}")),
         phase_index,
-        phase_title: None,
         agent_type: None,
-        isolation: None,
         model: None,
         state: WorkflowAgentState::Done,
         tokens: None,
         tool_calls: None,
         reused: false,
         error: None,
-        prompt_preview: None,
-        result_preview: None,
     }
 }
 
