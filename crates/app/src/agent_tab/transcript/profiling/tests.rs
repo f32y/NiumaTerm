@@ -15,7 +15,7 @@ use tracing::subscriber::with_default;
 use tracing_subscriber::fmt;
 
 use crate::agent_tab::profile::AgentKind;
-use crate::agent_tab::transcript::{Entry, TranscriptView};
+use crate::agent_tab::transcript::TranscriptView;
 
 #[global_allocator]
 static ALLOCATOR: ProfilingAllocator = ProfilingAllocator;
@@ -59,7 +59,7 @@ impl Drop for Enabled {
     }
 }
 
-fn take_totals() -> [Totals; 9] {
+fn take_totals() -> [Totals; 8] {
     take_samples()
 }
 
@@ -77,11 +77,7 @@ fn history(turns: u64, live: Item) -> TranscriptView {
                 questions: None,
             },
         ] {
-            view.append_entry(Entry {
-                turn,
-                item,
-                metadata: Default::default(),
-            });
+            view.push_stamped(turn, item);
         }
 
         view.conversation
@@ -90,11 +86,7 @@ fn history(turns: u64, live: Item) -> TranscriptView {
             .replay(turn, false, None, None);
     }
 
-    view.append_entry(Entry {
-        turn: turns,
-        item: live,
-        metadata: Default::default(),
-    });
+    view.push_stamped(turns, live);
 
     view.refresh_rows(CollapseRows::WorkAndToolCalls);
 
@@ -113,7 +105,7 @@ fn reasoning(capacity: usize) -> Item {
 }
 
 #[gpui::test]
-fn profiles_real_updates_and_mirror_revisions_without_changing_results(cx: &mut TestAppContext) {
+fn profiles_real_updates_without_changing_results(cx: &mut TestAppContext) {
     assert!(Probe::start(Operation::AppendDelta).is_none());
     assert!(AllocationScope::start().is_none());
 
@@ -121,7 +113,7 @@ fn profiles_real_updates_and_mirror_revisions_without_changing_results(cx: &mut 
         let entity = cx.new(|_| history(4, reasoning(1024)));
         let _enabled = Enabled::new();
 
-        entity.update(cx, |view, cx| {
+        entity.update(cx, |view, _| {
             assert!(view.append_delta("live", " more", TextField::ReasoningSummary));
             assert!(!view.append_delta("missing", "ignored", TextField::ReasoningSummary));
 
@@ -266,9 +258,9 @@ fn measure<C, T>(
     }
 }
 
-#[gpui::test]
+#[test]
 #[ignore = "manual transcript timing and allocation baseline; run alone"]
-fn long_transcript_profile(cx: &mut TestAppContext) {
+fn long_transcript_profile() {
     eprintln!(
         "transcript baseline: debug_assertions={} timings exclude active probes; allocations are separate inclusive batches",
         cfg!(debug_assertions)

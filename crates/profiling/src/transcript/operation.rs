@@ -7,7 +7,6 @@ pub enum Operation {
     AppendDelta,
     RowsRebuild,
     Typewriter,
-    MirrorRebuild,
     BackgroundSnapshot,
     WorkflowSnapshot,
 }
@@ -22,7 +21,6 @@ impl From<Operation> for &'static str {
             Operation::AppendDelta => "append-delta",
             Operation::RowsRebuild => "rows-rebuild",
             Operation::Typewriter => "typewriter",
-            Operation::MirrorRebuild => "mirror-rebuild",
             Operation::BackgroundSnapshot => "background-snapshot",
             Operation::WorkflowSnapshot => "workflow-snapshot",
         }

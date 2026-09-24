@@ -16,14 +16,13 @@ use crate::allocation::{AllocationCounts, AllocationScope};
 use crate::transcript::Operation;
 
 /// Operations in the same order as the drained totals array.
-pub const OPERATIONS: [Operation; 9] = [
+pub const OPERATIONS: [Operation; 8] = [
     Operation::AppendEntry,
     Operation::Replay,
     Operation::MergeCompleted,
     Operation::AppendDelta,
     Operation::RowsRebuild,
     Operation::Typewriter,
-    Operation::MirrorRebuild,
     Operation::BackgroundSnapshot,
     Operation::WorkflowSnapshot,
 ];
