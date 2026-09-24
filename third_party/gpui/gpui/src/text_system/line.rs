@@ -737,7 +737,7 @@ fn paint_line_background(
 /// Share of the line box a run's background fills, the radius of its corners,
 /// and how far it reaches past the glyphs on each side.
 const RUN_BACKGROUND_HEIGHT: f32 = 0.9;
-const RUN_BACKGROUND_RADIUS: f32 = 4.0;
+const RUN_BACKGROUND_RADIUS: f32 = 6.0;
 const RUN_BACKGROUND_PADDING_X: f32 = 3.0;
 
 /// The plate behind a run of highlighted text. Drawn shorter than the line box
@@ -790,8 +790,12 @@ fn aligned_origin_x(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{FontId, GlyphId, ShapedGlyph, ShapedRun};
+    use crate::{
+        DecorationRun, FontId, GlyphId, Hsla, LineLayout, ShapedGlyph, ShapedLine, ShapedRun,
+        SharedString, point, px,
+    };
+    use smallvec::SmallVec;
+    use std::sync::Arc;
 
     /// Helper: build a ShapedLine from glyph descriptors without the platform text system.
     /// Each glyph is described as (byte_index, x_position).
