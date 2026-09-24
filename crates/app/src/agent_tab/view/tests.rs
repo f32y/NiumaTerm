@@ -11,7 +11,7 @@ use crate::agent_tab::capabilities::AgentCapabilities as _;
 use crate::agent_tab::composer::prompt_with_response_annotations;
 use crate::agent_tab::session::UpdateSuspension;
 use crate::agent_tab::thread_controls::effort::effort_gauge_step;
-use crate::agent_tab::view::blocking_overlay::{UpdateOverlayPhase, update_overlay_phase};
+use crate::agent_tab::view::blocking_overlay::update_overlay_label;
 use crate::agent_tab::view::composer_layout::{ComposerEnterBehavior, composer_enter_behavior};
 use crate::agent_tab::view::composer_notices::{
     LastResponseTone, last_response_tone, multi_root_notice, queued_message_label,
@@ -96,24 +96,21 @@ fn composer_stats_append_generation_speed_and_mark_estimates() {
 }
 
 #[test]
-fn update_phases_choose_the_blocking_overlay() {
-    assert_eq!(
-        update_overlay_phase(&UpdateSuspension::Stopping),
-        Some(UpdateOverlayPhase::Stopping)
-    );
-    assert_eq!(
-        update_overlay_phase(&UpdateSuspension::Updating),
-        Some(UpdateOverlayPhase::Updating)
-    );
-    assert_eq!(
-        update_overlay_phase(&UpdateSuspension::Reconnecting),
-        Some(UpdateOverlayPhase::Reconnecting)
-    );
-    assert_eq!(update_overlay_phase(&UpdateSuspension::Waiting), None);
-    assert_eq!(
-        update_overlay_phase(&UpdateSuspension::Failed("failed".into())),
-        None
-    );
+fn only_the_teardown_phases_take_the_blocking_overlay() {
+    for state in [
+        UpdateSuspension::Stopping,
+        UpdateSuspension::Updating,
+        UpdateSuspension::Reconnecting,
+    ] {
+        assert!(update_overlay_label(&state).is_some());
+    }
+
+    for state in [
+        UpdateSuspension::Waiting,
+        UpdateSuspension::Failed("failed".into()),
+    ] {
+        assert!(update_overlay_label(&state).is_none());
+    }
 }
 
 #[test]

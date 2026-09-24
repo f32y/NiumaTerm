@@ -3,9 +3,8 @@ mod prompt_truncation_tests {
     use gpui::{FontFallbacks, px};
     use nmt_agent::chat::{Compaction, CompactionTrigger, Item as SessionItem};
 
-    use crate::agent_tab::composer::{ComposerAction, prompt_with_response_annotations};
+    use crate::agent_tab::composer::prompt_with_response_annotations;
     use crate::agent_tab::profile::AgentKind;
-    use crate::agent_tab::session::Status;
     use crate::agent_tab::settings::AgentSettings;
     use crate::agent_tab::transcript::render::transcript_code_block_style;
     use crate::agent_tab::transcript::{
@@ -35,19 +34,6 @@ mod prompt_truncation_tests {
         assert_eq!(style.text.font_family.as_deref(), Some("JetBrains Mono"));
         assert_eq!(style.text.font_size, Some(px(12.5).into()));
         assert_eq!(fallbacks.fallback_list(), ["Microsoft YaHei"]);
-    }
-
-    #[test]
-    fn composer_replaces_send_with_stop_only_while_running() {
-        let action: ComposerAction = Status::Running.into();
-
-        assert_eq!(action, ComposerAction::Stop);
-
-        for status in [Status::Starting, Status::Idle, Status::Exited] {
-            let action: ComposerAction = status.into();
-
-            assert_eq!(action, ComposerAction::Send);
-        }
     }
 
     #[test]

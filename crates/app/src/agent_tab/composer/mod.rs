@@ -32,7 +32,6 @@ use gpui::SharedString;
 
 #[cfg(test)]
 use crate::agent_tab::composer::palette::{feedback_is_current, feedback_is_transient};
-use crate::agent_tab::session::Status;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum CommandFeedbackKind {
@@ -55,26 +54,10 @@ pub(super) struct CommandFeedback {
     pub(super) message: SharedString,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum ComposerAction {
-    Send,
-    Stop,
-}
-
 pub(super) fn restored_input_after_interruption(submitted: &str, current: &str) -> String {
     if current.trim().is_empty() || current == submitted {
         submitted.to_string()
     } else {
         format!("{submitted}\n\n{current}")
-    }
-}
-
-impl From<Status> for ComposerAction {
-    fn from(status: Status) -> Self {
-        if status == Status::Running {
-            ComposerAction::Stop
-        } else {
-            ComposerAction::Send
-        }
     }
 }

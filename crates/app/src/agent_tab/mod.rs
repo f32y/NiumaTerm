@@ -100,10 +100,10 @@ use crate::agent_tab::composer::attachments::{
     ComposerAttachments, MAX_ATTACHMENTS, THUMBNAIL, has_image, prepare_paste, scratch_dir,
 };
 use crate::agent_tab::composer::{
-    BranchFlow, CachedCatalog, CommandFeedbackKind, ComposerAction, PaletteAction, PaletteModel,
-    PaletteRow, PendingSlashCommand, RewindAction, SlashPalette, branch_error_message,
-    branch_failure_message, fork_palette_model, prompt_with_response_annotations,
-    restored_input_after_interruption, rewind_palette_model, row_prompt_target,
+    BranchFlow, CachedCatalog, CommandFeedbackKind, PaletteAction, PaletteModel, PaletteRow,
+    PendingSlashCommand, RewindAction, SlashPalette, branch_error_message, branch_failure_message,
+    fork_palette_model, prompt_with_response_annotations, restored_input_after_interruption,
+    rewind_palette_model, row_prompt_target,
 };
 use crate::agent_tab::execution::{
     AgentSession, ChildReader, CommandBinding, PresentationEffect, SessionOwner,
@@ -3760,8 +3760,7 @@ impl Render for AgentPane {
             .prompts
             .render(&self.session, composer_free, window, cx);
 
-        let action: ComposerAction = self.session.borrow().runtime().status().into();
-        let running = action == ComposerAction::Stop;
+        let running = self.session.borrow().runtime().status() == Status::Running;
 
         let update_suspended = self
             .session

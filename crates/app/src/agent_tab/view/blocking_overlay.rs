@@ -43,28 +43,14 @@ impl BlockingOverlay {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum UpdateOverlayPhase {
-    Stopping,
-    Updating,
-    Reconnecting,
-}
-
-impl UpdateOverlayPhase {
-    fn label(self) -> Cow<'static, str> {
-        match self {
-            Self::Stopping => t!("agent-update-stopping-label"),
-            Self::Updating => t!("agent-update-updating-label"),
-            Self::Reconnecting => t!("agent-update-reconnecting-label"),
-        }
-    }
-}
-
-pub(super) fn update_overlay_phase(state: &UpdateSuspension) -> Option<UpdateOverlayPhase> {
+/// The label of the update phases that tear the backend down and bring it
+/// back, the ones that own the whole surface; `None` for the phases the tab
+/// stays usable in.
+pub(super) fn update_overlay_label(state: &UpdateSuspension) -> Option<Cow<'static, str>> {
     match state {
-        UpdateSuspension::Stopping => Some(UpdateOverlayPhase::Stopping),
-        UpdateSuspension::Updating => Some(UpdateOverlayPhase::Updating),
-        UpdateSuspension::Reconnecting => Some(UpdateOverlayPhase::Reconnecting),
+        UpdateSuspension::Stopping => Some(t!("agent-update-stopping-label")),
+        UpdateSuspension::Updating => Some(t!("agent-update-updating-label")),
+        UpdateSuspension::Reconnecting => Some(t!("agent-update-reconnecting-label")),
         UpdateSuspension::Waiting | UpdateSuspension::Failed(_) => None,
     }
 }
@@ -157,7 +143,7 @@ pub(crate) fn update_overlay(
     suspension: Option<&UpdateSuspension>,
     cx: &mut Context<AgentPane>,
 ) -> Option<AnyElement> {
-    let label = update_overlay_phase(suspension?)?.label();
+    let label = update_overlay_label(suspension?)?;
 
     let body = v_flex()
         .items_center()

@@ -333,23 +333,15 @@ pub(super) fn command(
     Ok(())
 }
 
-/// What a backend signal did to the attempt it was addressed to.
-pub(super) enum ExecutionOutcome {
-    /// The signal was for an attempt or turn the room no longer tracks.
-    Ignored,
-    /// The attempt advanced.
-    Applied,
-    /// The moderator decision was valid and taken.
-    DecisionAccepted,
-    /// The moderator decision was malformed or rejected.
-    DecisionRejected,
-}
-
+/// Apply a backend signal to the attempt it was addressed to. Returns whether
+/// it carried a moderator decision the room took, which is what the caller
+/// answers the moderator with; a signal for an attempt the room no longer
+/// tracks, a plain turn event, and a rejected decision all answer no.
 pub(super) fn execution(
     session: &mut TeamSession,
     key: AttemptEventKey,
     signal: ExecutionSignal,
-) -> Result<ExecutionOutcome, TeamError> {
+) -> Result<bool, TeamError> {
     let Some(attempt) = session
         .store()
         .room()
@@ -358,24 +350,24 @@ pub(super) fn execution(
         .find(|attempt| attempt.id == key.attempt)
         .cloned()
     else {
-        return Ok(ExecutionOutcome::Ignored);
+        return Ok(false);
     };
 
     if key.backend_generation != attempt.intent.backend_generation {
-        return Ok(ExecutionOutcome::Ignored);
+        return Ok(false);
     }
 
     match signal {
         ExecutionSignal::Accepted { id, .. } => {
             session.accept_attempt(key, &id)?;
 
-            Ok(ExecutionOutcome::Applied)
+            Ok(false)
         }
         ExecutionSignal::Finished {
             id, error, text, ..
         } => {
             if attempt.provider_turn.as_deref() != Some(id.as_str()) {
-                return Ok(ExecutionOutcome::Ignored);
+                return Ok(false);
             }
 
             if error.is_some() {
@@ -384,11 +376,11 @@ pub(super) fn execution(
                 session.complete_reply(key, &id, text)?;
             }
 
-            Ok(ExecutionOutcome::Applied)
+            Ok(false)
         }
         ExecutionSignal::Decision { request, .. } => {
             if attempt.provider_turn.as_deref() != Some(request.provider_turn.as_str()) {
-                return Ok(ExecutionOutcome::Ignored);
+                return Ok(false);
             }
 
             let accepted = if let Some((stage, operation, action)) =
@@ -402,7 +394,7 @@ pub(super) fn execution(
             };
 
             if accepted {
-                return Ok(ExecutionOutcome::DecisionAccepted);
+                return Ok(true);
             }
 
             if let BudgetScope::Discussion(discussion) = attempt.intent.budget {
@@ -412,7 +404,7 @@ pub(super) fn execution(
                 )?;
             }
 
-            Ok(ExecutionOutcome::DecisionRejected)
+            Ok(false)
         }
     }
 }

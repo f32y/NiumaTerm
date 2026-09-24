@@ -30,7 +30,7 @@ use nmt_config::profile::AgentProfile;
 use crate::agent_tab::execution::{AgentSession, ExecutionSignal, SessionOwner};
 use crate::agent_tab::settings::AgentSettings;
 use crate::agent_tab::team::member_host::MemberHost;
-use crate::agent_tab::team::operations::{ExecutionOutcome, MemberSnapshot};
+use crate::agent_tab::team::operations::MemberSnapshot;
 
 type Operation = Box<dyn FnOnce(&mut TeamRuntime, &mut Context<TeamRuntime>)>;
 
@@ -701,12 +701,7 @@ impl TeamRuntime {
             },
             move |this, result, cx| {
                 let accepted = match result {
-                    Ok(ExecutionOutcome::DecisionAccepted) => true,
-                    Ok(
-                        ExecutionOutcome::Ignored
-                        | ExecutionOutcome::Applied
-                        | ExecutionOutcome::DecisionRejected,
-                    ) => false,
+                    Ok(accepted) => *accepted,
                     Err(error) => {
                         this.error = Some(error.to_string());
 
