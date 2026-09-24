@@ -9,10 +9,9 @@ use serde_json::{Map, Value, json};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::time::{Instant, timeout_at};
 
-use crate::chat::Event;
+use crate::codex::app_server::ThreadProfile;
 use crate::codex::app_server::host::{CodexHost, HOST_EXIT_METHOD, RegistrationId};
-use crate::codex::app_server::protocol::{thread_name_request, thread_start_params};
-use crate::codex::app_server::{Session, ThreadProfile};
+use crate::codex::app_server::protocol::thread_start_params;
 use crate::session::naming::provisional_title;
 use crate::workspace::AgentWorkspace;
 
@@ -30,13 +29,13 @@ pub(super) const TITLE_GENERATION_RESULT_METHOD: &str = "nmt/codexTitleGeneratio
 
 type Delivery = Arc<dyn Fn(Value) + Send + Sync>;
 
-struct TitleGenerationRequest {
-    generation_id: u64,
-    root_thread_id: String,
-    provisional_title: String,
-    prompt: String,
-    profile: ThreadProfile,
-    workspace: AgentWorkspace,
+pub(super) struct TitleGenerationRequest {
+    pub(super) generation_id: u64,
+    pub(super) root_thread_id: String,
+    pub(super) provisional_title: String,
+    pub(super) prompt: String,
+    pub(super) profile: ThreadProfile,
+    pub(super) workspace: AgentWorkspace,
 }
 
 pub(super) struct TitleGenerationHandle {
@@ -81,104 +80,9 @@ impl TitleGenerationResult {
     }
 }
 
-impl Session {
-    /// A user-authored name invalidates any generated replacement before the
-    /// provider write is queued, so a late worker result cannot rename it.
-    pub(crate) fn rename_thread(&mut self, name: &str) -> bool {
-        self.cancel_title_generation();
-
-        let Some(thread_id) = self.conversation.thread_id.clone() else {
-            return false;
-        };
-
-        let name = name.trim();
-
-        if name.is_empty() {
-            return false;
-        }
-
-        let rpc_id = self.alloc_rpc_id();
-
-        self.try_send(thread_name_request(rpc_id, &thread_id, name))
-            .is_ok()
-    }
-
-    pub(crate) fn cancel_title_generation(&mut self) {
-        if let Some(generation) = self.title_generation.take() {
-            generation.cancel();
-        }
-    }
-
-    pub(super) fn begin_title_generation(&mut self, prompt: &str, provisional_title: &str) {
-        self.cancel_title_generation();
-
-        let (Some(host), Some(root_thread_id)) =
-            (self.host.as_ref(), self.conversation.thread_id.clone())
-        else {
-            self.queue_thread_name(provisional_title);
-
-            return;
-        };
-
-        self.next_title_generation_id = self.next_title_generation_id.wrapping_add(1).max(1);
-
-        let generation_id = self.next_title_generation_id;
-
-        self.title_generation = Some(start_title_generation(
-            Arc::clone(host),
-            Arc::clone(&self.deliver),
-            TitleGenerationRequest {
-                generation_id,
-                root_thread_id,
-                provisional_title: provisional_title.to_string(),
-                prompt: prompt.to_string(),
-                profile: self.thread_profile.clone(),
-                workspace: self.workspace.clone(),
-            },
-        ));
-    }
-
-    pub(super) fn apply_title_generation_result(&mut self, params: &Value) -> Vec<Event> {
-        let Some(result) = parse_title_generation_result(TITLE_GENERATION_RESULT_METHOD, params)
-        else {
-            return Vec::new();
-        };
-
-        let matches_active = self
-            .title_generation
-            .as_ref()
-            .is_some_and(|active| active.accepts(&result, self.conversation.thread_id.as_deref()));
-
-        if !matches_active {
-            return Vec::new();
-        }
-
-        self.title_generation.take();
-
-        let title = result.resolved_title().to_string();
-
-        self.queue_thread_name(&title);
-
-        vec![Event::TitleUpdated(title)]
-    }
-
-    fn queue_thread_name(&mut self, name: &str) {
-        let Some(thread_id) = self.conversation.thread_id.clone() else {
-            return;
-        };
-
-        // Keep later writes queued even while an earlier name is pending: a
-        // user rename that follows a generated name must be the final request
-        // the server applies.
-        let rpc_id = self.alloc_rpc_id();
-
-        self.send(thread_name_request(rpc_id, &thread_id, name));
-    }
-}
-
 /// Cancellation arrives as a message rather than by aborting the task, so the
 /// cleanup that interrupts the title turn and detaches the registration runs.
-fn start_title_generation(
+pub(super) fn start_title_generation(
     host: Arc<CodexHost>,
     deliver: Delivery,
     request: TitleGenerationRequest,

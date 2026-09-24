@@ -47,6 +47,7 @@ use futures::future::{BoxFuture, FutureExt as _, ready};
 use serde_json::{Value, json};
 
 use crate::LaunchConfig;
+use crate::chat::TeamDecisionRequest;
 use crate::codex::ProviderConfig;
 use crate::codex::app_server::background_tasks::{CodexTasks, ThreadScope, notification_thread_id};
 use crate::codex::app_server::compaction::is_legacy_compaction_notification;
@@ -59,20 +60,22 @@ use crate::codex::app_server::progress::{goal_status, spawn_plan_restore};
 #[cfg(test)]
 use crate::codex::app_server::protocol::thread_start_params;
 use crate::codex::app_server::protocol::{
-    CodexCommand, codex_user_input, file_change_paths, parse_fork_checkpoints, parse_models,
-    parse_replay, parse_thread_settings, parse_thread_summaries, resumed_thread_events,
-    skills_list_request, stringify_command, thread_list_params, thread_resume_params,
-    turn_interrupt_request, turn_start_params,
+    CodexCommand, codex_user_input, file_change_paths, initial_thread_request,
+    parse_fork_checkpoints, parse_models, parse_replay, parse_thread_settings,
+    parse_thread_summaries, resumed_thread_events, skills_list_request, stringify_command,
+    thread_list_params, thread_name_request, thread_resume_params, turn_interrupt_request,
+    turn_start_params,
 };
 #[cfg(test)]
 use crate::codex::app_server::skills::parse_skill_catalog;
 use crate::codex::app_server::skills::{SkillRefreshState, skill_catalog_from_response};
-use crate::codex::app_server::team::TeamState;
+use crate::codex::app_server::team::{TeamState, decision_tool};
 use crate::codex::app_server::title_generation::{
-    TITLE_GENERATION_RESULT_METHOD, TitleGenerationHandle,
+    TITLE_GENERATION_RESULT_METHOD, TitleGenerationHandle, TitleGenerationRequest,
+    parse_title_generation_result, start_title_generation,
 };
-use crate::session::ConversationTitleRequest;
-use crate::session::team_capabilities::TeamLaunch;
+use crate::session::team_capabilities::{ModeratorAdmission, RecoveredTeamTurn, TeamLaunch};
+use crate::session::{AgentKind, ConversationTitleRequest};
 use crate::subprocess::DROP_SHUTDOWN_GRACE;
 use crate::workspace::AgentWorkspace;
 
@@ -1327,3 +1330,266 @@ pub const SANDBOX_OPTIONS: [(&str, &str); 3] = [
     ("workspaceWrite", "workspace-write"),
     ("dangerFullAccess", "full-access"),
 ];
+
+impl Session {
+    /// A user-authored name invalidates any generated replacement before the
+    /// provider write is queued, so a late worker result cannot rename it.
+    pub(crate) fn rename_thread(&mut self, name: &str) -> bool {
+        self.cancel_title_generation();
+
+        let Some(thread_id) = self.conversation.thread_id.clone() else {
+            return false;
+        };
+
+        let name = name.trim();
+
+        if name.is_empty() {
+            return false;
+        }
+
+        let rpc_id = self.alloc_rpc_id();
+
+        self.try_send(thread_name_request(rpc_id, &thread_id, name))
+            .is_ok()
+    }
+
+    pub(crate) fn cancel_title_generation(&mut self) {
+        if let Some(generation) = self.title_generation.take() {
+            generation.cancel();
+        }
+    }
+
+    pub(super) fn begin_title_generation(&mut self, prompt: &str, provisional_title: &str) {
+        self.cancel_title_generation();
+
+        let (Some(host), Some(root_thread_id)) =
+            (self.host.as_ref(), self.conversation.thread_id.clone())
+        else {
+            self.queue_thread_name(provisional_title);
+
+            return;
+        };
+
+        self.next_title_generation_id = self.next_title_generation_id.wrapping_add(1).max(1);
+
+        let generation_id = self.next_title_generation_id;
+
+        self.title_generation = Some(start_title_generation(
+            Arc::clone(host),
+            Arc::clone(&self.deliver),
+            TitleGenerationRequest {
+                generation_id,
+                root_thread_id,
+                provisional_title: provisional_title.to_string(),
+                prompt: prompt.to_string(),
+                profile: self.thread_profile.clone(),
+                workspace: self.workspace.clone(),
+            },
+        ));
+    }
+
+    pub(super) fn apply_title_generation_result(&mut self, params: &Value) -> Vec<Event> {
+        let Some(result) = parse_title_generation_result(TITLE_GENERATION_RESULT_METHOD, params)
+        else {
+            return Vec::new();
+        };
+
+        let matches_active = self
+            .title_generation
+            .as_ref()
+            .is_some_and(|active| active.accepts(&result, self.conversation.thread_id.as_deref()));
+
+        if !matches_active {
+            return Vec::new();
+        }
+
+        self.title_generation.take();
+
+        let title = result.resolved_title().to_string();
+
+        self.queue_thread_name(&title);
+
+        vec![Event::TitleUpdated(title)]
+    }
+
+    fn queue_thread_name(&mut self, name: &str) {
+        let Some(thread_id) = self.conversation.thread_id.clone() else {
+            return;
+        };
+
+        // Keep later writes queued even while an earlier name is pending: a
+        // user rename that follows a generated name must be the final request
+        // the server applies.
+        let rpc_id = self.alloc_rpc_id();
+
+        self.send(thread_name_request(rpc_id, &thread_id, name));
+    }
+}
+
+impl Session {
+    pub fn team_recovered_turns(&self) -> &[RecoveredTeamTurn] {
+        self.team
+            .as_ref()
+            .map_or(&[], |team| team.completed_turns.as_slice())
+    }
+
+    pub(super) fn retain_team_history(&mut self, turns: &Value) {
+        let Some(team) = self.team.as_mut() else {
+            return;
+        };
+
+        team.completed_turns = turns
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|turn| {
+                if turn["status"].as_str() != Some("completed") {
+                    return None;
+                }
+
+                let id = turn["id"].as_str().filter(|id| !id.is_empty())?;
+
+                let text = turn["items"]
+                    .as_array()?
+                    .iter()
+                    .rev()
+                    .find(|item| item["type"].as_str() == Some("agentMessage"))
+                    .and_then(|item| item["text"].as_str())
+                    .unwrap_or_default();
+
+                Some(RecoveredTeamTurn {
+                    id: id.to_owned(),
+                    text: text.to_owned(),
+                })
+            })
+            .collect();
+    }
+
+    pub async fn spawn_team(
+        launch: &LaunchConfig,
+        host_catalog: &[LaunchConfig],
+        workspace: &AgentWorkspace,
+        resume: Option<String>,
+        policy: TeamLaunch,
+        deliver: impl Fn(Value) + Send + Sync + 'static,
+        on_stderr: impl Fn(String) + Send + 'static,
+    ) -> Result<Self, String> {
+        Self::spawn_inner(
+            launch,
+            host_catalog,
+            workspace,
+            ConversationStart {
+                resume,
+                suppress_replay: !policy.restore_transcript,
+                team: Some(policy),
+            },
+            deliver,
+            on_stderr,
+        )
+        .await
+    }
+
+    pub fn team_capabilities(&self, backend_generation: u64) -> ModeratorAdmission {
+        let mut capabilities = ModeratorAdmission::unverified(AgentKind::Codex);
+
+        if self
+            .team
+            .as_ref()
+            .is_some_and(|team| team.ready && team.moderation_registered)
+        {
+            capabilities = ModeratorAdmission::CodexDynamicTools { backend_generation };
+        }
+
+        capabilities
+    }
+
+    pub(super) fn start_initial_thread(&mut self) {
+        let mut request = initial_thread_request(
+            self.initial_resume.as_deref(),
+            &self.thread_profile,
+            &self.workspace,
+        );
+
+        if self.team.as_ref().is_some_and(|team| team.launch.moderator)
+            && self.initial_resume.is_none()
+        {
+            request["params"]["dynamicTools"] = json!([decision_tool()]);
+        }
+
+        let kind = if self.initial_resume.is_some() {
+            QueryKind::Resume
+        } else {
+            QueryKind::Start
+        };
+
+        self.send_query(kind, request);
+    }
+
+    pub(super) fn finish_team_start(&mut self, events: Vec<Event>) -> Vec<Event> {
+        if let Some(team) = &mut self.team {
+            team.moderation_registered = team.launch.moderator;
+            team.ready = true;
+        }
+
+        events
+    }
+
+    pub(super) fn on_team_decision(&mut self, request_id: u64, params: &Value) -> Vec<Event> {
+        let valid = params["tool"].as_str() == Some("team_decide")
+            && params["threadId"].as_str() == self.thread_id()
+            && params["turnId"].as_str() == self.conversation.current_turn.as_deref()
+            && self.team.as_ref().is_some_and(|team| {
+                team.ready
+                    && team.moderation_registered
+                    && !team.pending_decisions.contains_key(&request_id)
+            });
+
+        if !valid {
+            self.send(json!({"id": request_id, "result": {"success": false, "contentItems": [{"type": "inputText", "text": "This discussion operation is unavailable for this session or turn."}]}}));
+
+            return Vec::new();
+        }
+
+        let Some(turn) = params["turnId"].as_str() else {
+            return Vec::new();
+        };
+
+        if let Some(team) = &mut self.team {
+            team.pending_decisions.insert(request_id, turn.to_owned());
+        }
+
+        vec![Event::TeamDecision(TeamDecisionRequest {
+            request_id,
+            provider_turn: turn.to_owned(),
+            arguments: params["arguments"].clone(),
+        })]
+    }
+
+    pub fn respond_team_decision(
+        &mut self,
+        request: &TeamDecisionRequest,
+        accepted: bool,
+        explanation: &str,
+    ) -> bool {
+        let current = self
+            .team
+            .as_ref()
+            .and_then(|team| team.pending_decisions.get(&request.request_id));
+
+        if current != Some(&request.provider_turn)
+            || self.conversation.current_turn.as_deref() != Some(request.provider_turn.as_str())
+        {
+            return false;
+        }
+
+        if self.try_send(json!({"id": request.request_id, "result": {"success": accepted, "contentItems": [{"type": "inputText", "text": explanation}]}})).is_err() {
+            return false;
+        }
+
+        if let Some(team) = &mut self.team {
+            team.pending_decisions.remove(&request.request_id);
+        }
+
+        true
+    }
+}
