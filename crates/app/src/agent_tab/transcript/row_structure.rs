@@ -9,7 +9,7 @@ use std::time::Instant;
 
 use gpui::{Pixels, px};
 use nmt_agent::chat::Item as SessionItem;
-use nmt_agent::transcript::conversation::ConversationState;
+use nmt_agent::transcript::conversation::{ConversationState, hidden};
 use nmt_config::agent::CollapseRows;
 
 use crate::agent_tab::transcript::render::gap_px;
@@ -18,7 +18,7 @@ use crate::agent_tab::transcript::rows::{
     TranscriptRow, TurnSummary, entry_fingerprint, folds_turns, row_gap, turn_summary,
 };
 use crate::agent_tab::transcript::typewriter::ReplyTyping;
-use crate::agent_tab::transcript::{RowSpec, hidden, is_work_row};
+use crate::agent_tab::transcript::{RowSpec, is_work_row};
 
 /// What the row structure is read from: the conversation, which parts of it
 /// are disclosed, and how far a streaming reply has been typed.

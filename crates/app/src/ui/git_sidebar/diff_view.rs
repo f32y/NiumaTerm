@@ -1,9 +1,9 @@
 use std::iter;
 use std::ops::Range;
-use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use app::agent_tab::transcript::file_extension_lang;
 use app::terminal_tab::metrics;
 use gpui::prelude::*;
 use gpui::{
@@ -124,35 +124,18 @@ impl DiffView {
             }
         }
 
-        let language = match Path::new(path)
-            .extension()
-            .and_then(|extension| extension.to_str())
-            .unwrap_or("")
-        {
-            "rs" => "rust",
-            "ts" | "tsx" => "typescript",
-            "js" | "jsx" | "mjs" | "cjs" => "javascript",
-            "py" => "python",
-            "json" => "json",
-            "toml" => "toml",
-            "html" | "vue" => "html",
-            "css" | "scss" => "css",
-            "md" => "markdown",
-            "sh" | "zsh" => "bash",
-            "c" | "h" => "c",
-            "cpp" | "hpp" => "cpp",
-            "yml" | "yaml" => "yaml",
-            _ => "",
-        };
+        // The registry resolves file extensions itself, so every bundled
+        // grammar highlights rather than only the ones a table names.
+        let language = file_extension_lang(path);
 
         let parse = |text: &str| {
             if text.len() > 2 * 1024 * 1024
-                || LanguageRegistry::singleton().language(language).is_none()
+                || LanguageRegistry::singleton().language(&language).is_none()
             {
                 return None;
             }
 
-            let mut highlighter = SyntaxHighlighter::new(language);
+            let mut highlighter = SyntaxHighlighter::new(&language);
 
             highlighter
                 .update(None, &Rope::from_str(text), Some(Duration::from_millis(25)))
