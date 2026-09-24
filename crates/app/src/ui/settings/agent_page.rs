@@ -49,18 +49,17 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
         .title(t!("settings-agent-general"))
         .item(SettingItem::new(
             t!("settings-agent-show-usage"),
-            SettingField::switch(
-                |cx| cx.global::<AppSettings>().config().agent.show_agent_usage,
-                |value, cx| {
-                    cx.global_mut::<AppSettings>()
-                        .edit_agent(|section| section.show_agent_usage = value);
+            settings_switch(
+                |config| config.agent.show_agent_usage,
+                |settings, value| {
+                    settings.edit_agent(|section| section.show_agent_usage = value);
                 },
             ),
         ))
         .item(
             SettingItem::new(
                 t!("settings-agent-collapse-tool-calls"),
-                SettingField::dropdown(
+                settings_choice(
                     vec![
                         (
                             work_and_tool_calls_key.into(),
@@ -72,20 +71,9 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
                         ),
                         (off_key.into(), t!("settings-common-off").into()),
                     ],
-                    |cx| {
-                        let key: &str = cx
-                            .global::<AppSettings>()
-                            .config()
-                            .agent
-                            .collapse_tool_calls
-                            .into();
-
-                        key.into()
-                    },
-                    |value, cx| {
-                        cx.global_mut::<AppSettings>().edit_agent(|section| {
-                            section.collapse_tool_calls = value.as_str().into()
-                        });
+                    |config| config.agent.collapse_tool_calls.into(),
+                    |settings, value| {
+                        settings.edit_agent(|section| section.collapse_tool_calls = value.into());
                     },
                 ),
             )
@@ -94,16 +82,10 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
         .item(
             SettingItem::new(
                 t!("settings-agent-codex-skill-compat"),
-                SettingField::switch(
-                    |cx| {
-                        cx.global::<AppSettings>()
-                            .config()
-                            .agent
-                            .codex_skill_command_compat
-                    },
-                    |value, cx| {
-                        cx.global_mut::<AppSettings>()
-                            .edit_agent(|section| section.codex_skill_command_compat = value);
+                settings_switch(
+                    |config| config.agent.codex_skill_command_compat,
+                    |settings, value| {
+                        settings.edit_agent(|section| section.codex_skill_command_compat = value);
                     },
                 ),
             )
@@ -112,7 +94,7 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
         .item(
             SettingItem::new(
                 t!("settings-agent-model-list-style"),
-                SettingField::dropdown(
+                settings_choice(
                     vec![
                         (
                             name_and_id_key.into(),
@@ -131,19 +113,9 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
                             t!("settings-agent-model-list-style-id-only").into(),
                         ),
                     ],
-                    |cx| {
-                        let key: &str = cx
-                            .global::<AppSettings>()
-                            .config()
-                            .agent
-                            .model_list_style
-                            .into();
-
-                        key.into()
-                    },
-                    |value, cx| {
-                        cx.global_mut::<AppSettings>()
-                            .edit_agent(|section| section.model_list_style = value.as_str().into());
+                    |config| config.agent.model_list_style.into(),
+                    |settings, value| {
+                        settings.edit_agent(|section| section.model_list_style = value.into());
                     },
                 ),
             )
@@ -152,11 +124,10 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
         .item(
             SettingItem::new(
                 t!("settings-agent-enable-team"),
-                SettingField::switch(
-                    |cx| cx.global::<AppSettings>().config().agent.enable_agent_team,
-                    |value, cx| {
-                        cx.global_mut::<AppSettings>()
-                            .edit_agent(|section| section.enable_agent_team = value);
+                settings_switch(
+                    |config| config.agent.enable_agent_team,
+                    |settings, value| {
+                        settings.edit_agent(|section| section.enable_agent_team = value);
                     },
                 ),
             )
@@ -165,15 +136,10 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
         .item(
             SettingItem::new(
                 t!("settings-appearance-human-friendly-agent-ui-layout"),
-                SettingField::switch(
-                    |cx| {
-                        cx.global::<AppSettings>()
-                            .config()
-                            .appearance
-                            .human_friendly_agent_ui_layout
-                    },
-                    |value, cx| {
-                        cx.global_mut::<AppSettings>().edit_appearance(|section| {
+                settings_switch(
+                    |config| config.appearance.human_friendly_agent_ui_layout,
+                    |settings, value| {
+                        settings.edit_appearance(|section| {
                             section.human_friendly_agent_ui_layout = value
                         });
                     },
@@ -188,16 +154,10 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
         .title(t!("settings-agent-cli-updates"))
         .item(SettingItem::new(
             t!("settings-agent-check-updates"),
-            SettingField::switch(
-                |cx| {
-                    cx.global::<AppSettings>()
-                        .config()
-                        .agent
-                        .check_agent_updates
-                },
-                |value, cx| {
-                    cx.global_mut::<AppSettings>()
-                        .edit_agent(|section| section.check_agent_updates = value);
+            settings_switch(
+                |config| config.agent.check_agent_updates,
+                |settings, value| {
+                    settings.edit_agent(|section| section.check_agent_updates = value);
                 },
             ),
         ))
@@ -232,11 +192,10 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
                 .item(
                     SettingItem::new(
                         t!("settings-agent-enable-hooks"),
-                        SettingField::switch(
-                            |cx| cx.global::<AppSettings>().config().agent.enable_agent_hooks,
-                            |value, cx| {
-                                cx.global_mut::<AppSettings>()
-                                    .edit_agent(|section| section.enable_agent_hooks = value);
+                        settings_switch(
+                            |config| config.agent.enable_agent_hooks,
+                            |settings, value| {
+                                settings.edit_agent(|section| section.enable_agent_hooks = value);
                             },
                         ),
                     )

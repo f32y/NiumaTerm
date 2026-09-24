@@ -14,15 +14,10 @@ pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
                 .title(t!("settings-system-session"))
                 .item(SettingItem::new(
                     t!("settings-system-restore-session"),
-                    SettingField::switch(
-                        |cx| {
-                            cx.global::<AppSettings>()
-                                .config()
-                                .system
-                                .restore_last_session_when_opening
-                        },
-                        |value, cx| {
-                            cx.global_mut::<AppSettings>().edit_system(|section| {
+                    settings_switch(
+                        |config| config.system.restore_last_session_when_opening,
+                        |settings, value| {
+                            settings.edit_system(|section| {
                                 section.restore_last_session_when_opening = value
                             });
                         },
@@ -30,15 +25,10 @@ pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
                 ))
                 .item(SettingItem::new(
                     t!("settings-system-confirm-closing"),
-                    SettingField::switch(
-                        |cx| {
-                            cx.global::<AppSettings>()
-                                .config()
-                                .system
-                                .confirm_before_closing_workspace
-                        },
-                        |value, cx| {
-                            cx.global_mut::<AppSettings>().edit_system(|section| {
+                    settings_switch(
+                        |config| config.system.confirm_before_closing_workspace,
+                        |settings, value| {
+                            settings.edit_system(|section| {
                                 section.confirm_before_closing_workspace = value
                             });
                         },
@@ -46,7 +36,7 @@ pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
                 ))
                 .item(SettingItem::new(
                     t!("settings-system-warn-terminate"),
-                    SettingField::dropdown(
+                    settings_choice(
                         vec![
                             (
                                 "disabled".into(),
@@ -58,19 +48,10 @@ pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
                             ),
                             ("always".into(), t!("settings-system-warn-always").into()),
                         ],
-                        |cx| {
-                            let key: &str = cx
-                                .global::<AppSettings>()
-                                .config()
-                                .system
-                                .warn_before_terminating_shell
-                                .into();
-
-                            SharedString::from(key)
-                        },
-                        |value, cx| {
-                            cx.global_mut::<AppSettings>().edit_system(|section| {
-                                section.warn_before_terminating_shell = value.as_str().into()
+                        |config| config.system.warn_before_terminating_shell.into(),
+                        |settings, value| {
+                            settings.edit_system(|section| {
+                                section.warn_before_terminating_shell = value.into()
                             });
                         },
                     )
@@ -86,16 +67,10 @@ pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
             .item(
                 SettingItem::new(
                     t!("settings-system-open-best-workspace"),
-                    SettingField::switch(
-                        |cx| {
-                            cx.global::<AppSettings>()
-                                .config()
-                                .system
-                                .open_in_best_workspace
-                        },
-                        |value, cx| {
-                            cx.global_mut::<AppSettings>()
-                                .edit_system(|section| section.open_in_best_workspace = value);
+                    settings_switch(
+                        |config| config.system.open_in_best_workspace,
+                        |settings, value| {
+                            settings.edit_system(|section| section.open_in_best_workspace = value);
                         },
                     ),
                 )
@@ -138,16 +113,10 @@ pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
             .item(
                 SettingItem::new(
                     t!("settings-system-manage-job"),
-                    SettingField::switch(
-                        |cx| {
-                            cx.global::<AppSettings>()
-                                .config()
-                                .system
-                                .manage_subprocess_job
-                        },
-                        |value, cx| {
-                            cx.global_mut::<AppSettings>()
-                                .edit_system(|section| section.manage_subprocess_job = value);
+                    settings_switch(
+                        |config| config.system.manage_subprocess_job,
+                        |settings, value| {
+                            settings.edit_system(|section| section.manage_subprocess_job = value);
                         },
                     ),
                 )
@@ -192,26 +161,15 @@ pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
             .title(t!("settings-system-input"))
             .item(SettingItem::new(
                 t!("settings-system-newline-shortcut"),
-                SettingField::dropdown(
+                settings_choice(
                     vec![
                         ("ctrl-enter".into(), "Ctrl-Enter".into()),
                         ("shift-enter".into(), "Shift-Enter".into()),
                         ("off".into(), t!("settings-common-off").into()),
                     ],
-                    |cx| {
-                        let key: &str = cx
-                            .global::<AppSettings>()
-                            .config()
-                            .system
-                            .newline_shortcut
-                            .into();
-
-                        SharedString::from(key)
-                    },
-                    |value, cx| {
-                        cx.global_mut::<AppSettings>().edit_system(|section| {
-                            section.newline_shortcut = value.as_str().into()
-                        });
+                    |config| config.system.newline_shortcut.into(),
+                    |settings, value| {
+                        settings.edit_system(|section| section.newline_shortcut = value.into());
                     },
                 )
                 .default_value(SharedString::from(<&str>::from(NewlineShortcut::CtrlEnter))),

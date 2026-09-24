@@ -36,17 +36,16 @@ pub(super) fn about_page() -> SettingPage {
     let group = group
         .item(SettingItem::new(
             t!("settings-about-check-updates"),
-            SettingField::switch(
-                |cx| cx.global::<AppSettings>().config().update.check_updates,
-                |value, cx| {
-                    cx.global_mut::<AppSettings>()
-                        .edit_update(|section| section.check_updates = value);
+            settings_switch(
+                |config| config.update.check_updates,
+                |settings, value| {
+                    settings.edit_update(|section| section.check_updates = value);
                 },
             ),
         ))
         .item(SettingItem::new(
             t!("settings-about-channel"),
-            SettingField::dropdown(
+            settings_choice(
                 vec![
                     ("stable".into(), t!("settings-about-channel-stable").into()),
                     (
@@ -54,14 +53,9 @@ pub(super) fn about_page() -> SettingPage {
                         t!("settings-about-channel-nightly").into(),
                     ),
                 ],
-                |cx| {
-                    let key: &str = cx.global::<AppSettings>().config().update.channel.into();
-
-                    key.into()
-                },
-                |value, cx| {
-                    cx.global_mut::<AppSettings>()
-                        .edit_update(|section| section.channel = value.as_str().into());
+                |config| config.update.channel.into(),
+                |settings, value| {
+                    settings.edit_update(|section| section.channel = value.into());
                 },
             )
             .default_value("stable"),

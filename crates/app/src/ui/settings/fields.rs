@@ -6,9 +6,10 @@ use gpui::{
 use gpui_component::button::Button;
 use gpui_component::searchable_list::{SearchableListItem, SearchableVec};
 use gpui_component::select::{Select, SelectEvent, SelectState};
-use gpui_component::setting::SettingField;
+use gpui_component::setting::{NumberFieldOptions, SettingField};
 use gpui_component::slider::{Slider, SliderEvent, SliderState};
 use gpui_component::{ActiveTheme as _, AxisExt as _, Disableable as _, h_flex, v_flex};
+use nmt_config::Config;
 use nmt_config::appearance::TabShape;
 use rust_i18n::t;
 
@@ -274,4 +275,46 @@ pub(super) fn tab_shape_field() -> SettingField<SharedString> {
             .menu_width(px(TAB_SHAPE_MENU_WIDTH))
             .when(options.layout().is_vertical(), |this| this.w_full())
     })
+}
+
+/// A switch bound to one config value: `read` takes it from the current
+/// config and `write` hands a new one to the settings owner, which persists
+/// it and applies its side effects.
+pub(super) fn settings_switch(
+    read: fn(&Config) -> bool,
+    write: fn(&mut AppSettings, bool),
+) -> SettingField<bool> {
+    SettingField::switch(
+        move |cx| read(cx.global::<AppSettings>().config()),
+        move |value, cx| write(cx.global_mut::<AppSettings>(), value),
+    )
+}
+
+/// A dropdown bound to one config value stored as a keyed choice: `read`
+/// names the current choice's key and `write` hands the picked key to the
+/// settings owner, which parses and persists it.
+pub(super) fn settings_choice(
+    options: Vec<(SharedString, SharedString)>,
+    read: fn(&Config) -> &'static str,
+    write: fn(&mut AppSettings, &str),
+) -> SettingField<SharedString> {
+    SettingField::dropdown(
+        options,
+        move |cx| read(cx.global::<AppSettings>().config()).into(),
+        move |value, cx| write(cx.global_mut::<AppSettings>(), value.as_str()),
+    )
+}
+
+/// A number input bound to one config value, read and written the same way
+/// as [`settings_switch`].
+pub(super) fn settings_number(
+    options: NumberFieldOptions,
+    read: fn(&Config) -> f64,
+    write: fn(&mut AppSettings, f64),
+) -> SettingField<f64> {
+    SettingField::number_input(
+        options,
+        move |cx| read(cx.global::<AppSettings>().config()),
+        move |value, cx| write(cx.global_mut::<AppSettings>(), value),
+    )
 }

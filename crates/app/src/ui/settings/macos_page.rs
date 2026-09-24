@@ -16,16 +16,10 @@ pub(super) fn macos_group() -> SettingGroup {
         .item(
             SettingItem::new(
                 t!("settings-system-send-notifications"),
-                SettingField::switch(
-                    |cx| {
-                        cx.global::<AppSettings>()
-                            .config()
-                            .system
-                            .send_system_notifications
-                    },
-                    |value, cx| {
-                        cx.global_mut::<AppSettings>()
-                            .edit_system(|section| section.send_system_notifications = value)
+                settings_switch(
+                    |config| config.system.send_system_notifications,
+                    |settings, value| {
+                        settings.edit_system(|section| section.send_system_notifications = value);
                     },
                 ),
             )

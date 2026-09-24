@@ -103,7 +103,7 @@ use crate::ui::settings::appearance_page::appearance_page;
 use crate::ui::settings::card::{card_row, card_text_input, description_hint};
 use crate::ui::settings::fields::{
     background_image_field, background_image_opacity_field, background_opacity_field,
-    tab_shape_field,
+    settings_choice, settings_number, settings_switch, tab_shape_field,
 };
 use crate::ui::settings::hooks::{AgentHooks, Hook};
 #[cfg(test)]

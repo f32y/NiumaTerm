@@ -19,27 +19,16 @@ pub(super) fn appearance_page(
                 .title(t!("settings-appearance-language"))
                 .item(SettingItem::new(
                     t!("settings-appearance-language"),
-                    SettingField::dropdown(
+                    settings_choice(
                         vec![
                             // Language names are proper nouns shown in their
                             // own language, so they stay out of the catalogs.
                             ("en".into(), "English".into()),
                             ("zh-CN".into(), "简体中文".into()),
                         ],
-                        |cx| {
-                            let key: &str = cx
-                                .global::<AppSettings>()
-                                .config()
-                                .appearance
-                                .language
-                                .into();
-
-                            key.into()
-                        },
-                        |value, cx| {
-                            cx.global_mut::<AppSettings>().edit_appearance(|section| {
-                                section.language = value.as_str().into()
-                            });
+                        |config| config.appearance.language.into(),
+                        |settings, value| {
+                            settings.edit_appearance(|section| section.language = value.into());
                         },
                     )
                     .default_value("en"),
@@ -50,15 +39,10 @@ pub(super) fn appearance_page(
                 .title(t!("settings-appearance-theme"))
                 .item(SettingItem::new(
                     t!("settings-appearance-agent-pane-terminal-background"),
-                    SettingField::switch(
-                        |cx| {
-                            cx.global::<AppSettings>()
-                                .config()
-                                .appearance
-                                .agent_pane_use_terminal_background
-                        },
-                        |value, cx| {
-                            cx.global_mut::<AppSettings>().edit_appearance(|section| {
+                    settings_switch(
+                        |config| config.appearance.agent_pane_use_terminal_background,
+                        |settings, value| {
+                            settings.edit_appearance(|section| {
                                 section.agent_pane_use_terminal_background = value
                             });
                         },
@@ -92,7 +76,7 @@ pub(super) fn appearance_page(
                 .title(t!("settings-appearance-window"))
                 .item(SettingItem::new(
                     t!("settings-appearance-window-backdrop"),
-                    SettingField::dropdown(
+                    settings_choice(
                         vec![
                             (
                                 "mica-alt".into(),
@@ -108,35 +92,20 @@ pub(super) fn appearance_page(
                             ),
                             ("off".into(), t!("settings-common-off").into()),
                         ],
-                        |cx| {
-                            let key: &str = cx
-                                .global::<AppSettings>()
-                                .config()
-                                .appearance
-                                .window_backdrop
-                                .into();
-
-                            key.into()
-                        },
-                        |value, cx| {
-                            cx.global_mut::<AppSettings>().edit_appearance(|section| {
-                                section.window_backdrop = value.as_str().into()
-                            });
+                        |config| config.appearance.window_backdrop.into(),
+                        |settings, value| {
+                            settings
+                                .edit_appearance(|section| section.window_backdrop = value.into());
                         },
                     )
                     .default_value("acrylic"),
                 ))
                 .item(SettingItem::new(
                     t!("settings-appearance-effect-on-content-area"),
-                    SettingField::switch(
-                        |cx| {
-                            cx.global::<AppSettings>()
-                                .config()
-                                .appearance
-                                .transparent_main_view
-                        },
-                        |value, cx| {
-                            cx.global_mut::<AppSettings>()
+                    settings_switch(
+                        |config| config.appearance.transparent_main_view,
+                        |settings, value| {
+                            settings
                                 .edit_appearance(|section| section.transparent_main_view = value);
                         },
                     ),
@@ -166,7 +135,7 @@ pub(super) fn appearance_page(
                 )
                 .item(SettingItem::new(
                     t!("settings-appearance-smooth-scrolling"),
-                    SettingField::dropdown(
+                    settings_choice(
                         vec![
                             ("all".into(), t!("settings-appearance-scrolling-all").into()),
                             (
@@ -179,31 +148,20 @@ pub(super) fn appearance_page(
                             ),
                             ("off".into(), t!("settings-common-off").into()),
                         ],
-                        |cx| {
-                            let key: &str = cx
-                                .global::<AppSettings>()
-                                .config()
-                                .appearance
-                                .smooth_scrolling
-                                .into();
-
-                            key.into()
-                        },
-                        |value, cx| {
-                            cx.global_mut::<AppSettings>().edit_appearance(|section| {
-                                section.smooth_scrolling = value.as_str().into()
-                            });
+                        |config| config.appearance.smooth_scrolling.into(),
+                        |settings, value| {
+                            settings
+                                .edit_appearance(|section| section.smooth_scrolling = value.into());
                         },
                     )
                     .default_value("all"),
                 ))
                 .item(SettingItem::new(
                     t!("settings-appearance-reduce-motion"),
-                    SettingField::switch(
-                        |cx| cx.global::<AppSettings>().config().appearance.reduce_motion,
-                        |value, cx| {
-                            cx.global_mut::<AppSettings>()
-                                .edit_appearance(|section| section.reduce_motion = value);
+                    settings_switch(
+                        |config| config.appearance.reduce_motion,
+                        |settings, value| {
+                            settings.edit_appearance(|section| section.reduce_motion = value);
                         },
                     ),
                 )),
@@ -221,40 +179,29 @@ pub(super) fn appearance_page(
                 ))
                 .item(SettingItem::new(
                     t!("settings-appearance-terminal-font-size"),
-                    SettingField::number_input(
+                    settings_number(
                         NumberFieldOptions {
                             min: 6.0,
                             max: 72.0,
                             step: 0.1,
                         },
-                        |cx| {
-                            cx.global::<AppSettings>()
-                                .config()
-                                .appearance
-                                .terminal_font_size
-                        },
-                        |value, cx| {
-                            cx.global_mut::<AppSettings>()
-                                .edit_appearance(|section| section.terminal_font_size = value);
+                        |config| config.appearance.terminal_font_size,
+                        |settings, value| {
+                            settings.edit_appearance(|section| section.terminal_font_size = value);
                         },
                     ),
                 ))
                 .item(SettingItem::new(
                     t!("settings-appearance-terminal-line-height"),
-                    SettingField::number_input(
+                    settings_number(
                         NumberFieldOptions {
                             min: 0.8,
                             max: 3.0,
                             step: 0.1,
                         },
-                        |cx| {
-                            cx.global::<AppSettings>()
-                                .config()
-                                .appearance
-                                .terminal_line_height
-                        },
-                        |value, cx| {
-                            cx.global_mut::<AppSettings>()
+                        |config| config.appearance.terminal_line_height,
+                        |settings, value| {
+                            settings
                                 .edit_appearance(|section| section.terminal_line_height = value);
                         },
                     ),
@@ -265,36 +212,24 @@ pub(super) fn appearance_page(
                 ))
                 .item(SettingItem::new(
                     t!("settings-appearance-agent-font-size"),
-                    SettingField::number_input(
+                    settings_number(
                         NumberFieldOptions {
                             min: 6.0,
                             max: 72.0,
                             step: 0.1,
                         },
-                        |cx| {
-                            cx.global::<AppSettings>()
-                                .config()
-                                .appearance
-                                .agent_font_size
-                        },
-                        |value, cx| {
-                            cx.global_mut::<AppSettings>()
-                                .edit_appearance(|section| section.agent_font_size = value);
+                        |config| config.appearance.agent_font_size,
+                        |settings, value| {
+                            settings.edit_appearance(|section| section.agent_font_size = value);
                         },
                     ),
                 ))
                 .item(SettingItem::new(
                     t!("settings-appearance-monospace-only"),
-                    SettingField::switch(
-                        |cx| {
-                            cx.global::<AppSettings>()
-                                .config()
-                                .appearance
-                                .monospace_only
-                        },
-                        |value, cx| {
-                            cx.global_mut::<AppSettings>()
-                                .edit_appearance(|section| section.monospace_only = value);
+                    settings_switch(
+                        |config| config.appearance.monospace_only,
+                        |settings, value| {
+                            settings.edit_appearance(|section| section.monospace_only = value);
                         },
                     ),
                 ))
@@ -306,20 +241,15 @@ pub(super) fn appearance_page(
                 ))
                 .item(SettingItem::new(
                     t!("settings-appearance-agent-transcript-font-size"),
-                    SettingField::number_input(
+                    settings_number(
                         NumberFieldOptions {
                             min: 6.0,
                             max: 72.0,
                             step: 0.1,
                         },
-                        |cx| {
-                            cx.global::<AppSettings>()
-                                .config()
-                                .appearance
-                                .agent_transcript_font_size
-                        },
-                        |value, cx| {
-                            cx.global_mut::<AppSettings>().edit_appearance(|section| {
+                        |config| config.appearance.agent_transcript_font_size,
+                        |settings, value| {
+                            settings.edit_appearance(|section| {
                                 section.agent_transcript_font_size = value
                             });
                         },
@@ -331,7 +261,7 @@ pub(super) fn appearance_page(
                 .title(t!("settings-appearance-tab-bar"))
                 .item(SettingItem::new(
                     t!("settings-appearance-tab-bar-style"),
-                    SettingField::dropdown(
+                    settings_choice(
                         vec![
                             (
                                 "horizontal".into(),
@@ -342,47 +272,35 @@ pub(super) fn appearance_page(
                                 t!("settings-appearance-tab-bar-style-vertical").into(),
                             ),
                         ],
-                        |cx| {
-                            let key: &str = cx
-                                .global::<AppSettings>()
-                                .config()
-                                .appearance
-                                .tab_bar_style
-                                .into();
-
-                            key.into()
-                        },
-                        |value, cx| {
-                            cx.global_mut::<AppSettings>().edit_appearance(|section| {
-                                section.tab_bar_style = value.as_str().into()
-                            });
+                        |config| config.appearance.tab_bar_style.into(),
+                        |settings, value| {
+                            settings
+                                .edit_appearance(|section| section.tab_bar_style = value.into());
                         },
                     )
                     .default_value("horizontal"),
                 ))
                 .item(SettingItem::new(
                     t!("settings-appearance-tab-auto-size"),
-                    SettingField::switch(
-                        |cx| cx.global::<AppSettings>().config().appearance.tab_auto_size,
-                        |value, cx| {
-                            cx.global_mut::<AppSettings>()
-                                .edit_appearance(|section| section.tab_auto_size = value);
+                    settings_switch(
+                        |config| config.appearance.tab_auto_size,
+                        |settings, value| {
+                            settings.edit_appearance(|section| section.tab_auto_size = value);
                         },
                     ),
                 ))
                 .item(
                     SettingItem::new(
                         t!("settings-appearance-tab-width"),
-                        SettingField::number_input(
+                        settings_number(
                             NumberFieldOptions {
                                 min: MIN_TAB_WIDTH,
                                 max: MAX_TAB_WIDTH,
                                 step: 1.0,
                             },
-                            |cx| cx.global::<AppSettings>().config().appearance.tab_width,
-                            |value, cx| {
-                                cx.global_mut::<AppSettings>()
-                                    .edit_appearance(|section| section.tab_width = value);
+                            |config| config.appearance.tab_width,
+                            |settings, value| {
+                                settings.edit_appearance(|section| section.tab_width = value);
                             },
                         ),
                     )
@@ -401,15 +319,10 @@ pub(super) fn appearance_page(
                 .item(
                     SettingItem::new(
                         t!("settings-appearance-daily-token-usage"),
-                        SettingField::switch(
-                            |cx| {
-                                cx.global::<AppSettings>()
-                                    .config()
-                                    .appearance
-                                    .show_daily_token_usage
-                            },
-                            |value, cx| {
-                                cx.global_mut::<AppSettings>().edit_appearance(|section| {
+                        settings_switch(
+                            |config| config.appearance.show_daily_token_usage,
+                            |settings, value| {
+                                settings.edit_appearance(|section| {
                                     section.show_daily_token_usage = value
                                 });
                             },
@@ -421,15 +334,10 @@ pub(super) fn appearance_page(
                 )
                 .item(SettingItem::new(
                     t!("settings-appearance-git-status"),
-                    SettingField::switch(
-                        |cx| {
-                            cx.global::<AppSettings>()
-                                .config()
-                                .appearance
-                                .show_git_status_on_title_bar
-                        },
-                        |value, cx| {
-                            cx.global_mut::<AppSettings>().edit_appearance(|section| {
+                    settings_switch(
+                        |config| config.appearance.show_git_status_on_title_bar,
+                        |settings, value| {
+                            settings.edit_appearance(|section| {
                                 section.show_git_status_on_title_bar = value
                             });
                         },
