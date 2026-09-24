@@ -12,8 +12,7 @@ use rust_i18n::t;
 
 use crate::agent_usage::AgentUsageView;
 use crate::ui::composition::{
-    FLOATING_SURFACE_BOTTOM_INSET, FLOATING_SURFACE_SIDE_INSET, FLOATING_SURFACE_TOP_INSET,
-    TOOLBAR_BUTTON_SIZE, TOOLBAR_ICON_SIZE, toolbar_button,
+    FLOATING_SURFACE_BOTTOM_INSET, TOOLBAR_BUTTON_SIZE, TOOLBAR_ICON_SIZE, toolbar_button,
 };
 use crate::ui::fluent::SELECTION_BAR_WIDTH;
 use crate::ui::platform_style::{Host, PlatformStyle as _};
@@ -47,7 +46,7 @@ pub(super) const RESIZE_HANDLE: &str = "workspace-sidebar-resize";
 /// first.
 pub(super) const MIN_WIDTH: f32 = f32::max(
     140.0,
-    Host::TITLE_BAR_LEADING_INSET + TITLE_BAR_CONTROLS_WIDTH - FLOATING_SURFACE_SIDE_INSET,
+    Host::TITLE_BAR_LEADING_INSET + TITLE_BAR_CONTROLS_WIDTH,
 );
 
 pub(crate) const MAX_WIDTH: f32 = 480.0;
@@ -191,8 +190,6 @@ impl Sidebar {
         let content = div()
             .w(px(width))
             .h_full()
-            .pl(px(FLOATING_SURFACE_SIDE_INSET))
-            .pt(px(FLOATING_SURFACE_TOP_INSET))
             .pb(px(FLOATING_SURFACE_BOTTOM_INSET))
             .child(panel);
 
@@ -269,7 +266,7 @@ const SIDEBAR_PADDING_X: f32 = 12.0;
 /// column starts where the app menu button's icon does, so the heading, the
 /// tab glyphs and the status icons stand under that icon's edge.
 const SIDEBAR_PADDING_LEFT: f32 = match Host::WINDOW_CONTROLS_INSET {
-    Some(inset) => inset - FLOATING_SURFACE_SIDE_INSET + SIDEBAR_ROW_GUTTER,
+    Some(inset) => inset + SIDEBAR_ROW_GUTTER,
     None => Host::TITLE_BAR_LEADING_INSET + (TOOLBAR_BUTTON_SIZE - TOOLBAR_ICON_SIZE) / 2.0,
 };
 

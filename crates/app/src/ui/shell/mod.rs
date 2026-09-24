@@ -3425,11 +3425,6 @@ impl Render for AppWindow {
                             .min_w_0()
                             .relative()
                             .overflow_hidden()
-                            // Gutters only on the two sides that face other
-                            // chrome; the surface runs flush into the window's
-                            // right and bottom edges.
-                            .pl(px(ui::composition::FLOATING_SURFACE_SIDE_INSET))
-                            .pt(px(ui::composition::FLOATING_SURFACE_TOP_INSET))
                             .child(
                                 floating_surface_card(cx)
                                     .id("main-floating-surface")

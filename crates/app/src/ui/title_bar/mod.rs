@@ -11,9 +11,7 @@ use gpui_component::{
 use nmt_config::appearance::TabShape;
 use rust_i18n::t;
 
-use crate::ui::composition::{
-    FLOATING_SURFACE_SIDE_INSET, TOOLBAR_BUTTON_SIZE, toolbar_button, toolbar_toggle,
-};
+use crate::ui::composition::{TOOLBAR_BUTTON_SIZE, toolbar_button, toolbar_toggle};
 use crate::ui::git_status::{GitStatusModel, GitStatusView};
 use crate::ui::platform_style::{Host, PlatformStyle as _};
 use crate::ui::shell::{ToggleBackgroundTasks, ToggleGitSidebar, ToggleWorkflows};
@@ -125,8 +123,7 @@ impl WindowTitleBar {
 
         // The leading region ends on the sidebar's edge, measured from where
         // the bar's content starts, so it shrinks by the host's leading inset.
-        let leading_width =
-            (sidebar_width + FLOATING_SURFACE_SIDE_INSET - Host::TITLE_BAR_LEADING_INSET).max(0.0);
+        let leading_width = (sidebar_width - Host::TITLE_BAR_LEADING_INSET).max(0.0);
 
         // Interactive chrome lives in the titlebar but is wrapped in
         // `occlude()`: that blocks the drag hitbox beneath it, so Windows
