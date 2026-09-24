@@ -50,8 +50,9 @@ fn window_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("ctrl-shift-a", NewAgentTab, Some("AppWindow")),
         // Split-pane creation and keyboard resize. These consume the xterm
         // `\x1b[1;7A..D` / `\x1b[1;4A..D` arrow sequences before the terminal
-        // encodes them (accepted conflict, see the terminal-split-panes
-        // change).
+        // encodes them, so a program that binds Ctrl+Alt+arrows or
+        // Alt+Shift+arrows never receives them; pane control on those chords
+        // is worth that loss because few terminal programs bind them.
         KeyBinding::new("ctrl-alt-up", SplitUp, Some("AppWindow")),
         KeyBinding::new("ctrl-alt-down", SplitDown, Some("AppWindow")),
         KeyBinding::new("ctrl-alt-left", SplitLeft, Some("AppWindow")),
