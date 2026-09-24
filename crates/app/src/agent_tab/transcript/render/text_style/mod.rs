@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use gpui::prelude::*;
-use gpui::{App, ElementId, Font, Hsla, SharedString, StyleRefinement, px};
+use gpui::{App, ElementId, Font, SharedString, StyleRefinement, px};
 use gpui_component::highlighter::HighlightTheme;
 use gpui_component::text::TextViewStyle;
 use gpui_component::{ActiveTheme as _, text};
@@ -59,7 +59,8 @@ pub(crate) fn transcript_highlight_theme(cx: &App) -> Arc<HighlightTheme> {
 
     let surface = cx.global::<AgentSettings>().terminal_background;
 
-    highlight_theme_for_surface(themed, is_dark_surface(surface))
+    // A surface darker than mid-gray takes the dark highlight theme.
+    highlight_theme_for_surface(themed, surface.l < 0.5)
 }
 
 pub(crate) fn highlight_theme_for_surface(
@@ -73,13 +74,6 @@ pub(crate) fn highlight_theme_for_surface(
     } else {
         HighlightTheme::default_light()
     }
-}
-
-/// Mid-gray in HSL lightness splits dark surfaces from light ones. A theme
-/// file's mode is checked against its palette with the same measure, so a
-/// palette and the surface it lands on agree on which side they are on.
-pub(crate) fn is_dark_surface(color: Hsla) -> bool {
-    color.l < 0.5
 }
 
 pub(crate) fn transcript_text_style(cx: &App) -> TextViewStyle {

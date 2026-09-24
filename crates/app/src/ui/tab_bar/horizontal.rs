@@ -766,10 +766,6 @@ fn agent_tab_indicator(busy: bool, unread: bool) -> Option<AgentTabIndicator> {
     }
 }
 
-fn progress_bar_width(tab_width: Pixels) -> Pixels {
-    (tab_width - UI_RADIUS * 2.0).max(Pixels::ZERO)
-}
-
 /// Progress bar along the bottom edge of a tab, driven by OSC 9;4. One corner
 /// radius of space at each side keeps the track on the straight bottom edge.
 fn progress_bar(report: ProgressReport, tab_width: f32, cx: &App) -> AnyElement {
@@ -779,7 +775,8 @@ fn progress_bar(report: ProgressReport, tab_width: f32, cx: &App) -> AnyElement 
         .absolute()
         .bottom_0()
         .right(UI_RADIUS)
-        .w(progress_bar_width(px(tab_width)))
+        // The bar stops where the tab's rounded corners begin.
+        .w((px(tab_width) - UI_RADIUS * 2.0).max(Pixels::ZERO))
         .h(px(2.0))
         .child(
             div()

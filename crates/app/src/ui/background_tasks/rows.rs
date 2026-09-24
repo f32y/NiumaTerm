@@ -232,10 +232,6 @@ pub(super) fn finished_rows(snapshot: &BackgroundTaskSnapshot) -> Vec<&Backgroun
     rows
 }
 
-pub(super) fn visible_rows(total: usize, limit: usize, expanded: bool) -> usize {
-    if expanded { total } else { total.min(limit) }
-}
-
 pub(super) fn section_control_label(hidden: usize, expanded: bool) -> Option<String> {
     if expanded {
         return Some(t!("tasks-background-show-fewer").to_string());

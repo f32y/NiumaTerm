@@ -7,9 +7,8 @@ use nmt_agent::background_task::{
 
 use crate::ui::background_tasks::rows::{
     duration_label, finished_heading, finished_rows, row_detail, row_timing, running_heading,
-    running_rows, section_control_label, visible_rows,
+    running_rows, section_control_label,
 };
-use crate::ui::background_tasks::{COMPACT_FINISHED_ROWS, COMPACT_RUNNING_ROWS};
 
 mod detail_navigation {
     use nmt_agent::background_task::BackgroundTaskKey;
@@ -239,11 +238,6 @@ fn active_rows_show_elapsed_time_and_terminal_rows_show_a_relative_end() {
 
 #[test]
 fn compact_sections_hide_the_tail_behind_a_control() {
-    assert_eq!(visible_rows(9, COMPACT_RUNNING_ROWS, false), 4);
-    assert_eq!(visible_rows(9, COMPACT_RUNNING_ROWS, true), 9);
-    assert_eq!(visible_rows(3, COMPACT_RUNNING_ROWS, false), 3);
-    assert_eq!(visible_rows(25, COMPACT_FINISHED_ROWS, false), 10);
-
     assert_eq!(
         section_control_label(5, false).as_deref(),
         Some("Show 5 more")

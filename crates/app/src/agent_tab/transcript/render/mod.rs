@@ -1,7 +1,6 @@
 #[cfg(test)]
 pub(super) use crate::agent_tab::transcript::render::text_style::highlight_theme_for_surface;
 #[cfg(test)]
-pub(super) use crate::agent_tab::transcript::render::text_style::is_dark_surface;
 #[cfg(test)]
 pub(super) use crate::agent_tab::transcript::render::text_style::transcript_code_block_style;
 

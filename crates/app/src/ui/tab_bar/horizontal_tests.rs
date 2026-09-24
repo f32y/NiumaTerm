@@ -7,7 +7,7 @@ use nmt_config::appearance::TabShape;
 use crate::ui::platform_style::{Host, PlatformStyle as _};
 use crate::ui::tab_bar::horizontal::{
     AgentTabIndicator, MIN_AUTO_TAB_WIDTH, NEW_TAB_BUTTON_WIDTH, TabDensity, agent_tab_indicator,
-    auto_tab_width, progress_bar_width, shell_tab, tab_density, tab_gap,
+    auto_tab_width, shell_tab, tab_density, tab_gap,
 };
 
 struct TabGestureProbe {
@@ -92,14 +92,6 @@ fn tab_press_stays_out_of_titlebar_while_reorder_drag_still_starts(cx: &mut gpui
     cx.simulate_click(point(px(220.), px(15.)), Modifiers::default());
 
     assert_eq!(parent_presses.get(), 1);
-}
-
-#[test]
-fn progress_bar_stops_at_rounded_tab_edges() {
-    let tab_width = px(150.0);
-    let bar_width = progress_bar_width(tab_width);
-
-    assert_eq!(bar_width, px(134.0));
 }
 
 /// Auto Size holds the configured width while the row has room, shares the

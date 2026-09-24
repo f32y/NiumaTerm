@@ -225,15 +225,14 @@ fn parse_oauth_usage(bytes: &[u8]) -> Result<UsageSnapshot, String> {
 fn oauth_window(window: Option<&OAuthUsageWindow>, window_minutes: u32) -> Option<UsageWindow> {
     let window = window?;
 
-    let mut usage = UsageWindow::new(remaining_percentage(Some(window))?, window_minutes);
+    let mut usage = UsageWindow::new(remaining_percentage(window)?, window_minutes);
 
     usage.resets_at = window.resets_at.as_ref().and_then(parse_timestamp_millis);
 
     Some(usage)
 }
 
-fn remaining_percentage(window: Option<&OAuthUsageWindow>) -> Option<u8> {
-    let window = window?;
+fn remaining_percentage(window: &OAuthUsageWindow) -> Option<u8> {
     let used = window.utilization.or(window.used_percentage)?;
 
     used.is_finite()

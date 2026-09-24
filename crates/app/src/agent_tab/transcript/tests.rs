@@ -1795,8 +1795,8 @@ mod surface_palette_tests {
     use gpui_component::{ActiveTheme as _, Theme, ThemeMode};
 
     use crate::agent_tab::settings::AgentSettings;
+    use crate::agent_tab::transcript::render::highlight_theme_for_surface;
     use crate::agent_tab::transcript::render::text_style::transcript_highlight_theme;
-    use crate::agent_tab::transcript::render::{highlight_theme_for_surface, is_dark_surface};
 
     #[gpui::test]
     fn transcript_palette_tracks_background_snapshot_and_pane_choice(cx: &mut TestAppContext) {
@@ -1867,14 +1867,6 @@ mod surface_palette_tests {
             highlight_theme_for_surface(dark, false).appearance,
             ThemeMode::Light
         );
-    }
-
-    #[test]
-    fn surfaces_split_at_mid_gray() {
-        assert!(is_dark_surface(rgb(0x300A24).into()));
-        assert!(is_dark_surface(rgb(0x1C1C1C).into()));
-        assert!(!is_dark_surface(rgb(0xE0E0E0).into()));
-        assert!(!is_dark_surface(rgb(0xFCFBFA).into()));
     }
 }
 

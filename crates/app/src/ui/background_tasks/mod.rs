@@ -33,7 +33,7 @@ use crate::ui::AppSettings;
 use crate::ui::background_tasks::rows::{
     background_task_kind_label, background_task_state_label, finished_heading, finished_rows,
     render_row, row_detail, row_timing, running_heading, running_rows, section_control_label,
-    state_color, visible_rows,
+    state_color,
 };
 use crate::ui::composition::{empty_state, panel_header, toolbar_button};
 
@@ -238,7 +238,12 @@ impl BackgroundTasksView {
         now: SystemTime,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let shown = visible_rows(rows.len(), limit, expanded);
+        let shown = if expanded {
+            rows.len()
+        } else {
+            rows.len().min(limit)
+        };
+
         let hidden = rows.len() - shown;
 
         let control = section_control_label(hidden, expanded).map(|label| {
