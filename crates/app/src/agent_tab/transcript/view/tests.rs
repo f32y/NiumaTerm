@@ -1,101 +1,68 @@
-use std::time::Instant;
+use std::sync::Arc;
 
-use chrono::Utc;
-use gpui::Context;
+use gpui::{Context, Image};
 use nmt_agent::chat::{Item as SessionItem, ReplayTurn};
 use nmt_agent::transcript::TextField;
+use nmt_agent::transcript::conversation::ConversationImage;
 use nmt_profiling::transcript::{Operation, Probe};
 
-use crate::agent_tab::transcript::Entry;
-use crate::agent_tab::transcript::rows::EntryPresentation;
 use crate::agent_tab::transcript::view::TranscriptView;
 
+/// Test-side writers. Each one changes the conversation the way the
+/// controller does in production and then takes the change through
+/// `sync_content`, so these tests measure the path the pane uses.
 impl TranscriptView {
-    /// Mirror a conversation this view does not own. `revision` identifies the
-    /// source's current content, so an unchanged source costs one comparison
-    /// rather than a rebuild. Row indices stay stable because the source only
-    /// appends and merges in place, which keeps expansion state valid.
-    pub fn show_items(&mut self, items: &[SessionItem], revision: u64, cx: &mut Context<Self>) {
-        if self.source_revision == Some(revision) {
-            return;
-        }
-
-        let _profile = Probe::start(Operation::MirrorRebuild);
-
-        self.source_revision = Some(revision);
-
-        self.conversation.borrow_mut().content.replace(
-            items
-                .iter()
-                .map(|item| Entry {
-                    turn: 0,
-                    item: item.clone(),
-                    metadata: EntryPresentation::default(),
-                })
-                .collect(),
-        );
-
-        self.code_transcripts.invalidate_from(0);
-
-        self.row_cache.invalidate(0);
-
-        cx.notify();
-    }
-
     /// Drop the conversation and every piece of view state derived from it.
-    /// Used when the owning view switches to a different conversation, so one
-    /// conversation's expansion and scroll position cannot leak into another's.
     pub(crate) fn clear(&mut self) {
         self.conversation.borrow_mut().clear();
 
-        self.reset_presentation();
+        self.sync_content();
     }
 
     /// Append one turn of a restored conversation under its own turn id, with
-    /// the accounting the provider persisted for it. Replaying it settles the
-    /// turn, so it folds its work exactly like one completed in this process.
-    /// Its duration is a separate question: the transcript file records none,
-    /// so a replayed turn usually closes without an elapsed-time line rather
-    /// than stating a time the session never reported.
+    /// the accounting the provider persisted for it.
     pub(crate) fn append_replay(&mut self, turn: u64, replay: ReplayTurn, cx: &mut Context<Self>) {
         let _profile = Probe::start(Operation::Replay);
 
-        if replay.items.is_empty() {
-            self.invalidate_turn_rows(turn);
-        }
+        self.conversation.borrow_mut().replay(turn, replay);
 
-        for entry in replay.items {
-            self.append_entry(Entry {
-                turn,
-                item: entry.item,
-                metadata: EntryPresentation {
-                    at: entry.at,
-                    images: Vec::new(),
-                },
-            });
-        }
-
-        self.conversation.borrow_mut().turns.replay(
-            turn,
-            replay.interrupted,
-            replay.seconds,
-            replay.output_tokens,
-        );
+        self.sync_content();
 
         cx.notify();
     }
 
-    /// Append one entry with an explicit stamp, for content this view records
-    /// outside the normal push path.
+    /// Append one entry under `turn`, stamped now.
     pub(crate) fn push_stamped(&mut self, turn: u64, item: SessionItem) {
-        self.append_entry(Entry {
-            turn,
-            item,
-            metadata: EntryPresentation {
-                at: Some(Utc::now().timestamp()),
-                images: Vec::new(),
-            },
-        });
+        let _profile = Probe::start(Operation::AppendEntry);
+
+        self.conversation.borrow_mut().push(turn, item, Vec::new());
+
+        self.sync_content();
+    }
+
+    /// Append an item with the images it carries, as the pane does through
+    /// the controller. Submitting a user message returns to the live tail.
+    pub(crate) fn push(
+        &mut self,
+        turn: u64,
+        item: SessionItem,
+        images: Vec<Arc<Image>>,
+        cx: &mut Context<Self>,
+    ) {
+        if matches!(&item, SessionItem::UserMessage { .. }) {
+            self.scroll_to_bottom();
+        }
+
+        let images = images
+            .into_iter()
+            .map(|image| Arc::new(ConversationImage::new(image.bytes().into())))
+            .collect();
+
+        self.conversation.borrow_mut().push(turn, item, images);
+
+        self.sync_content();
+
+        cx.notify();
     }
 
     pub(crate) fn contains_item(&self, id: &str) -> bool {
@@ -106,11 +73,9 @@ impl TranscriptView {
     pub(crate) fn merge_completed(&mut self, item: &SessionItem) {
         let _profile = Probe::start(Operation::MergeCompleted);
 
-        if let Some(index) = self.conversation.borrow_mut().content.merge_completed(item) {
-            self.code_transcripts.invalidate(index);
+        self.conversation.borrow_mut().merge_completed(item);
 
-            self.row_cache.invalidate(index);
-        }
+        self.sync_content();
     }
 
     /// Extend a streamed item's text. Returns whether the result is non-empty,
@@ -118,44 +83,28 @@ impl TranscriptView {
     pub(crate) fn append_delta(&mut self, item_id: &str, delta: &str, field: TextField) -> bool {
         let _profile = Probe::start(Operation::AppendDelta);
 
-        let Some(update) = self
+        let update = self
             .conversation
             .borrow_mut()
-            .append_delta(item_id, delta, field)
-        else {
-            return false;
-        };
+            .append_delta(item_id, delta, field);
 
-        let index = update.index;
+        self.sync_content();
 
-        // Only a newly selected reply needs its old prefix counted. Existing
-        // typed edges keep advancing in the view without rescanning each delta.
-        if matches!(field, TextField::Reply)
-            && let SessionItem::AgentMessage {
-                text: Some(text), ..
-            } = &self.conversation.borrow().content.entries()[index].item
-            && let Some(previous) =
-                self.typing
-                    .begin(index, text, update.previous_bytes, Instant::now())
-        {
-            self.row_cache.invalidate(previous);
-        }
-
-        self.code_transcripts.invalidate(index);
-
-        self.row_cache.invalidate(index);
-
-        update.non_blank
+        update.is_some_and(|update| update.non_blank)
     }
 
     pub(crate) fn set_compacting(&mut self, compacting: bool, cx: &mut Context<Self>) {
-        self.conversation
-            .borrow_mut()
-            .live
-            .set_compacting(compacting);
+        {
+            let mut conversation = self.conversation.borrow_mut();
 
-        self.row_cache
-            .invalidate(self.conversation.borrow().content.entries().len());
+            let live_row = conversation.content.entries().len();
+
+            conversation.live.set_compacting(compacting);
+
+            conversation.changed(live_row, None);
+        }
+
+        self.sync_content();
 
         cx.notify();
     }
@@ -165,26 +114,49 @@ impl TranscriptView {
     }
 
     pub(crate) fn mark_interrupted(&mut self, turn: u64) {
-        self.conversation.borrow_mut().turns.mark_interrupted(turn);
+        {
+            let mut conversation = self.conversation.borrow_mut();
 
-        self.invalidate_turn_rows(turn);
+            conversation.turns.mark_interrupted(turn);
+
+            conversation.changed_turn(turn);
+        }
+
+        self.sync_content();
+    }
+
+    /// Open the live turn the way the controller does when a prompt starts.
+    pub(crate) fn start_working(&mut self, cx: &mut Context<Self>) {
+        self.conversation.borrow_mut().start();
+
+        self.sync_content();
+
+        cx.notify();
+    }
+
+    /// Drop a turn that produced nothing, as the controller does on an
+    /// immediate interrupt.
+    pub(crate) fn discard_turn(&mut self, turn: u64, cx: &mut Context<Self>) {
+        {
+            let mut conversation = self.conversation.borrow_mut();
+
+            conversation.live.discard();
+
+            conversation.turns.forget(turn);
+
+            conversation.changed_turn(turn);
+        }
+
+        self.sync_content();
+
+        cx.notify();
     }
 
     /// Settle the running turn's duration and output usage for its status row.
-    /// These are view state rather than provider transcript content, so they
-    /// stay outside the shared item stream.
     pub(crate) fn settle_turn(&mut self, turn: u64, cx: &mut Context<Self>) {
-        let Some((started, output_tokens)) = self.conversation.borrow_mut().live.finish() else {
-            return;
-        };
+        self.conversation.borrow_mut().settle(turn);
 
-        self.conversation.borrow_mut().turns.settle(
-            turn,
-            started.elapsed().as_secs(),
-            output_tokens,
-        );
-
-        self.invalidate_turn_rows(turn);
+        self.sync_content();
 
         cx.notify();
     }

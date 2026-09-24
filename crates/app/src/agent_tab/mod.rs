@@ -2856,23 +2856,14 @@ impl AgentPane {
     }
 
     /// Append one item to the conversation, tagged with the current turn so
-    /// settled turns fold as one unit.
+    /// settled turns fold as one unit. The controller owns the conversation,
+    /// so the item goes through it and the view picks the change up the same
+    /// way it picks up every other one.
     pub(super) fn push_item(&mut self, item: SessionItem, cx: &mut Context<Self>) {
-        self.push_item_with_images(item, Vec::new(), cx);
-    }
-
-    /// Append an item along with the images it carried, which only a sent
-    /// user message has.
-    pub(super) fn push_item_with_images(
-        &mut self,
-        item: SessionItem,
-        images: Vec<Arc<Image>>,
-        cx: &mut Context<Self>,
-    ) {
-        let turn = self.session.borrow().turn();
+        self.session.borrow_mut().push_item(item);
 
         self.transcript
-            .update(cx, |transcript, cx| transcript.push(turn, item, images, cx));
+            .update(cx, |transcript, _| transcript.sync_content());
 
         cx.notify();
     }
@@ -3250,11 +3241,11 @@ impl AgentPane {
         cx.notify();
     }
 
-    /// Start the turn clock and drive the once-a-second repaint of the live
-    /// progress row; the ticker stops itself once `finish_working` clears it.
+    /// Show the live progress row the controller just opened and drive its
+    /// once-a-second repaint; the ticker stops itself once the turn settles.
     pub(crate) fn start_working(&mut self, cx: &mut Context<Self>) {
         self.transcript
-            .update(cx, |transcript, cx| transcript.start_working(cx));
+            .update(cx, |transcript, _| transcript.sync_content());
 
         cx.notify();
 
@@ -3287,9 +3278,10 @@ impl AgentPane {
 
         let interrupted = self.session.borrow_mut().interrupt_from_user();
 
-        if let Some((turn, prompt)) = interrupted.prompt {
+        if let Some((_, prompt)) = interrupted.prompt {
+            // The controller already dropped the turn that produced nothing.
             self.transcript
-                .update(cx, |transcript, cx| transcript.discard_turn(turn, cx));
+                .update(cx, |transcript, _| transcript.sync_content());
 
             let current = self.input.read(cx).text().to_string();
             let restored = restored_input_after_interruption(&prompt.text, &current);

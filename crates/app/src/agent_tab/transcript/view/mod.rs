@@ -8,7 +8,6 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 
-use chrono::Utc;
 use gpui::prelude::*;
 use gpui::{
     AnyElement, Bounds, Context, FollowMode, Image, ImageFormat, IntoElement, ListAlignment,
@@ -20,7 +19,7 @@ use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::scroll::Scrollbar;
 use gpui_component::{ActiveTheme as _, ElementExt as _, IconName, Sizable as _};
 use nmt_agent::chat::Item as SessionItem;
-use nmt_agent::transcript::conversation::{ConversationImage, ConversationState};
+use nmt_agent::transcript::conversation::ConversationState;
 use nmt_config::agent::CollapseRows;
 use nmt_profiling::transcript::{Operation, Probe};
 use rust_i18n::t;
@@ -48,8 +47,8 @@ use crate::agent_tab::transcript::render::{
 use crate::agent_tab::transcript::reveal::{Disclosures, RevealKey, revealed_block, revealed_part};
 use crate::agent_tab::transcript::row_structure::{RowGeometry, RowSource};
 use crate::agent_tab::transcript::rows::{
-    EntryPresentation, PickerReservation, RowGap, TranscriptRow, folds_turns, is_run_row,
-    spaced_rows, turn_opening_prompts,
+    PickerReservation, RowGap, TranscriptRow, folds_turns, is_run_row, spaced_rows,
+    turn_opening_prompts,
 };
 use crate::agent_tab::transcript::typewriter::ReplyTyping;
 use crate::agent_tab::transcript::{
@@ -108,8 +107,6 @@ pub struct TranscriptView {
 
     /// Revision of the conversation this view was last filled from, for a view
     /// that mirrors content someone else owns rather than accumulating its own.
-    source_revision: Option<u64>,
-
     observed_version: (u64, u64),
 
     /// The pane whose conversation this is, for the row actions that address
@@ -161,7 +158,6 @@ impl TranscriptView {
             typing: ReplyTyping::new(),
             cwd,
             kind,
-            source_revision: None,
             observed_version: (0, 0),
             owner: None,
             attribution: HashMap::new(),
@@ -282,7 +278,6 @@ impl TranscriptView {
 
         self.row_cache.invalidate(0);
 
-        self.source_revision = None;
         self.picker.stashed_position = None;
         self.picker.reserve_below = false;
 
@@ -362,29 +357,6 @@ impl TranscriptView {
 
     pub(crate) fn is_working(&self) -> bool {
         self.conversation.borrow().live.is_working()
-    }
-
-    pub(crate) fn start_working(&mut self, cx: &mut Context<Self>) {
-        if !self.conversation.borrow().live.is_working() {
-            self.conversation.borrow_mut().start();
-        }
-
-        self.row_cache
-            .invalidate(self.conversation.borrow().content.entries().len());
-
-        cx.notify();
-    }
-
-    /// Discard a turn that never produced visible output, so an immediate stop
-    /// leaves no elapsed-time row behind for work that did not happen.
-    pub(crate) fn discard_turn(&mut self, turn: u64, cx: &mut Context<Self>) {
-        self.conversation.borrow_mut().live.discard();
-
-        self.conversation.borrow_mut().turns.forget(turn);
-
-        self.invalidate_turn_rows(turn);
-
-        cx.notify();
     }
 
     pub(crate) fn zoom_image(
@@ -718,32 +690,6 @@ impl TranscriptView {
         work_card(index, step, &self.disclosures, body, cx)
     }
 
-    pub(super) fn append_entry(&mut self, entry: Entry) {
-        let _profile = Probe::start(Operation::AppendEntry);
-
-        // The previous last turn may gain another entry, and its final row's
-        // spacing depends on the first row appended below it.
-        let index = self.conversation.borrow_mut().append(entry);
-
-        self.row_cache.invalidate(index.saturating_sub(1));
-    }
-
-    fn invalidate_turn_rows(&mut self, turn: u64) {
-        if let Some(index) = self
-            .conversation
-            .borrow()
-            .content
-            .entries()
-            .iter()
-            .position(|entry| entry.turn == turn)
-        {
-            self.row_cache.invalidate(index);
-        } else {
-            self.row_cache
-                .invalidate(self.conversation.borrow().content.entries().len());
-        }
-    }
-
     pub(super) fn refresh_rows(&mut self, collapse: CollapseRows) {
         #[cfg(test)]
         {
@@ -944,37 +890,6 @@ impl TranscriptView {
         self.transcript_list.scroll_to_end_smooth();
     }
 
-    /// Append an item and the images it carries, which only a user message
-    /// has any of.
-    pub(crate) fn push(
-        &mut self,
-        turn: u64,
-        item: SessionItem,
-        images: Vec<Arc<Image>>,
-        cx: &mut Context<Self>,
-    ) {
-        // Submitting a user message explicitly returns to the live tail.
-        // Agent output preserves a manually chosen reading position via the
-        // list's own tail-follow state.
-        if matches!(&item, SessionItem::UserMessage { .. }) {
-            self.scroll_to_bottom();
-        }
-
-        self.append_entry(Entry {
-            turn,
-            item,
-            metadata: EntryPresentation {
-                at: Some(Utc::now().timestamp()),
-                images: images
-                    .into_iter()
-                    .map(|image| Arc::new(ConversationImage::new(image.bytes().into())))
-                    .collect(),
-            },
-        });
-
-        cx.notify();
-    }
-
     /// Data-only description of every transcript row, in render order. This
     /// is the single source of truth for the transcript's structure; the
     /// virtualized list builds elements only for the visible slice of it.
@@ -991,6 +906,22 @@ impl TranscriptView {
             conversation,
             disclosures: &self.disclosures,
             typing: &self.typing,
+        }
+    }
+
+    fn invalidate_turn_rows(&mut self, turn: u64) {
+        if let Some(index) = self
+            .conversation
+            .borrow()
+            .content
+            .entries()
+            .iter()
+            .position(|entry| entry.turn == turn)
+        {
+            self.row_cache.invalidate(index);
+        } else {
+            self.row_cache
+                .invalidate(self.conversation.borrow().content.entries().len());
         }
     }
 

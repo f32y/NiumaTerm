@@ -7,7 +7,7 @@ use nmt_config::agent::CollapseRows;
 use nmt_profiling::transcript::{Operation, Probe, flush};
 
 use crate::agent_tab::profile::AgentKind;
-use crate::agent_tab::transcript::{Entry, TranscriptView};
+use crate::agent_tab::transcript::TranscriptView;
 
 #[gpui::test]
 fn disabled_hooks_leave_transcript_updates_available(_cx: &mut TestAppContext) {
@@ -18,14 +18,13 @@ fn disabled_hooks_leave_transcript_updates_available(_cx: &mut TestAppContext) {
 
     let mut view = TranscriptView::new(AgentKind::Codex, None);
 
-    view.append_entry(Entry {
-        turn: 1,
-        metadata: Default::default(),
-        item: Item::Reasoning {
+    view.push_stamped(
+        1,
+        Item::Reasoning {
             id: "reasoning".into(),
             summary: Some("before".into()),
         },
-    });
+    );
 
     assert!(view.append_delta("reasoning", "-after", TextField::ReasoningSummary));
 

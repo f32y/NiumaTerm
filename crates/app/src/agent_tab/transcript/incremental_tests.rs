@@ -240,23 +240,9 @@ fn cached_rows_follow_disclosures_turns_and_mirrored_revisions(cx: &mut TestAppC
 
             assert_rows_match_rebuild(view, mode);
 
-            let mirrored = [Item::Reasoning {
-                id: "mirror".into(),
-                summary: Some("first".into()),
-            }];
-
-            view.show_items(&mirrored, 1, cx);
-
-            assert!(view.contains_item("mirror"));
-            assert!(!view.contains_item("live"));
-
-            assert_rows_match_rebuild(view, mode);
-
             view.clear();
 
-            view.show_items(&mirrored, 1, cx);
-
-            assert!(view.contains_item("mirror"));
+            assert!(!view.contains_item("live"));
 
             assert_rows_match_rebuild(view, mode);
         });
