@@ -84,6 +84,7 @@ pub(super) struct Inline {
     highlights: Vec<(Range<usize>, HighlightStyle)>,
     styled_text: StyledText,
     link_click_handler: Option<Arc<LinkClickHandlerFn>>,
+    source_offset: Option<usize>,
 
     state: Arc<Mutex<InlineState>>,
 }
@@ -92,6 +93,8 @@ pub(super) struct Inline {
 #[derive(Debug, Default, PartialEq)]
 pub(crate) struct InlineState {
     hovered_link: Option<SharedString>,
+    hovered_bounds: Option<Bounds<Pixels>>,
+    multi_click: Option<(Point<Pixels>, Range<usize>)>,
     /// The text that actually rendering, matched with selection.
     pub(super) text: SharedString,
     pub(super) selection: Option<Selection>,
@@ -100,7 +103,21 @@ pub(crate) struct InlineState {
 impl InlineState {
     /// Save actually rendered text for selected text to use.
     pub(crate) fn set_text(&mut self, text: SharedString) {
+        if self.text != text {
+            self.multi_click = None;
+        }
         self.text = text;
+    }
+
+    fn select_fragment(&mut self, selection: Option<Selection>, offset: usize) {
+        if let Some(selection) = selection {
+            let start = selection.start + offset;
+            let end = selection.end + offset;
+            self.selection = Some(match self.selection.take() {
+                Some(previous) => (previous.start.min(start)..previous.end.max(end)).into(),
+                None => (start..end).into(),
+            });
+        }
     }
 }
 
@@ -124,8 +141,15 @@ impl Inline {
             text: text.clone(),
             styled_text: StyledText::new(text),
             link_click_handler,
+            source_offset: None,
             state,
         }
+    }
+
+    pub(super) fn source_fragment(mut self, text: SharedString, offset: usize) -> Self {
+        self.text = text;
+        self.source_offset = Some(offset);
+        self
     }
 
     /// Get link at given mouse position.
@@ -179,6 +203,19 @@ impl Inline {
         }
 
         if let Some(selection) = text_view_state.multi_click_selection() {
+            if let Some(offset) = self.source_offset
+                && let Ok(state) = self.state.lock()
+                && let Some((position, range)) = &state.multi_click
+                && *position == selection.pos
+            {
+                let start = range.start.max(offset);
+                let end = range.end.min(offset + self.text.len());
+                return (
+                    is_selectable,
+                    true,
+                    (start < end).then(|| ((start - offset)..(end - offset)).into()),
+                );
+            }
             return (
                 is_selectable,
                 true,
@@ -507,10 +544,6 @@ impl Element for Inline {
     ) {
         let current_view = window.current_view();
         let hitbox = prepaint;
-        let Ok(mut state) = self.state.lock() else {
-            return;
-        };
-
         let text_layout = self.styled_text.layout().clone();
         self.styled_text
             .paint(global_id, None, bounds, &mut (), &mut (), window, cx);
@@ -519,7 +552,15 @@ impl Element for Inline {
         let (is_selectable, is_selection, selection) =
             self.layout_selections(&text_layout, &bounds, window, cx);
 
-        state.selection = selection;
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
+
+        if let Some(offset) = self.source_offset {
+            state.select_fragment(selection.clone(), offset);
+        } else {
+            state.selection = selection.clone();
+        }
 
         if is_selection || is_selectable {
             window.set_cursor_style(CursorStyle::IBeam, &hitbox);
@@ -531,7 +572,7 @@ impl Element for Inline {
             window.set_cursor_style(CursorStyle::PointingHand, &hitbox);
         }
 
-        if let Some(selection) = &state.selection {
+        if let Some(selection) = &selection {
             let color = GlobalState::global(cx)
                 .text_view_state()
                 .map(|state| state.read(cx).text_view_style.selection())
@@ -556,6 +597,7 @@ impl Element for Inline {
                 let text_layout = text_layout.clone();
                 let inline_state = self.state.clone();
                 let text = self.text.clone();
+                let source_offset = self.source_offset.unwrap_or(0);
                 let text_view_state = GlobalState::global(cx).text_view_state().cloned();
                 move |event: &MouseDownEvent, phase, window, cx| {
                     if !phase.bubble()
@@ -581,15 +623,29 @@ impl Element for Inline {
                         return;
                     };
 
-                    let selected_text = text[range.clone()].to_string();
+                    let selected_text = {
+                        let Ok(mut inline_state) = inline_state.lock() else {
+                            return;
+                        };
+                        let range = match kind {
+                            TextViewMultiClickKind::Word => {
+                                word_range_at(&inline_state.text, range.start + source_offset)
+                            }
+                            TextViewMultiClickKind::Paragraph => Some(0..inline_state.text.len()),
+                        };
+                        let Some(range) = range else {
+                            return;
+                        };
+                        let selected_text = inline_state.text[range.clone()].to_owned();
+                        inline_state.multi_click = Some((event.position, range.clone()));
+                        inline_state.selection = Some(range.into());
+                        selected_text
+                    };
 
                     // This renderer owns multi-click selection. Prevent the
                     // window selection layer from handling the same press.
                     GlobalState::suppress_text_selection(cx);
 
-                    if let Ok(mut inline_state) = inline_state.lock() {
-                        inline_state.selection = Some(range.into());
-                    }
                     if let Some(text_view_state) = &text_view_state {
                         text_view_state.update(cx, |state, cx| {
                             state.set_multi_click_selection(
@@ -626,6 +682,10 @@ impl Element for Inline {
                     let Ok(mut state) = inline_state.lock() else {
                         return;
                     };
+                    if hovered_link.is_none() && state.hovered_bounds != Some(hitbox.bounds) {
+                        return;
+                    }
+                    state.hovered_bounds = hovered_link.as_ref().map(|_| hitbox.bounds);
                     if state.hovered_link == hovered_link {
                         return;
                     }
@@ -759,7 +819,7 @@ fn point_in_text_selection(
 
 #[cfg(test)]
 mod tests {
-    use super::{char_cell_at, point_in_text_selection};
+    use crate::text::inline::{char_cell_at, point_in_text_selection};
     use gpui::{point, px};
 
     #[test]

@@ -17,8 +17,8 @@ use crate::{
     StyledExt, h_flex,
     scrollable_mask::horizontal_scroll_area,
     text::{
-        CodeBlockActionsFn, CodeBlockHighlighterFn, LinkClickHandlerFn, MarkdownExtensions,
-        MarkdownNode, TableActionsFn,
+        CodeBlockActionsFn, CodeBlockHighlighterFn, LinkClickHandlerFn, LinkIconResolverFn,
+        MarkdownExtensions, MarkdownNode, TableActionsFn,
         document::NodeRenderOptions,
         inline::{Inline, InlineState},
         inline_flow::{InlineFlow, InlineFlowItem},
@@ -28,7 +28,7 @@ use crate::{
     v_flex,
 };
 
-use super::{
+use crate::text::{
     SelectionFormat, TextViewStyle,
     utils::{image_source, list_item_prefix},
 };
@@ -1368,6 +1368,7 @@ pub(crate) struct NodeContext {
     pub(crate) code_block_highlighter: Option<Arc<CodeBlockHighlighterFn>>,
     pub(crate) table_actions: Option<Arc<TableActionsFn>>,
     pub(crate) link_click_handler: Option<Arc<LinkClickHandlerFn>>,
+    pub(crate) link_icon_resolver: Option<Arc<LinkIconResolverFn>>,
     pub(crate) markdown_extensions: Arc<MarkdownExtensions>,
 }
 
@@ -1390,12 +1391,28 @@ impl Paragraph {
         let span = self.span;
         let children = &self.children;
 
-        if self.should_render_inline_flow() {
+        let has_link_icons = node_cx.link_icon_resolver.as_ref().is_some_and(|resolver| {
+            children
+                .iter()
+                .flat_map(|child| &child.marks)
+                .any(|(_, mark)| {
+                    mark.link.as_ref().is_some_and(|link| {
+                        let resolved = link
+                            .identifier
+                            .as_ref()
+                            .and_then(|id| node_cx.link_refs.get(id))
+                            .unwrap_or(link);
+                        resolver(&resolved.url).is_some()
+                    })
+                })
+        });
+        if self.should_render_inline_flow() || has_link_icons {
             return InlineFlow::new(
                 span.unwrap_or_default(),
                 self.inline_flow_items(node_cx, cx),
                 node_cx.link_click_handler.clone(),
             )
+            .with_link_icons(node_cx.link_icon_resolver.as_deref(), node_cx.style.link())
             .into_any_element();
         }
 
@@ -1568,6 +1585,7 @@ impl Paragraph {
                         state.set_text(text.clone().into());
                     }
                     items.push(InlineFlowItem::Text {
+                        source_offset: 0,
                         state: inline_node.state.clone(),
                         text: text.clone().into(),
                         links: links.clone(),
@@ -1620,11 +1638,6 @@ impl Paragraph {
 
                     if let Some(mut link_mark) = style.link.clone() {
                         highlight.color = Some(node_cx.style.link());
-                        highlight.underline = Some(gpui::UnderlineStyle {
-                            thickness: gpui::px(1.),
-                            ..Default::default()
-                        });
-
                         if let Some(identifier) = link_mark.identifier.as_ref()
                             && let Some(mark) = node_cx.link_refs.get(identifier)
                         {
@@ -1647,6 +1660,7 @@ impl Paragraph {
                 state.set_text(text.clone().into());
             }
             items.push(InlineFlowItem::Text {
+                source_offset: 0,
                 state: self.state.clone(),
                 text: text.into(),
                 links,
@@ -2494,7 +2508,7 @@ impl BlockNode {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::text::node::*;
 
     #[test]
     fn code_block_highlights_are_cached_by_highlighter_identity() {

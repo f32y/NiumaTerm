@@ -19,8 +19,8 @@ use crate::{
     async_util::{Receiver, Sender, unbounded},
     input::{self, SelectAll},
     text::{
-        CodeBlockActionsFn, CodeBlockHighlighterFn, LinkClickHandlerFn, MarkdownExtensions,
-        TableActionsFn, TextViewStyle,
+        CodeBlockActionsFn, CodeBlockHighlighterFn, LinkClickHandlerFn, LinkIconResolverFn,
+        MarkdownExtensions, TableActionsFn, TextViewStyle,
         document::ParsedDocument,
         format,
         node::{self, NodeContext},
@@ -108,6 +108,7 @@ pub struct TextViewState {
     pub(super) code_block_highlighter: Option<std::sync::Arc<CodeBlockHighlighterFn>>,
     pub(super) table_actions: Option<std::sync::Arc<TableActionsFn>>,
     pub(super) link_click_handler: Option<std::sync::Arc<LinkClickHandlerFn>>,
+    pub(super) link_icon_resolver: Option<Arc<LinkIconResolverFn>>,
     pub(super) markdown_extensions: Arc<MarkdownExtensions>,
 
     pub(super) is_selecting: bool,
@@ -212,6 +213,7 @@ impl TextViewState {
             code_block_highlighter: None,
             table_actions: None,
             link_click_handler: None,
+            link_icon_resolver: None,
             markdown_extensions: Arc::default(),
             is_selecting: false,
             auto_scroll: AutoScroll::default(),
@@ -622,6 +624,7 @@ impl Render for TextViewState {
         node_cx.code_block_highlighter = self.code_block_highlighter.clone();
         node_cx.table_actions = self.table_actions.clone();
         node_cx.link_click_handler = self.link_click_handler.clone();
+        node_cx.link_icon_resolver = self.link_icon_resolver.clone();
         node_cx.markdown_extensions = self.markdown_extensions.clone();
         node_cx.style = self.text_view_style.clone();
 
@@ -858,8 +861,8 @@ fn parse_content(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::text::MarkdownNode;
+    use crate::text::state::*;
     use gpui::TestAppContext;
 
     #[gpui::test]

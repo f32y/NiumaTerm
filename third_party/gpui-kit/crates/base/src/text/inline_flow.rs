@@ -5,21 +5,29 @@ use std::{
 
 use gpui::{
     AbsoluteLength, AnyElement, App, AvailableSpace, Bounds, DefiniteLength, Element, ElementId,
-    GlobalElementId, HighlightStyle, InspectorElementId, InteractiveElement as _, IntoElement,
-    LayoutId, LineFragment as WrapLineFragment, ObjectFit, Pixels, ShapedLine, SharedString,
-    SharedUri, Size, StatefulInteractiveElement as _, Styled, StyledImage as _, TextRun, TextStyle,
-    WhiteSpace, Window, img, point, prelude::FluentBuilder as _, px, relative, size,
+    GlobalElementId, HighlightStyle, Hsla, InspectorElementId, InteractiveElement as _,
+    IntoElement, LayoutId, LineFragment as WrapLineFragment, ObjectFit, Pixels, ShapedLine,
+    SharedString, SharedUri, Size, StatefulInteractiveElement as _, Styled, StyledImage as _,
+    TextRun, TextStyle, WhiteSpace, Window, img, point, prelude::FluentBuilder as _, px, relative,
+    size, svg,
 };
 
-use crate::text::text_view::{LinkClickHandlerFn, handle_link_click};
+use crate::text::text_view::{
+    LinkClickHandlerFn, LinkIconResolverFn, TextViewDefaults, handle_link_click,
+};
+use crate::{GlobalState, TextSelection};
 
-use super::{
+use crate::text::{
     inline::{Inline, InlineState},
     node::LinkMark,
     utils::image_source,
 };
 
 const IMAGE_LEN: usize = 1;
+
+#[cfg(test)]
+#[path = "link_icon_tests.rs"]
+mod link_icon_tests;
 
 pub(super) struct InlineFlow {
     id: ElementId,
@@ -30,6 +38,7 @@ pub(super) struct InlineFlow {
 pub(super) enum InlineFlowItem {
     Text {
         state: Arc<Mutex<InlineState>>,
+        source_offset: usize,
         text: SharedString,
         links: Vec<(Range<usize>, LinkMark)>,
         highlights: Vec<(Range<usize>, HighlightStyle)>,
@@ -40,6 +49,11 @@ pub(super) enum InlineFlowItem {
         title: String,
         width: Option<DefiniteLength>,
         height: Option<DefiniteLength>,
+    },
+    Icon {
+        path: SharedString,
+        link: LinkMark,
+        color: Hsla,
     },
 }
 
@@ -83,6 +97,7 @@ enum MeasureItem {
         width: Option<DefiniteLength>,
         height: Option<DefiniteLength>,
     },
+    Icon,
 }
 
 struct LineFragmentLayout {
@@ -102,6 +117,17 @@ enum LineFragmentKind {
 }
 
 impl InlineFlow {
+    pub(super) fn with_link_icons(
+        mut self,
+        resolver: Option<&LinkIconResolverFn>,
+        color: Hsla,
+    ) -> Self {
+        if let Some(resolver) = resolver {
+            self.items = decorate_links(self.items, resolver, color);
+        }
+        self
+    }
+
     pub(super) fn new(
         id: impl Into<ElementId>,
         items: Vec<InlineFlowItem>,
@@ -157,6 +183,51 @@ impl InlineFlow {
             })
             .into_any_element()
     }
+
+    fn icon_element(
+        ix: usize,
+        path: SharedString,
+        link: LinkMark,
+        color: Hsla,
+        width: Pixels,
+        handler: Option<Arc<LinkClickHandlerFn>>,
+    ) -> AnyElement {
+        let aux_handler = handler.clone();
+        let aux_url = link.url.clone();
+        let tooltip_url = link.url.clone();
+        svg()
+            .path(path)
+            .id(ix)
+            .size(width)
+            .text_color(color)
+            .cursor_pointer()
+            .on_hover(move |hovered, window, cx| {
+                let bounds = Bounds::new(window.mouse_position(), size(width, width));
+                TextViewDefaults::global(cx).request_link_tooltip(
+                    hovered.then(|| tooltip_url.clone()),
+                    bounds,
+                    window,
+                    cx,
+                );
+            })
+            .on_click(move |event, window, cx| {
+                if GlobalState::global(cx)
+                    .text_view_state()
+                    .is_some_and(|state| state.read(cx).has_selection(cx))
+                {
+                    return;
+                }
+                TextSelection::end(window, cx);
+                cx.stop_propagation();
+                handle_link_click(&handler, link.url.clone(), event.clone(), window, cx);
+            })
+            .on_aux_click(move |event, window, cx| {
+                TextSelection::end(window, cx);
+                cx.stop_propagation();
+                handle_link_click(&aux_handler, aux_url.clone(), event.clone(), window, cx);
+            })
+            .into_any_element()
+    }
 }
 
 impl IntoElement for InlineFlow {
@@ -204,6 +275,10 @@ impl Element for InlineFlow {
                     cx,
                 )),
                 MeasureItem::Text { .. } => None,
+                MeasureItem::Icon => {
+                    let width = window.text_style().font_size.to_pixels(rem_size);
+                    Some(size(width * 1.25, width))
+                }
             })
             .collect::<Vec<_>>();
         let layout_state = InlineFlowLayoutState::default();
@@ -255,6 +330,16 @@ impl Element for InlineFlow {
             .unwrap_or_default();
         let mut elements = Vec::with_capacity(fragments.len());
 
+        // Every visual fragment writes a range into its original text run.
+        // Clear once before painting so wrapped lines accumulate one selection.
+        for item in &self.items {
+            if let InlineFlowItem::Text { state, .. } = item {
+                if let Ok(mut state) = state.lock() {
+                    state.selection = None;
+                }
+            }
+        }
+
         for fragment in fragments {
             match fragment {
                 PositionedFragment::Text {
@@ -267,25 +352,23 @@ impl Element for InlineFlow {
                     highlights,
                     ..
                 } => {
-                    let state = match &self.items[item_ix] {
-                        InlineFlowItem::Text {
-                            state,
-                            text: source,
-                            ..
-                        } if source_range == (0..source.len()) => state.clone(),
-                        _ => Arc::new(Mutex::new(InlineState::default())),
+                    let InlineFlowItem::Text {
+                        state,
+                        source_offset,
+                        ..
+                    } = &self.items[item_ix]
+                    else {
+                        continue;
                     };
-                    if let Ok(mut state) = state.lock() {
-                        state.set_text(text);
-                    }
 
                     let mut element = Inline::new(
                         elements.len(),
-                        state,
+                        state.clone(),
                         links,
                         highlights,
                         self.link_click_handler.clone(),
                     )
+                    .source_fragment(text, source_offset + source_range.start)
                     .into_any_element();
                     element.prepaint_as_root(
                         bounds.origin + origin,
@@ -303,20 +386,27 @@ impl Element for InlineFlow {
                     origin,
                     size: fragment_size,
                 } => {
-                    let InlineFlowItem::Image {
-                        url, link, title, ..
-                    } = &self.items[item_ix]
-                    else {
-                        continue;
+                    let mut element = match &self.items[item_ix] {
+                        InlineFlowItem::Icon { path, link, color } => Self::icon_element(
+                            elements.len(),
+                            path.clone(),
+                            link.clone(),
+                            *color,
+                            fragment_size.height,
+                            self.link_click_handler.clone(),
+                        ),
+                        InlineFlowItem::Image {
+                            url, link, title, ..
+                        } => Self::image_element(
+                            elements.len(),
+                            url,
+                            link,
+                            title.as_str(),
+                            fragment_size,
+                            self.link_click_handler.clone(),
+                        ),
+                        InlineFlowItem::Text { .. } => continue,
                     };
-                    let mut element = Self::image_element(
-                        elements.len(),
-                        url,
-                        link,
-                        title.as_str(),
-                        fragment_size,
-                        self.link_click_handler.clone(),
-                    );
                     element.prepaint_as_root(
                         bounds.origin + origin,
                         size(
@@ -371,6 +461,7 @@ impl From<&InlineFlowItem> for MeasureItem {
                 width: *width,
                 height: *height,
             },
+            InlineFlowItem::Icon { .. } => MeasureItem::Icon,
         }
     }
 }
@@ -379,9 +470,90 @@ impl MeasureItem {
     fn len(&self) -> usize {
         match self {
             MeasureItem::Text { text, .. } => text.len(),
-            MeasureItem::Image { .. } => IMAGE_LEN,
+            MeasureItem::Image { .. } | MeasureItem::Icon => IMAGE_LEN,
         }
     }
+}
+
+fn decorate_links(
+    items: Vec<InlineFlowItem>,
+    resolver: &LinkIconResolverFn,
+    color: Hsla,
+) -> Vec<InlineFlowItem> {
+    let mut decorated = Vec::new();
+    for item in items {
+        let InlineFlowItem::Text {
+            state,
+            source_offset,
+            text,
+            links,
+            highlights,
+        } = item
+        else {
+            decorated.push(item);
+            continue;
+        };
+        let mut spans: Vec<(Range<usize>, LinkMark)> = Vec::new();
+        for (range, link) in &links {
+            if let Some((previous, previous_link)) = spans.last_mut()
+                && previous.end == range.start
+                && previous_link == link
+            {
+                previous.end = range.end;
+            } else {
+                spans.push((range.clone(), link.clone()));
+            }
+        }
+        let icons = spans
+            .into_iter()
+            .filter_map(|(range, link)| {
+                if range.is_empty() {
+                    return None;
+                }
+                resolver(&link.url).map(|path| (range.start, link, path))
+            })
+            .collect::<Vec<_>>();
+        if icons.is_empty() {
+            decorated.push(InlineFlowItem::Text {
+                state,
+                source_offset,
+                text,
+                links,
+                highlights,
+            });
+            continue;
+        }
+        let mut start = 0;
+        for (offset, link, path) in icons {
+            if start < offset {
+                decorated.push(InlineFlowItem::Text {
+                    state: state.clone(),
+                    source_offset: source_offset + start,
+                    text: text[start..offset].to_owned().into(),
+                    links: slice_ranges(&links, start, offset, |range, link| (range, link.clone())),
+                    highlights: slice_ranges(&highlights, start, offset, |range, style| {
+                        (range, *style)
+                    }),
+                });
+            }
+            decorated.push(InlineFlowItem::Icon { path, link, color });
+            start = offset;
+        }
+        if start < text.len() {
+            decorated.push(InlineFlowItem::Text {
+                state,
+                source_offset: source_offset + start,
+                links: slice_ranges(&links, start, text.len(), |range, link| {
+                    (range, link.clone())
+                }),
+                highlights: slice_ranges(&highlights, start, text.len(), |range, style| {
+                    (range, *style)
+                }),
+                text: text[start..].to_owned().into(),
+            });
+        }
+    }
+    decorated
 }
 
 fn layout_flow(
@@ -453,7 +625,7 @@ fn layout_flow(
                         });
                     }
                 }
-                MeasureItem::Image { .. } => {
+                MeasureItem::Image { .. } | MeasureItem::Icon => {
                     if line_range.start <= item_start && item_end <= line_range.end {
                         let size = image_sizes[item_ix]
                             .expect("image size should be measured before layout");
@@ -545,6 +717,7 @@ fn line_ranges(
 
     for hard_line in hard_lines {
         let mut item_start = 0;
+        let mut prefix_len = 0;
         let wrap_fragments = items
             .iter()
             .enumerate()
@@ -555,9 +728,32 @@ fn line_ranges(
                 } else {
                     match item {
                         MeasureItem::Text { text, .. } => {
-                            let start = hard_line.start.max(item_start) - item_start;
+                            let start =
+                                (hard_line.start.max(item_start) - item_start).max(prefix_len);
+                            prefix_len = 0;
                             let end = hard_line.end.min(item_end) - item_start;
                             (start < end).then(|| WrapLineFragment::text(&text[start..end]))
+                        }
+                        MeasureItem::Icon => {
+                            let mut width = image_sizes[ix]
+                                .expect("icon size is measured before wrapping")
+                                .width;
+                            if let Some(MeasureItem::Text {
+                                text, highlights, ..
+                            }) = items.get(ix + 1)
+                                && let Some(first) = text.chars().next().filter(|ch| *ch != '\n')
+                            {
+                                prefix_len = first.len_utf8();
+                                let prefix: SharedString = text[..prefix_len].to_owned().into();
+                                let styles =
+                                    slice_ranges(highlights, 0, prefix_len, |range, style| {
+                                        (range, *style)
+                                    });
+                                let runs = runs_for_highlights(&prefix, text_style, styles);
+                                width += shape_line(prefix, font_size, &runs, window).width();
+                            }
+                            // A prefix and its first character occupy one wrapping unit.
+                            Some(WrapLineFragment::element(width, IMAGE_LEN + prefix_len))
                         }
                         MeasureItem::Image { .. } => (hard_line.start <= item_start
                             && item_end <= hard_line.end)
@@ -748,7 +944,7 @@ fn slice_ranges<T, U>(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::text::inline_flow::*;
 
     #[test]
     fn inline_image_without_explicit_size_scales_intrinsic_ratio_to_line_height() {

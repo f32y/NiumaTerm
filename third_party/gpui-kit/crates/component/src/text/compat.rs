@@ -4,7 +4,7 @@ use gpui::{
     SharedString, StyleRefinement, Styled, Window,
 };
 
-use super::{
+use crate::text::{
     MarkdownExtensions, MarkdownNode, MarkdownParseContext, MarkdownPlugin, SelectionFormat,
     TableData, TextViewState, TextViewStyle,
 };
@@ -117,6 +117,15 @@ impl TextView {
         self.inner = self.inner.on_link_click(f);
         self
     }
+    /// Adds a monochrome SVG before links whose resolved target returns an asset path.
+    pub fn link_icon(
+        mut self,
+        resolver: impl Fn(&str) -> Option<SharedString> + Send + Sync + 'static,
+    ) -> Self {
+        self.inner = self.inner.link_icon(resolver);
+        self
+    }
+
     /// Sets which Markdown extensions the parser accepts.
     pub fn markdown_extensions(mut self, value: MarkdownExtensions) -> Self {
         self.inner = self.inner.markdown_extensions(value);

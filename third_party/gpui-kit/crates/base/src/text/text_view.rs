@@ -103,6 +103,8 @@ pub(crate) type TableActionsFn =
 pub(crate) type LinkClickHandlerFn =
     dyn Fn(&SharedString, &ClickEvent, &mut Window, &mut App) + Send + Sync;
 
+pub(crate) type LinkIconResolverFn = dyn Fn(&str) -> Option<SharedString> + Send + Sync;
+
 pub(crate) fn handle_link_click(
     handler: &Option<Arc<LinkClickHandlerFn>>,
     url: SharedString,
@@ -155,6 +157,7 @@ pub struct TextView {
     code_block_highlighter: Option<Arc<CodeBlockHighlighterFn>>,
     table_actions: Option<Arc<TableActionsFn>>,
     link_click_handler: Option<Arc<LinkClickHandlerFn>>,
+    link_icon_resolver: Option<Arc<LinkIconResolverFn>>,
     markdown_extensions: Arc<MarkdownExtensions>,
 }
 
@@ -199,6 +202,7 @@ impl TextView {
             code_block_highlighter: None,
             table_actions: None,
             link_click_handler: None,
+            link_icon_resolver: None,
             markdown_extensions: Arc::default(),
         }
     }
@@ -220,6 +224,7 @@ impl TextView {
             code_block_highlighter: None,
             table_actions: None,
             link_click_handler: None,
+            link_icon_resolver: None,
             markdown_extensions: Arc::default(),
         }
     }
@@ -241,6 +246,7 @@ impl TextView {
             code_block_highlighter: None,
             table_actions: None,
             link_click_handler: None,
+            link_icon_resolver: None,
             markdown_extensions: Arc::default(),
         }
     }
@@ -262,6 +268,7 @@ impl TextView {
             code_block_highlighter: None,
             table_actions: None,
             link_click_handler: None,
+            link_icon_resolver: None,
             markdown_extensions: Arc::default(),
         }
     }
@@ -378,6 +385,15 @@ impl TextView {
         F: Fn(&SharedString, &ClickEvent, &mut Window, &mut App) + Send + Sync + 'static,
     {
         self.link_click_handler = Some(Arc::new(handler));
+        self
+    }
+
+    /// Adds a monochrome SVG before links whose resolved target returns an asset path.
+    pub fn link_icon(
+        mut self,
+        resolver: impl Fn(&str) -> Option<SharedString> + Send + Sync + 'static,
+    ) -> Self {
+        self.link_icon_resolver = Some(Arc::new(resolver));
         self
     }
 
@@ -600,6 +616,7 @@ impl Element for TextView {
             state.code_block_highlighter = code_block_highlighter.clone();
             state.table_actions = self.table_actions.clone();
             state.link_click_handler = self.link_click_handler.clone();
+            state.link_icon_resolver = self.link_icon_resolver.clone();
             state.set_markdown_extensions(self.markdown_extensions.clone(), cx);
             state.selectable = self.selectable;
             state.selection_format = self.selection_format;
@@ -784,7 +801,7 @@ mod tests {
         atomic::{AtomicUsize, Ordering},
     };
 
-    use super::{TextView, TextViewPlugin};
+    use crate::text::text_view::{TextView, TextViewPlugin};
     use crate::text::{TableData, TextViewState, TextViewStyle};
     use gpui::{
         AppContext as _, Bounds, ClickEvent, Context, Entity, InteractiveElement as _, IntoElement,
@@ -1262,8 +1279,8 @@ mod tests {
 
     #[test]
     fn the_clip_only_moves_for_a_straddling_glyph_line() {
-        use super::line_safe_clip_bottom;
         use crate::text::state::LineSpan;
+        use crate::text::text_view::line_safe_clip_bottom;
 
         let spans = [
             // Lines end at 20 / 40 / 60.
@@ -1312,8 +1329,8 @@ mod tests {
 
     #[test]
     fn a_line_taller_than_the_budget_keeps_the_part_that_fits() {
-        use super::line_safe_clip_bottom;
         use crate::text::state::LineSpan;
+        use crate::text::text_view::line_safe_clip_bottom;
 
         // A heading line of 28px, in a box capped at one 26px body line.
         let heading = [LineSpan {
@@ -1327,8 +1344,8 @@ mod tests {
 
     #[test]
     fn the_clip_does_not_stop_on_a_row_of_border_and_padding() {
-        use super::line_safe_clip_bottom;
         use crate::text::state::LineSpan;
+        use crate::text::text_view::line_safe_clip_bottom;
 
         // Two table rows, each one line of text, 9px of border and padding
         // between them.
