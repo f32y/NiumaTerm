@@ -32,28 +32,19 @@ pub(crate) struct ChildAgents {
     pub restored_session: Option<String>,
 }
 
-/// Show a task snapshot only against the parent session it was produced for.
-/// Provider adapters publish snapshots asynchronously, so a snapshot can still
-/// be held when the pane has already moved to another session or has no
-/// session id yet; in both cases the view must render nothing rather than
-/// another conversation's children.
-pub fn scoped_background_tasks<'a>(
-    parent: Option<&BackgroundTaskKey>,
-    snapshot: Option<&'a BackgroundTaskSnapshot>,
-) -> Option<&'a BackgroundTaskSnapshot> {
-    let parent = parent?;
-    let snapshot = snapshot?;
-
-    (&snapshot.parent_session == parent).then_some(snapshot)
-}
-
 impl ChildAgents {
-    /// The held snapshot, when it was produced for `parent`.
+    /// The held snapshot, when it was produced for `parent`. Provider adapters
+    /// publish snapshots asynchronously, so a snapshot can still be held after
+    /// the pane has moved to another session or before it has a session id;
+    /// both cases render nothing so another conversation's children stay out.
     pub(crate) fn scoped(
         &self,
         parent: Option<&BackgroundTaskKey>,
     ) -> Option<&BackgroundTaskSnapshot> {
-        scoped_background_tasks(parent, self.background_tasks.as_ref())
+        let parent = parent?;
+        let snapshot = self.background_tasks.as_ref()?;
+
+        (&snapshot.parent_session == parent).then_some(snapshot)
     }
 
     /// Child `key`'s conversation, withheld with the snapshot when that
