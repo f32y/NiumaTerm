@@ -55,14 +55,14 @@ use crate::codex::app_server::conversation::ThreadState;
 #[cfg(test)]
 use crate::codex::app_server::conversation::TurnOutputUsage;
 use crate::codex::app_server::host::{CodexHost, HOST_EXIT_METHOD, RegistrationId};
-use crate::codex::app_server::progress::{goal_request, goal_status, spawn_plan_restore};
+use crate::codex::app_server::progress::{goal_status, spawn_plan_restore};
 #[cfg(test)]
 use crate::codex::app_server::protocol::thread_start_params;
 use crate::codex::app_server::protocol::{
-    codex_command_request, codex_command_response, codex_user_input, file_change_paths,
-    parse_fork_checkpoints, parse_models, parse_replay, parse_thread_settings,
-    parse_thread_summaries, resumed_thread_events, skills_list_request, stringify_command,
-    thread_list_params, thread_resume_params, turn_interrupt_request, turn_start_params,
+    CodexCommand, codex_user_input, file_change_paths, parse_fork_checkpoints, parse_models,
+    parse_replay, parse_thread_settings, parse_thread_summaries, resumed_thread_events,
+    skills_list_request, stringify_command, thread_list_params, thread_resume_params,
+    turn_interrupt_request, turn_start_params,
 };
 #[cfg(test)]
 use crate::codex::app_server::skills::parse_skill_catalog;
@@ -500,42 +500,40 @@ impl Session {
             return SlashCommandOutcome::NotReady;
         };
 
-        if name != "goal" && self.conversation.current_turn.is_some() {
-            return SlashCommandOutcome::Rejected {
-                message: "Codex is already running a turn.".to_string(),
-            };
-        }
-
-        if name != "goal" && !arguments.trim().is_empty() {
-            return SlashCommandOutcome::Rejected {
-                message: format!("/{name} does not accept arguments."),
-            };
-        }
-
-        let rpc_id = self.alloc_rpc_id();
-
-        let request = if name == "goal" {
-            Some(goal_request(rpc_id, &thread_id, arguments))
-        } else {
-            codex_command_request(rpc_id, &thread_id, name)
-        };
-
-        let Some(request) = request else {
+        let Some(command) = CodexCommand::parse(name) else {
             return SlashCommandOutcome::Rejected {
                 message: format!("Unsupported Codex command: /{name}"),
             };
         };
 
-        if let Err(message) = self.try_send(request) {
+        // A goal is read and set alongside a running turn, and it is the only
+        // command that takes an argument.
+        if command != CodexCommand::Goal {
+            if self.conversation.current_turn.is_some() {
+                return SlashCommandOutcome::Rejected {
+                    message: "Codex is already running a turn.".to_string(),
+                };
+            }
+
+            if !arguments.trim().is_empty() {
+                return SlashCommandOutcome::Rejected {
+                    message: format!("/{name} does not accept arguments."),
+                };
+            }
+        }
+
+        let rpc_id = self.alloc_rpc_id();
+
+        if let Err(message) = self.try_send(command.request(rpc_id, &thread_id, arguments)) {
             return SlashCommandOutcome::Rejected { message };
         }
 
-        if name == "compact" {
+        if command == CodexCommand::Compact {
             self.conversation.compaction.request_manual();
         }
 
         self.control
-            .track(rpc_id, ControlOperation::Command(name.to_string()));
+            .track(rpc_id, ControlOperation::Command(command));
 
         SlashCommandOutcome::Accepted
     }
@@ -981,18 +979,18 @@ impl Session {
                 return Vec::new();
             }
 
-            return self.on_response_error(pending_command.as_deref(), query, error);
+            return self.on_response_error(pending_command, query, error);
         }
 
         if let Some(command) = pending_command {
-            if command == "goal" {
+            if command == CodexCommand::Goal {
                 // A live update can arrive before the command reply. Read the
                 // current goal with revision protection instead of restoring
                 // the older state captured in that reply.
                 self.request_goal();
 
                 return vec![Event::SlashCommandResult {
-                    name: command,
+                    name: command.name().to_string(),
                     outcome: SlashCommandOutcome::Completed {
                         message: None,
                         approval: None,
@@ -1000,9 +998,13 @@ impl Session {
                 }];
             }
 
+            // Dedicated command requests acknowledge scheduling before their
+            // turn and item notifications report the actual work. Treating
+            // this response as completion could admit another queued command
+            // while the thread is busy.
             return vec![Event::SlashCommandResult {
-                outcome: codex_command_response(&command, None),
-                name: command,
+                name: command.name().to_string(),
+                outcome: SlashCommandOutcome::Accepted,
             }];
         }
 
@@ -1135,18 +1137,22 @@ impl Session {
 
     fn on_response_error(
         &mut self,
-        pending_command: Option<&str>,
+        pending_command: Option<CodexCommand>,
         query: Option<QueryKind>,
         error: &str,
     ) -> Vec<Event> {
         if let Some(command) = pending_command {
-            if command == "compact" {
+            if command == CodexCommand::Compact {
                 self.conversation.compaction.reject_manual_request();
             }
 
+            let name = command.name();
+
             return vec![Event::SlashCommandResult {
-                name: command.to_string(),
-                outcome: codex_command_response(command, Some(error)),
+                name: name.to_string(),
+                outcome: SlashCommandOutcome::Rejected {
+                    message: format!("/{name} failed: {error}"),
+                },
             }];
         }
 

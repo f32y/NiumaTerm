@@ -1,6 +1,7 @@
 use serde_json::Value;
 
 use crate::codex::app_server::FIRST_TURN_RPC_ID;
+use crate::codex::app_server::protocol::CodexCommand;
 use crate::subprocess::requests::PendingRequests;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -27,7 +28,7 @@ pub(super) enum ControlOperation {
     Other,
     ThreadRequest,
     Steer { next_turn_params: Value },
-    Command(String),
+    Command(CodexCommand),
     ThreadName,
 }
 

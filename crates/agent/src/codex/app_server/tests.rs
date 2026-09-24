@@ -5,7 +5,7 @@ use crate::codex::app_server::compaction::{
     CompactionState, compaction_completed, compaction_started,
 };
 use crate::codex::app_server::protocol::{
-    command_purpose, initial_thread_request, parse_context_window_usage, parse_item,
+    CodexCommand, command_purpose, initial_thread_request, parse_context_window_usage, parse_item,
     turn_start_params,
 };
 use crate::codex::app_server::*;
@@ -290,7 +290,7 @@ fn control_responses_complete_once_and_ignore_unknown_ids() {
 
     session
         .control
-        .track(id, ControlOperation::Command("compact".into()));
+        .track(id, ControlOperation::Command(CodexCommand::Compact));
 
     session.conversation.compaction.request_manual();
 
@@ -324,7 +324,7 @@ fn thread_switch_retires_commands_but_keeps_catalog_responses() {
 
         session
             .control
-            .track(command, ControlOperation::Command("compact".into()));
+            .track(command, ControlOperation::Command(CodexCommand::Compact));
 
         session.conversation.compaction.request_manual();
 
@@ -388,7 +388,7 @@ fn failed_thread_switch_preserves_pending_command() {
 
     session
         .control
-        .track(id, ControlOperation::Command("review".into()));
+        .track(id, ControlOperation::Command(CodexCommand::Review));
 
     let transition = session.alloc_rpc_id();
 
@@ -926,7 +926,7 @@ fn codex_advertises_the_picker_but_not_plugin_management() {
 
     assert_eq!(skills.arguments, SlashCommandArguments::Skills);
     assert!(!commands.iter().any(|command| command.name == "plugins"));
-    assert!(codex_command_request(12, "thread", "skills").is_none());
+    assert_eq!(CodexCommand::parse("skills"), None);
 }
 
 #[test]
@@ -1361,17 +1361,17 @@ fn command_actions_become_compact_purpose_labels() {
 #[test]
 fn command_requests_use_dedicated_compact_and_inline_review_methods() {
     assert_eq!(
-        codex_command_request(100, "thr_1", "compact"),
-        Some(json!({
+        CodexCommand::Compact.request(100, "thr_1", ""),
+        json!({
             "jsonrpc": "2.0",
             "id": 100,
             "method": "thread/compact/start",
             "params": {"threadId": "thr_1"},
-        }))
+        })
     );
     assert_eq!(
-        codex_command_request(101, "thr_1", "review"),
-        Some(json!({
+        CodexCommand::Review.request(101, "thr_1", ""),
+        json!({
             "jsonrpc": "2.0",
             "id": 101,
             "method": "review/start",
@@ -1380,23 +1380,9 @@ fn command_requests_use_dedicated_compact_and_inline_review_methods() {
                 "delivery": "inline",
                 "target": {"type": "uncommittedChanges"},
             },
-        }))
+        })
     );
-    assert_eq!(codex_command_request(102, "thr_1", "unknown"), None);
-    assert_eq!(
-        codex_command_response("compact", None),
-        SlashCommandOutcome::Accepted
-    );
-    assert_eq!(
-        codex_command_response("review", None),
-        SlashCommandOutcome::Accepted
-    );
-    assert_eq!(
-        codex_command_response("review", Some("unsupported target")),
-        SlashCommandOutcome::Rejected {
-            message: "/review failed: unsupported target".into()
-        }
-    );
+    assert_eq!(CodexCommand::parse("unknown"), None);
 }
 
 #[test]

@@ -6,9 +6,10 @@ use serde_json::{Value, json};
 use crate::chat::{
     Compaction, ContextUsageScope, ContextWindowUsage, Event, ForkAnchor, ForkCheckpoint, Item,
     ModelInfo, ReplayItem, ReplayTurn, ScopedTokenUsage, SessionScope, SessionSummary,
-    SkillReference, SlashCommandOutcome, ThreadSettings, TokenUsageBreakdown, list_selected_model,
+    SkillReference, ThreadSettings, TokenUsageBreakdown, list_selected_model,
 };
 use crate::codex::ProviderConfig;
+use crate::codex::app_server::progress::goal_request;
 use crate::codex::app_server::questions::parse_async_questions;
 use crate::codex::app_server::{PROVIDER_API_FIELD, THREAD_LIST_LIMIT, ThreadProfile};
 use crate::json::{block_text, rfc3339_from_unix_seconds};
@@ -46,25 +47,52 @@ pub(super) fn parse_token_usage_breakdown(value: &Value) -> Option<TokenUsageBre
     })
 }
 
-pub(super) fn codex_command_request(rpc_id: u64, thread_id: &str, name: &str) -> Option<Value> {
-    match name {
-        "compact" => Some(json!({
-            "jsonrpc": "2.0",
-            "id": rpc_id,
-            "method": "thread/compact/start",
-            "params": {"threadId": thread_id},
-        })),
-        "review" => Some(json!({
-            "jsonrpc": "2.0",
-            "id": rpc_id,
-            "method": "review/start",
-            "params": {
-                "threadId": thread_id,
-                "delivery": "inline",
-                "target": {"type": "uncommittedChanges"},
-            },
-        })),
-        _ => None,
+/// A slash command the app server runs through a dedicated request.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum CodexCommand {
+    Compact,
+    Review,
+    Goal,
+}
+
+impl CodexCommand {
+    pub(super) fn parse(name: &str) -> Option<Self> {
+        match name {
+            "compact" => Some(Self::Compact),
+            "review" => Some(Self::Review),
+            "goal" => Some(Self::Goal),
+            _ => None,
+        }
+    }
+
+    pub(super) fn name(self) -> &'static str {
+        match self {
+            Self::Compact => "compact",
+            Self::Review => "review",
+            Self::Goal => "goal",
+        }
+    }
+
+    pub(super) fn request(self, rpc_id: u64, thread_id: &str, arguments: &str) -> Value {
+        match self {
+            Self::Compact => json!({
+                "jsonrpc": "2.0",
+                "id": rpc_id,
+                "method": "thread/compact/start",
+                "params": {"threadId": thread_id},
+            }),
+            Self::Review => json!({
+                "jsonrpc": "2.0",
+                "id": rpc_id,
+                "method": "review/start",
+                "params": {
+                    "threadId": thread_id,
+                    "delivery": "inline",
+                    "target": {"type": "uncommittedChanges"},
+                },
+            }),
+            Self::Goal => goal_request(rpc_id, thread_id, arguments),
+        }
     }
 }
 
@@ -136,19 +164,6 @@ pub(super) fn codex_user_input(
     }
 
     Value::Array(input)
-}
-
-pub(super) fn codex_command_response(name: &str, error: Option<&str>) -> SlashCommandOutcome {
-    if let Some(error) = error {
-        return SlashCommandOutcome::Rejected {
-            message: format!("/{name} failed: {error}"),
-        };
-    }
-
-    // Dedicated command RPCs acknowledge scheduling before their turn and
-    // item notifications report the actual work. Treating this response as
-    // completion can admit another queued command while the thread is busy.
-    SlashCommandOutcome::Accepted
 }
 
 pub(super) fn delta_event(params: &Value, make: fn(String, String) -> Event) -> Vec<Event> {

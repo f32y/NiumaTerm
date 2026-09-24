@@ -6,6 +6,7 @@ use tempfile::tempdir;
 use crate::chat::Event;
 use crate::codex::app_server::control::{ControlOperation, QueryKind};
 use crate::codex::app_server::progress::{PLAN_RESTORED, goal_request, read_plan, task_list};
+use crate::codex::app_server::protocol::CodexCommand;
 use crate::codex::app_server::tests::disconnected_session;
 use crate::progress::TaskStatus;
 
@@ -66,7 +67,7 @@ fn plan_and_goal_updates_are_scoped_and_live_state_wins_over_restore() {
 
     session
         .control
-        .track(1000, ControlOperation::Command("goal".into()));
+        .track(1000, ControlOperation::Command(CodexCommand::Goal));
 
     let events = session.process(json!({"id": 1000, "result": {"goal": {"objective": "Older objective", "status": "active"}}}));
 
