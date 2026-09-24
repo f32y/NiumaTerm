@@ -100,41 +100,6 @@ use crate::ghostty::render_state::RenderStateReader;
 use crate::render_buffer::RenderBuffer;
 use crate::{clipboard, graphics, vt_modes};
 
-/// What the engine last reported for the title and the working directory.
-///
-/// Both are read fresh from the engine on every poll, so the only thing kept
-/// here is the previous answer: it is what turns an unconditional read into a
-/// change report, and neither value is used for anything else.
-#[derive(Default)]
-struct TitleMirror {
-    title: String,
-    pwd: String,
-}
-
-impl TitleMirror {
-    /// Report `latest` only when it differs from the last reported title.
-    fn note_title(&mut self, latest: String) -> Option<String> {
-        if latest == self.title {
-            return None;
-        }
-
-        self.title = latest.clone();
-
-        Some(latest)
-    }
-
-    /// Report `latest` only when it differs from the last reported directory.
-    fn note_pwd(&mut self, latest: String) -> Option<String> {
-        if latest == self.pwd {
-            return None;
-        }
-
-        self.pwd = latest.clone();
-
-        Some(latest)
-    }
-}
-
 pub struct GhosttyTerminal {
     terminal: VtTerminal,
     render: RenderStateReader,
@@ -145,8 +110,6 @@ pub struct GhosttyTerminal {
     /// Boxed so its heap address stays fixed across `GhosttyTerminal` moves;
     /// registered with the engine as the callback userdata pointer.
     callbacks: Box<Callbacks>,
-
-    titles: TitleMirror,
 
     /// Set after a resize leaves only blank rows in the history: the viewport
     /// stays pinned to the top and the scrollbar reports just the screen,
@@ -246,7 +209,6 @@ impl GhosttyTerminal {
             cols,
             rows,
             callbacks,
-            titles: TitleMirror::default(),
             scrollbar_override: None,
             override_stale: false,
         })
@@ -283,31 +245,23 @@ impl GhosttyTerminal {
         self.callbacks.progress_active
     }
 
-    /// Poll the terminal title; returns `Some(title)` only when it changed
-    /// since the last poll.
-    pub fn poll_title(&mut self) -> Option<String> {
-        let title = self.read_string(VtTerminalData::TITLE);
-
-        self.titles.note_title(title)
+    /// The title, when the engine reported a change since the last call.
+    pub fn take_title_change(&mut self) -> Option<String> {
+        mem::take(&mut self.callbacks.title_changed).then(|| self.title())
     }
 
-    /// Poll the working directory (OSC 7); returns `Some(pwd)` only when it
-    /// changed since the last poll.
-    pub fn poll_pwd(&mut self) -> Option<String> {
-        let pwd = self.read_string(VtTerminalData::PWD);
-
-        self.titles.note_pwd(pwd)
+    /// The raw working directory string (OSC 7/9/1337), when the engine
+    /// reported a change since the last call. Empty when the shell cleared it.
+    pub fn take_pwd_change(&mut self) -> Option<String> {
+        mem::take(&mut self.callbacks.pwd_changed).then(|| self.read_string(VtTerminalData::PWD))
     }
 
-    /// The current OSC window title (peek — reads the engine's live value, no
-    /// change-detection). `poll_title` is the producer's change-detecting variant;
-    /// this is for on-demand frontend reads (title template), replacing the mirror.
+    /// The current OSC window title as the engine holds it.
     pub fn title(&self) -> String {
         self.read_string(VtTerminalData::TITLE)
     }
 
-    /// The current OSC 7 working directory (peek) as a path, or `None` when unset.
-    /// Replaces the mirror's `current_directory` for the title template.
+    /// The current OSC 7 working directory as a path, or `None` when unset.
     pub fn current_directory(&self) -> Option<path::PathBuf> {
         let pwd = self.read_string(VtTerminalData::PWD);
 

@@ -534,7 +534,7 @@ where
 
         // Collect one batch's metadata, image changes,
         // and frame before delivering events that announce the publication.
-        let pwd = self.ghostty.poll_pwd();
+        let pwd = self.ghostty.take_pwd_change();
 
         let (
             bell,
@@ -553,7 +553,7 @@ where
             let clipboard_writes = engine.take_clipboard_writes();
             let notifications = engine.take_notifications();
             let progress = engine.take_progress_report();
-            let title = engine.poll_title();
+            let title = engine.take_title_change();
             let vt_modes = ghostty_vt_modes(engine);
 
             let sync_output_timed_out = self

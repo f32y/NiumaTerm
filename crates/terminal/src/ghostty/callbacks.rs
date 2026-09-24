@@ -40,6 +40,15 @@ pub(super) struct Callbacks {
     /// OSC 9 / OSC 777 desktop notifications as `(title, body)`, copied out
     /// before the callback returns because the engine only lends the strings.
     pub(super) notifications: Vec<(String, String)>,
+
+    /// The title changed (OSC 0/2) since the flag was last taken. The engine
+    /// keeps the value itself, so only the edge is recorded here and the
+    /// string is read once when the change is reported.
+    pub(super) title_changed: bool,
+
+    /// The working directory changed (OSC 7/9/1337) since the flag was last
+    /// taken; the value is read from the engine the same way as the title.
+    pub(super) pwd_changed: bool,
 }
 
 /// Register the terminal's synchronous callbacks, which write into the
@@ -87,9 +96,41 @@ pub(super) unsafe fn install_callbacks(terminal: VtTerminal) -> Box<Callbacks> {
             VtTerminalOption::DESKTOP_NOTIFICATION,
             desktop_notification_cb as *const os::raw::c_void,
         );
+
+        ghostty_terminal_set(
+            terminal,
+            VtTerminalOption::TITLE_CHANGED,
+            title_changed_cb as *const os::raw::c_void,
+        );
+
+        ghostty_terminal_set(
+            terminal,
+            VtTerminalOption::PWD_CHANGED,
+            pwd_changed_cb as *const os::raw::c_void,
+        );
     }
 
     callbacks
+}
+
+unsafe extern "C" fn title_changed_cb(_terminal: VtTerminal, userdata: *mut os::raw::c_void) {
+    if userdata.is_null() {
+        return;
+    }
+
+    let cb = unsafe { &mut *(userdata as *mut Callbacks) };
+
+    cb.title_changed = true;
+}
+
+unsafe extern "C" fn pwd_changed_cb(_terminal: VtTerminal, userdata: *mut os::raw::c_void) {
+    if userdata.is_null() {
+        return;
+    }
+
+    let cb = unsafe { &mut *(userdata as *mut Callbacks) };
+
+    cb.pwd_changed = true;
 }
 
 unsafe extern "C" fn progress_report_cb(

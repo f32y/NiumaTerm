@@ -1733,15 +1733,17 @@ fn progress_report_callback_tracks_state_and_percentage() {
 }
 
 #[test]
-fn title_poll_reports_change_once() {
+fn title_change_is_reported_once() {
     let mut terminal = GhosttyTerminal::new(8, 1, 100).unwrap();
+
+    assert_eq!(terminal.take_title_change(), None);
 
     terminal.write_vt(b"\x1b]2;hello\x07");
 
-    assert_eq!(terminal.poll_title().as_deref(), Some("hello"));
+    assert_eq!(terminal.take_title_change().as_deref(), Some("hello"));
 
     // No further change → None.
-    assert_eq!(terminal.poll_title(), None);
+    assert_eq!(terminal.take_title_change(), None);
 }
 
 /// The `PWD` getter is populated by both the manual `PWD` setter and by
@@ -1846,12 +1848,17 @@ fn pwd_poll_reports_change() {
     // Canonical OSC 7 with empty authority (`file:///path`).
     terminal.write_vt(b"\x1b]7;file:///home/u\x07");
 
-    let pwd = terminal.poll_pwd().expect("pwd reported");
+    let pwd = terminal.take_pwd_change().expect("pwd reported");
 
     assert!(pwd.contains("/home/u"), "unexpected pwd: {pwd:?}");
 
     // No further change → None.
-    assert_eq!(terminal.poll_pwd(), None);
+    assert_eq!(terminal.take_pwd_change(), None);
+
+    // Clearing the directory is a change too, reported as the empty string.
+    terminal.write_vt(b"\x1b]7;\x07");
+
+    assert_eq!(terminal.take_pwd_change().as_deref(), Some(""));
 }
 
 #[test]

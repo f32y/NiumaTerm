@@ -205,8 +205,6 @@ fn current_directory_is_available_before_event_drain() {
 
         engine.write_vt(format!("\x1b]7;{reported}\x07").as_bytes());
 
-        engine.poll_pwd();
-
         let mut snapshot = engine.snapshot().unwrap();
 
         session.render_buffer.publish(&mut snapshot);
