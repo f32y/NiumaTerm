@@ -16,7 +16,6 @@ wayland = ["clipboard", "copypasta/wayland"]
 [dependencies]
 copypasta = { workspace = true, optional = true }
 raw-window-handle.workspace = true
-dirs.workspace = true
 libc.workspace = true
 tracing.workspace = true
 parking_lot.workspace = true
@@ -25,6 +24,7 @@ tempfile.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 anyhow.workspace = true
+dirs.workspace = true
 which.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -43,5 +43,4 @@ futures.workspace = true
 base64.workspace = true
 windows-sys.workspace = true
 windows-registry.workspace = true
-which.workspace = true
 windows = { workspace = true, features = ["Win32_System_LibraryLoader"] }
