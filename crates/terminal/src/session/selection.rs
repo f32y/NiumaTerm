@@ -5,10 +5,10 @@ mod selection_tests;
 use parking_lot::Mutex;
 
 use crate::block_store::BlockStore;
-use crate::ghostty::{BlockHandle, BlockRef, Palette};
-use crate::grid::{Column, Line, Pos, Side};
+use crate::ghostty::{BlockHandle, BlockRef, CellWide, Palette};
+use crate::grid::{Column, Line, Pos, Row, Side, Square, Wide};
 use crate::render_buffer::RenderBuffer;
-use crate::selection::{Selection, SelectionRange, SelectionType, WORD_DELIMITERS};
+use crate::selection::{Selection, SelectionRange, SelectionType, VisibleGrid, WORD_DELIMITERS};
 use crate::session::{SurfaceCellSide, SurfaceMouseEventKind, SurfaceScreenCell};
 
 /// The engine-region selection and the gestures that build it. Anchors are held
@@ -137,77 +137,59 @@ pub(crate) fn block_selection_range(
         last += 1;
     }
 
-    match selection_type {
-        SelectionType::Lines => {
-            return Some(((first, 0), (last, cols.saturating_sub(1) as u32)));
-        }
-        SelectionType::Simple | SelectionType::Block => {
-            let col = col.min(cols.saturating_sub(1) as u32);
+    if matches!(selection_type, SelectionType::Simple | SelectionType::Block) {
+        let col = col.min(cols.saturating_sub(1) as u32);
 
-            return Some(((line, col), (line, col)));
-        }
-        SelectionType::Semantic => {}
+        return Some(((line, col), (line, col)));
     }
 
-    // Class 0 = whitespace, 1 = punctuation delimiter, 2 = word content.
-    // Expanding one class matches terminal double-click behavior for words,
-    // delimiter runs, and blank runs while retaining cell-accurate wide text.
-    let mut classes = vec![0u8; (last - first + 1) * cols];
+    // The logical line is materialized into the shape the live screen's
+    // selection reads, so a double or triple click in frozen history picks
+    // the same word or line it would have picked while the text was live.
+    let mut rows: Vec<Row<Square>> = Vec::with_capacity(last - first + 1);
+    let mut wrapped = Vec::with_capacity(last - first + 1);
 
     for row in first..=last {
-        let offset = (row - first) * cols;
+        let mut cells: Row<Square> = Row::new(cols);
 
-        block
+        let meta = block
             .read_row_visit(row, palette, |x, text, wide, _| {
-                use crate::ghostty::CellWide;
+                let x: usize = x.into();
 
-                if matches!(wide, CellWide::SpacerHead | CellWide::SpacerTail) {
+                if x >= cols {
                     return;
                 }
 
-                let ch = text.as_str().chars().next().unwrap_or(' ');
+                let square = &mut cells[Column(x)];
 
-                let class = if ch.is_whitespace() {
-                    0
-                } else if WORD_DELIMITERS.contains(ch) {
-                    1
-                } else {
-                    2
-                };
+                square.set_c(text.as_str().chars().next().unwrap_or('\0'));
 
-                let x: usize = x.into();
-
-                if x < cols {
-                    classes[offset + x] = class;
-
-                    if wide == CellWide::Wide && x + 1 < cols {
-                        classes[offset + x + 1] = class;
-                    }
-                }
+                square.set_wide(match wide {
+                    CellWide::Narrow => Wide::Narrow,
+                    CellWide::Wide => Wide::Wide,
+                    CellWide::SpacerTail => Wide::Spacer,
+                    CellWide::SpacerHead => Wide::LeadingSpacer,
+                });
             })
             .ok()
             .flatten()?;
+
+        rows.push(cells);
+        wrapped.push(meta.wrapped);
     }
 
-    let clicked = (line - first) * cols + (col as usize).min(cols - 1);
-    let class = classes[clicked];
+    let grid = VisibleGrid::new(&rows, cols, &wrapped);
 
-    let mut start = clicked;
+    let point = Pos::new(
+        Line((line - first) as i32),
+        Column((col as usize).min(cols - 1)),
+    );
 
-    while start > 0 && classes[start - 1] == class {
-        start -= 1;
-    }
+    let range = Selection::expand_point(&grid, point, selection_type, WORD_DELIMITERS)?;
 
-    let mut end = clicked;
+    let block_point = |pos: Pos| (first + pos.row.0 as usize, pos.col.0 as u32);
 
-    while end + 1 < classes.len() && classes[end + 1] == class {
-        end += 1;
-    }
-
-    Some((
-        (first + start / cols, (start % cols) as u32),
-        (first + end / cols, (end % cols) as u32),
-    ))
+    Some((block_point(range.start), block_point(range.end)))
 }
 
 /// A position in the frozen history: store item, physical block row, column.

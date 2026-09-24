@@ -192,3 +192,21 @@ fn paste_payload_normalizes_and_guards() {
         b"\x1b[200~lsrm\x1b[201~".to_vec()
     );
 }
+
+/// Frozen history expands a double click the way the live screen does,
+/// including jumping from a bracket to its match.
+#[test]
+fn frozen_click_selection_matches_brackets_like_the_live_screen() {
+    let mut terminal = GhosttyTerminal::new(20, 4, 100).unwrap();
+
+    terminal.write_vt(b"f(a, b) x");
+
+    let handle = terminal.finish_block().unwrap().expect("block created");
+    let block = terminal.block_acquire(handle).expect("block acquired");
+    let palette = terminal.color_palette();
+
+    assert_eq!(
+        block_selection_range(&block, &palette, 0, 1, SelectionType::Semantic),
+        Some(((0, 1), (0, 6)))
+    );
+}

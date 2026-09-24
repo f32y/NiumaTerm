@@ -200,6 +200,27 @@ impl Selection {
         }
     }
 
+    /// The word or line a click at `point` selects in `grid`, the way a
+    /// double or triple click does on the live screen. `None` for the kinds
+    /// that do not expand from a single point.
+    pub(crate) fn expand_point(
+        grid: &VisibleGrid,
+        point: Pos,
+        ty: SelectionType,
+        escape_chars: &str,
+    ) -> Option<SelectionRange> {
+        match ty {
+            SelectionType::Semantic => Some(Self::range_semantic_engine(
+                grid,
+                point,
+                point,
+                escape_chars,
+            )),
+            SelectionType::Lines => Some(Self::range_lines_engine(grid, point, point)),
+            SelectionType::Simple | SelectionType::Block => None,
+        }
+    }
+
     fn range_semantic_engine(
         grid: &VisibleGrid,
         mut start: Pos,
