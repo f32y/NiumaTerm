@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "settings_tests.rs"]
+mod settings_tests;
+
 use std::mem::take;
 
 use crate::chat::{AgentPreset, ApprovalPreset, ModelInfo, ThreadSettings};
@@ -37,48 +41,20 @@ pub struct ConversationSettings {
     pub agent_presets: Vec<AgentPreset>,
 }
 
-/// Fold the thread's reported settings together with what the pane
-/// remembered. `startup_model` and `startup_effort` come from the launch
-/// profile and are applied last, so a profile that pins one of them wins over
-/// both the remembered pick and whatever the agent reported.
-pub fn resolve_ready_settings(
-    mut next: ThreadSettings,
-    local: Option<&ThreadSettings>,
-    use_all_local: bool,
-    use_local_reviewer: bool,
-    startup_model: Option<&str>,
-    startup_effort: Option<&str>,
-) -> ThreadSettings {
-    if use_all_local && let Some(local) = local {
-        next = ThreadSettings {
-            model: local.model.clone().or(next.model),
-            approval: local.approval.clone().or(next.approval),
-            approvals_reviewer: local.approvals_reviewer.clone().or(next.approvals_reviewer),
-            sandbox: local.sandbox.clone().or(next.sandbox),
-            effort: local.effort.clone().or(next.effort),
-            tier: local.tier.clone().or(next.tier),
-            // A remembered composition already travelled with the creation
-            // request, and the harness refuses to recompose a conversation, so
-            // the one reported is what this conversation runs on.
-            agent_preset: next.agent_preset,
-        };
+/// Overlay remembered controls on what a Ready reported: each remembered
+/// pick wins where one exists. A remembered composition already travelled
+/// with the creation request, and the harness refuses to recompose a
+/// conversation, so the reported one is kept.
+fn overlay_remembered(next: ThreadSettings, local: &ThreadSettings) -> ThreadSettings {
+    ThreadSettings {
+        model: local.model.clone().or(next.model),
+        approval: local.approval.clone().or(next.approval),
+        approvals_reviewer: local.approvals_reviewer.clone().or(next.approvals_reviewer),
+        sandbox: local.sandbox.clone().or(next.sandbox),
+        effort: local.effort.clone().or(next.effort),
+        tier: local.tier.clone().or(next.tier),
+        agent_preset: next.agent_preset,
     }
-
-    if use_local_reviewer
-        && let Some(reviewer) = local.and_then(|local| local.approvals_reviewer.clone())
-    {
-        next.approvals_reviewer = Some(reviewer);
-    }
-
-    if let Some(model) = startup_model {
-        next.model = Some(model.to_string());
-    }
-
-    if let Some(effort) = startup_effort {
-        next.effort = Some(effort.to_string());
-    }
-
-    next
 }
 
 impl ConversationSettings {
@@ -124,20 +100,32 @@ impl ConversationSettings {
             stored
         };
 
-        let startup_model = seed_thread_defaults.then_some(startup_model).flatten();
-        let startup_effort = seed_thread_defaults.then_some(startup_effort).flatten();
+        if (seed_thread_defaults || preserve_current)
+            && let Some(local) = local
+        {
+            next = overlay_remembered(next, local);
+        }
 
-        next = resolve_ready_settings(
-            next,
-            local,
-            seed_thread_defaults || preserve_current,
-            seed_approval_reviewer,
-            startup_model,
-            startup_effort,
-        );
+        if seed_approval_reviewer
+            && let Some(reviewer) = local.and_then(|local| local.approvals_reviewer.clone())
+        {
+            next.approvals_reviewer = Some(reviewer);
+        }
+
+        // A launch profile's pinned model and effort outrank both the thread
+        // and the remembered picks, but only when the defaults are seeded.
+        if seed_thread_defaults {
+            if let Some(model) = startup_model {
+                next.model = Some(model.to_string());
+            }
+
+            if let Some(effort) = startup_effort {
+                next.effort = Some(effort.to_string());
+            }
+        }
 
         if let Some(restored) = self.restore_on_ready.take() {
-            next = resolve_ready_settings(next, Some(&restored), true, false, None, None);
+            next = overlay_remembered(next, &restored);
         }
 
         self.settings = next;

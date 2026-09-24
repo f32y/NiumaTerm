@@ -2,11 +2,9 @@ use nmt_agent::background_task::{
     BackgroundTaskKey, BackgroundTaskLoadState, BackgroundTaskRegistry, BackgroundTaskSnapshot,
     BackgroundTaskState, BackgroundTaskUpdate,
 };
-use nmt_agent::chat::ThreadSettings;
 use nmt_agent::session::ConversationTitleRequest;
 use nmt_agent::session::children::scoped_background_tasks;
 use nmt_agent::session::naming::conversation_title_request as build_title_request;
-use nmt_agent::session::settings::resolve_ready_settings;
 
 use crate::agent_tab::session::{directories_match, directory_label};
 use crate::agent_tab::{AgentKind, tab_title_from_prompt};
@@ -98,110 +96,6 @@ fn a_failed_refresh_reports_unavailable_without_dropping_known_rows() {
         snapshot.discovery,
         BackgroundTaskLoadState::Unavailable { .. }
     ));
-}
-
-#[test]
-fn resumed_codex_thread_uses_only_the_locally_remembered_reviewer() {
-    let backend = ThreadSettings {
-        model: Some("thread-model".into()),
-        approval: Some("never".into()),
-        approvals_reviewer: Some("user".into()),
-        sandbox: Some("readOnly".into()),
-        effort: Some("low".into()),
-        tier: Some("priority".into()),
-        agent_preset: None,
-    };
-
-    let stored = ThreadSettings {
-        model: Some("local-model".into()),
-        approval: Some("on-request".into()),
-        approvals_reviewer: Some("auto_review".into()),
-        sandbox: Some("workspaceWrite".into()),
-        effort: Some("high".into()),
-        tier: None,
-        agent_preset: None,
-    };
-
-    assert_eq!(
-        resolve_ready_settings(backend, Some(&stored), false, true, None, None),
-        ThreadSettings {
-            model: Some("thread-model".into()),
-            approval: Some("never".into()),
-            approvals_reviewer: Some("auto_review".into()),
-            sandbox: Some("readOnly".into()),
-            effort: Some("low".into()),
-            tier: Some("priority".into()),
-            agent_preset: None,
-        }
-    );
-}
-
-#[test]
-fn claude_profile_and_local_settings_survive_later_ready_events() {
-    let backend = ThreadSettings {
-        model: Some("agent-model".into()),
-        approval: Some("default".into()),
-        effort: None,
-        ..ThreadSettings::default()
-    };
-
-    let local = ThreadSettings {
-        model: Some("remembered-model".into()),
-        approval: Some("auto".into()),
-        effort: Some("high".into()),
-        ..ThreadSettings::default()
-    };
-
-    let initial = resolve_ready_settings(
-        backend.clone(),
-        Some(&local),
-        true,
-        false,
-        Some("profile-model"),
-        None,
-    );
-
-    assert_eq!(initial.model.as_deref(), Some("profile-model"));
-    assert_eq!(initial.approval.as_deref(), Some("auto"));
-    assert_eq!(initial.effort.as_deref(), Some("high"));
-    assert_eq!(
-        resolve_ready_settings(backend, Some(&initial), true, false, None, None),
-        initial
-    );
-}
-
-#[test]
-fn a_pinned_profile_effort_outranks_the_thread_and_the_remembered_pick() {
-    let backend = ThreadSettings {
-        effort: Some("low".into()),
-        ..ThreadSettings::default()
-    };
-
-    let local = ThreadSettings {
-        effort: Some("medium".into()),
-        ..ThreadSettings::default()
-    };
-
-    let resolved = resolve_ready_settings(backend, Some(&local), true, false, None, Some("max"));
-
-    assert_eq!(resolved.effort.as_deref(), Some("max"));
-}
-
-#[test]
-fn no_pinned_effort_leaves_the_remembered_pick_in_place() {
-    let backend = ThreadSettings {
-        effort: Some("low".into()),
-        ..ThreadSettings::default()
-    };
-
-    let local = ThreadSettings {
-        effort: Some("medium".into()),
-        ..ThreadSettings::default()
-    };
-
-    let resolved = resolve_ready_settings(backend, Some(&local), true, false, None, None);
-
-    assert_eq!(resolved.effort.as_deref(), Some("medium"));
 }
 
 #[test]
