@@ -6,7 +6,7 @@ use std::fs;
 use std::path::Path;
 use std::time::SystemTime;
 
-use crate::team::model::RoomId;
+use crate::team::model::{Author, RoomId};
 use crate::team::storage::validation::validate;
 use crate::team::storage::{ROOMS_DIRECTORY, RoomStore, Snapshot, StorageError, VERSION};
 
@@ -63,14 +63,15 @@ fn read_summary(path: &Path, id: RoomId) -> Result<Option<RoomSummary>, StorageE
 
     let room = snapshot.room;
 
-    if room.members.is_empty() && room.input_history.is_empty() && room.messages.is_empty() {
+    if room.members.is_empty() && room.messages.is_empty() {
         return Ok(None);
     }
 
     let title = room
-        .input_history
+        .messages
         .iter()
-        .map(|input| input.text.trim())
+        .filter(|message| message.author == Author::User)
+        .map(|message| message.text.trim())
         .find(|text| !text.is_empty())
         .map(|text| {
             text.lines()

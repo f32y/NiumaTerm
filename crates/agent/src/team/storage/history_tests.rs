@@ -4,7 +4,7 @@ use std::time::{Duration, SystemTime};
 use tempfile::tempdir;
 
 use crate::AgentWorkspace;
-use crate::team::model::{RoomId, UserInput};
+use crate::team::model::{Author, MessageId, PublicMessage, Publication, RoomId};
 use crate::team::room::Room;
 use crate::team::storage::RoomStore;
 use crate::team::storage::history::recent_rooms;
@@ -18,9 +18,12 @@ fn history_reads_owned_rooms_without_changing_them_and_skips_empty_or_damaged_ro
 
     room.add_member(config("Alice", "C:/project")).unwrap();
 
-    room.input_history.push(UserInput {
+    room.messages.push(PublicMessage {
+        id: MessageId::new(),
+        author: Author::User,
+        publication: Publication::UserInput,
         text: "Review the project\nMore details".into(),
-        ..UserInput::default()
+        replies_to: Vec::new(),
     });
 
     let store = RoomStore::create(directory.path(), room).unwrap();

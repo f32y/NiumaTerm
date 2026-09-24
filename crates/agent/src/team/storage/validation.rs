@@ -232,7 +232,6 @@ pub(super) fn validate_update(previous: &Room, next: &Room) -> Result<(), Storag
 
     if !next.messages.starts_with(&previous.messages)
         || !next.summaries.starts_with(&previous.summaries)
-        || !next.input_history.starts_with(&previous.input_history)
         || previous
             .members
             .iter()

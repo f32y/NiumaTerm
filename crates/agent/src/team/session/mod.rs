@@ -332,8 +332,6 @@ impl TeamSession {
             .create_discussion(input.text.clone(), participants, mode)?
             .id();
 
-        room.input_history.push(input.clone());
-
         let request = input.clone();
 
         room.messages.push(public_request(input));
@@ -352,8 +350,6 @@ impl TeamSession {
         self.validate_input(&input)?;
 
         let mut room = self.store.room().clone();
-
-        room.input_history.push(input.clone());
 
         let message = public_request(input);
         let id = message.id;

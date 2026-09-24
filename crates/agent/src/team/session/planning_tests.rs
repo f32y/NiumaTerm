@@ -10,7 +10,7 @@ use crate::team::discussion::{
     DiscussionMode, DiscussionState, ModeratorAction, PauseReason, StageKind,
 };
 use crate::team::model::{
-    AttemptId, ContextError, ContextLimits, DiscussionId, MemberId, UserInput,
+    AttemptId, Author, ContextError, ContextLimits, DiscussionId, MemberId, UserInput,
 };
 use crate::team::room::Room;
 use crate::team::session::{AttemptEventKey, TeamError, TeamSession};
@@ -418,7 +418,7 @@ fn fixed_discussion_advances_all_stages_with_frozen_peer_inputs_and_report_charg
             .budget_attempts(BudgetScope::Discussion(id))
             .all(|entry| matches!(entry.state, AttemptState::Completed { .. }))
     );
-    assert_eq!(session.store.room().input_history.len(), 1);
+    assert_eq!(user_inputs(&session), 1);
 }
 
 #[test]
@@ -486,7 +486,7 @@ fn user_correction_reprepares_only_unsent_arrangements_without_extra_charge() {
             .count(),
         2
     );
-    assert_eq!(session.store.room().input_history.len(), 2);
+    assert_eq!(user_inputs(&session), 2);
 
     finish(&mut session, resumed[0], "Bob's revised answer");
 }
@@ -819,4 +819,14 @@ fn reopening_drops_interaction_pauses_of_ended_sessions() {
 
     assert!(!pauses.contains(&PauseReason::Interaction(bob)));
     assert!(pauses.contains(&PauseReason::Reopened));
+}
+
+fn user_inputs(session: &TeamSession) -> usize {
+    session
+        .store
+        .room()
+        .messages()
+        .iter()
+        .filter(|message| message.author == Author::User)
+        .count()
 }

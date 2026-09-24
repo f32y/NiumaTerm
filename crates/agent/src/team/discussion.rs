@@ -182,7 +182,6 @@ impl Stage {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Discussion {
     pub(super) id: DiscussionId,
-    pub(super) objective: String,
     pub(super) participants: Vec<MemberId>,
     pub(super) mode: DiscussionMode,
     pub(super) state: DiscussionState,
@@ -228,10 +227,9 @@ impl Discussion {
         Ok(Self {
             id: DiscussionId::new(),
             request: UserInput {
-                text: objective.clone(),
+                text: objective,
                 ..UserInput::default()
             },
-            objective,
             participants,
             mode,
             state: DiscussionState::Idle,
@@ -243,10 +241,6 @@ impl Discussion {
 
     pub fn id(&self) -> DiscussionId {
         self.id
-    }
-
-    pub fn objective(&self) -> &str {
-        &self.objective
     }
 
     pub fn participants(&self) -> &[MemberId] {

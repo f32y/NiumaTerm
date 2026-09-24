@@ -56,9 +56,12 @@ fn restart_retains_sources_scopes_controls_pending_work_and_budget() {
         disagreements: Vec::new(),
     });
 
-    room.input_history.push(UserInput {
+    room.messages.push(PublicMessage {
+        id: MessageId::new(),
+        author: Author::User,
+        publication: Publication::UserInput,
         text: "Review this".into(),
-        references: vec![message],
+        replies_to: vec![message],
     });
 
     room.create_discussion(

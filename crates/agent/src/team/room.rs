@@ -24,7 +24,6 @@ pub struct Room {
     pub(super) discussions: Vec<Discussion>,
     pub(super) messages: Vec<PublicMessage>,
     pub(super) summaries: Vec<Summary>,
-    pub(super) input_history: Vec<UserInput>,
     pub(super) controls: RoomControls,
     pub(super) attempts: Vec<Attempt>,
 }
@@ -67,7 +66,6 @@ impl Room {
             discussions: Vec::new(),
             messages: Vec::new(),
             summaries: Vec::new(),
-            input_history: Vec::new(),
             controls: RoomControls::default(),
             attempts: Vec::new(),
         }
