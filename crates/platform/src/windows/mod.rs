@@ -15,7 +15,6 @@ pub mod filesystem;
 pub mod ipc;
 pub mod powershell;
 pub mod process;
-pub mod shell_extension;
 pub mod window;
 
 pub(crate) mod library;

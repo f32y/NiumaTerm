@@ -12,8 +12,10 @@ workspace = true
 name = "NmtShellExtension"
 crate-type = ["cdylib"]
 
-[dependencies]
-nmt_platform.workspace = true
+[target.'cfg(windows)'.dependencies]
+percent-encoding.workspace = true
+windows = { workspace = true, features = ["Win32_System_LibraryLoader"] }
+windows-core.workspace = true
 
 [build-dependencies]
 nmt_version.workspace = true

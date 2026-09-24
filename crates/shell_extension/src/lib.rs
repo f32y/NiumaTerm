@@ -7,9 +7,9 @@
 #![allow(non_snake_case)]
 #![cfg(windows)]
 
-use std::ffi;
+mod server;
 
-use nmt_platform::windows::shell_extension;
+use std::ffi;
 
 #[unsafe(no_mangle)]
 extern "system" fn DllMain(
@@ -17,7 +17,7 @@ extern "system" fn DllMain(
     reason: u32,
     _reserved: *mut ffi::c_void,
 ) -> bool {
-    shell_extension::dll_main(instance, reason)
+    server::dll_main(instance, reason)
 }
 
 #[unsafe(no_mangle)]
@@ -26,10 +26,10 @@ unsafe extern "system" fn DllGetClassObject(
     riid: *const ffi::c_void,
     output: *mut *mut ffi::c_void,
 ) -> i32 {
-    unsafe { shell_extension::dll_get_class_object(rclsid, riid, output) }
+    unsafe { server::dll_get_class_object(rclsid, riid, output) }
 }
 
 #[unsafe(no_mangle)]
 extern "system" fn DllCanUnloadNow() -> i32 {
-    shell_extension::dll_can_unload_now()
+    server::dll_can_unload_now()
 }
