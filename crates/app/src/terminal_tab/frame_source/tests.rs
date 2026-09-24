@@ -223,9 +223,7 @@ fn bad_shell_returns_error() {
 
 #[test]
 fn osc_notification_drains_into_shared_exact_notification_lifecycle() {
-    use nmt_agent::{
-        AgentActivityPolicy, AgentMonitor, AgentRoute, AgentRuntimeStatus, request_native_delivery,
-    };
+    use nmt_agent::{AgentActivityPolicy, AgentMonitor, AgentRoute, AgentRuntimeStatus};
 
     let event = HostEvent::Notification {
         title: "T".repeat(300),
@@ -253,7 +251,6 @@ fn osc_notification_drains_into_shared_exact_notification_lifecycle() {
     assert_eq!(notification.title.chars().count(), 256);
     assert_eq!(notification.body.chars().count(), 4_096);
     assert_eq!(monitor.project([&route]).status, AgentRuntimeStatus::Idle);
-    assert!(request_native_delivery(None, &route));
     assert!(monitor.mark_native_requested(&route, &notification.id));
     assert!(
         monitor

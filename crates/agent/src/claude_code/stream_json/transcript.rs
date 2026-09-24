@@ -118,7 +118,13 @@ impl TranscriptState {
         &mut self,
         composition: &ContextComposition,
     ) -> Option<ContextWindowUsage> {
-        let filled = window_from_composition(self.context_usage, composition)?;
+        // Live accounting breaks the window down by category; a coarse total
+        // only stands in while none has arrived.
+        if self.context_usage.is_some() || composition.used_tokens == 0 {
+            return None;
+        }
+
+        let filled = TokenUsageBreakdown::total_only(composition.used_tokens);
 
         self.context_usage = Some(filled);
         self.context_window = self.context_window.or(composition.max_tokens);
@@ -434,15 +440,4 @@ impl TranscriptState {
             self.context_window,
         )
     }
-}
-
-/// Whether a context breakdown should stand in for the window's own
-/// accounting. Live accounting names each category, so it is always the better
-/// answer; the breakdown only fills the gap before any has arrived.
-pub(super) fn window_from_composition(
-    live: Option<TokenUsageBreakdown>,
-    composition: &ContextComposition,
-) -> Option<TokenUsageBreakdown> {
-    (live.is_none() && composition.used_tokens > 0)
-        .then(|| TokenUsageBreakdown::total_only(composition.used_tokens))
 }

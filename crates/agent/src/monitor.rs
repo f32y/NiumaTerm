@@ -507,12 +507,5 @@ fn higher_status(left: AgentRuntimeStatus, right: AgentRuntimeStatus) -> AgentRu
     }
 }
 
-pub fn request_native_delivery(
-    exact_visible_route: Option<&AgentRoute>,
-    notification_route: &AgentRoute,
-) -> bool {
-    exact_visible_route != Some(notification_route)
-}
-
 pub const COMPLETION_QUIET_WINDOW: Duration = Duration::from_millis(1_500);
 pub(crate) const ACTIVE_STATE_STALE_AFTER: Duration = Duration::from_secs(30 * 60);

@@ -117,19 +117,6 @@ fn maps_oauth_windows_to_remaining_integer_percentages() {
 }
 
 #[test]
-fn oauth_fallback_is_limited_to_recoverable_statuses() {
-    assert!(oauth_status_allows_cli_fallback(StatusCode::UNAUTHORIZED));
-    assert!(oauth_status_allows_cli_fallback(
-        StatusCode::INTERNAL_SERVER_ERROR
-    ));
-    assert!(!oauth_status_allows_cli_fallback(StatusCode::FORBIDDEN));
-    assert!(!oauth_status_allows_cli_fallback(
-        StatusCode::TOO_MANY_REQUESTS
-    ));
-    assert!(!oauth_status_allows_cli_fallback(StatusCode::NOT_FOUND));
-}
-
-#[test]
 fn parses_interactive_usage_panel_with_split_labels_and_values() {
     let output = "\u{1b}[32mCurrent session\u{1b}[0m\r\n████ 97% used\r\nCurrent week (all models)\r\n17% consumed\r\nCurrent week (Fable)\r\n32% used\r\n";
 

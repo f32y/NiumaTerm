@@ -5,7 +5,7 @@ pub use crate::event::{
 pub use crate::hook_store::{HookInstallStatus, build_hook_command, hook_command_contains};
 pub use crate::monitor::{
     AgentActivityPolicy, AgentMonitor, AgentNotification, AgentProjection, COMPLETION_QUIET_WINDOW,
-    MonitorMutation, request_native_delivery,
+    MonitorMutation,
 };
 pub use crate::process::{
     AGENT_HOOK_EXE_ENV, AGENT_HOOK_PROTOCOL_VERSION, AGENT_HOOK_TOKEN_ENV, AGENT_HOOK_VERSION_ENV,

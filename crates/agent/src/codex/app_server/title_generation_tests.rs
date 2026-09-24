@@ -4,9 +4,9 @@ use tokio::sync::mpsc::unbounded_channel;
 use crate::codex::app_server::ThreadProfile;
 use crate::codex::app_server::protocol::thread_name_request;
 use crate::codex::app_server::title_generation::{
-    TITLE_GENERATION_CANCEL_METHOD, TITLE_GENERATION_RESULT_METHOD, TitleGenerationHandle,
-    TitleGenerationResult, generated_title_from_message, parse_title_generation_result,
-    provisional_title_from_prompt, title_thread_start_request, title_turn_start_request,
+    TITLE_GENERATION_CANCEL_METHOD, TitleGenerationHandle, TitleGenerationResult,
+    generated_title_from_message, parse_title_generation_result, provisional_title_from_prompt,
+    title_thread_start_request, title_turn_start_request,
 };
 use crate::workspace::AgentWorkspace;
 
@@ -28,15 +28,12 @@ fn provisional_title_flattens_and_bounds_the_prompt() {
 
 #[test]
 fn internal_result_parser_keeps_generation_identity() {
-    let result = parse_title_generation_result(
-        TITLE_GENERATION_RESULT_METHOD,
-        &json!({
-            "generationId": 7,
-            "rootThreadId": "thread-root",
-            "provisionalTitle": "Opening prompt",
-            "generatedTitle": "Inspect title updates",
-        }),
-    )
+    let result = parse_title_generation_result(&json!({
+        "generationId": 7,
+        "rootThreadId": "thread-root",
+        "provisionalTitle": "Opening prompt",
+        "generatedTitle": "Inspect title updates",
+    }))
     .unwrap();
 
     assert_eq!(result.generation_id, 7);
@@ -46,7 +43,6 @@ fn internal_result_parser_keeps_generation_identity() {
         result.generated_title.as_deref(),
         Some("Inspect title updates")
     );
-    assert!(parse_title_generation_result("other", &json!({})).is_none());
 }
 
 #[test]

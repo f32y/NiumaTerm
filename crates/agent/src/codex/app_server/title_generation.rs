@@ -114,14 +114,7 @@ pub(super) fn start_title_generation(
     }
 }
 
-pub(super) fn parse_title_generation_result(
-    method: &str,
-    params: &Value,
-) -> Option<TitleGenerationResult> {
-    if method != TITLE_GENERATION_RESULT_METHOD {
-        return None;
-    }
-
+pub(super) fn parse_title_generation_result(params: &Value) -> Option<TitleGenerationResult> {
     Some(TitleGenerationResult {
         generation_id: params["generationId"].as_u64()?,
         root_thread_id: params["rootThreadId"].as_str()?.to_string(),

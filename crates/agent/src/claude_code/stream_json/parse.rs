@@ -179,13 +179,6 @@ pub(super) fn initialize_command_catalog(
     }
 }
 
-pub(super) fn legacy_command_catalog(
-    structured_commands_published: bool,
-    commands: &Value,
-) -> Option<Vec<SlashCommandInfo>> {
-    (!structured_commands_published).then(|| parse_slash_commands(commands))
-}
-
 /// Commands that belong to the CLI's own terminal session rather than to the
 /// conversation. Each either reports state this application already shows, or
 /// changes settings its controls own; running one from the palette leaves the

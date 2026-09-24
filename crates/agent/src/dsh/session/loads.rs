@@ -325,7 +325,7 @@ pub(super) fn load_commands(
             client
                 .call(
                     catalogs::COMMAND_LIST_METHOD,
-                    catalogs::agent_args(&session_id),
+                    json!({ "agentId": session_id }),
                 )
                 .await,
             deliver.as_ref(),

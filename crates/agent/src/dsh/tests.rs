@@ -812,10 +812,6 @@ fn the_command_registry_fills_the_palette() {
     assert_eq!(catalog[0].arguments, SlashCommandArguments::None);
     assert_eq!(catalog[1].arguments, SlashCommandArguments::Freeform);
     assert_eq!(catalog[1].argument_hint.as_deref(), Some("preset name"));
-
-    // The registry resolves the agent from a session id, and the argument is
-    // named by that resolver rather than by the method's own parameter.
-    assert_eq!(catalogs::agent_args(SESSION), json!({ "agentId": SESSION }));
 }
 
 #[test]

@@ -197,10 +197,6 @@ async fn read_oauth_token() -> Result<String, String> {
     parse_oauth_token(&bytes)
 }
 
-fn oauth_status_allows_cli_fallback(status: StatusCode) -> bool {
-    status == StatusCode::UNAUTHORIZED || status.is_server_error()
-}
-
 fn parse_oauth_usage(bytes: &[u8]) -> Result<UsageSnapshot, String> {
     let response: OAuthUsageResponse = serde_json::from_slice(bytes)
         .map_err(|_| "Claude OAuth usage response was not valid JSON".to_string())?;
@@ -282,11 +278,15 @@ async fn request_oauth_usage() -> Result<UsageSnapshot, OAuthFetchError> {
             status.as_u16()
         );
 
-        return Err(if oauth_status_allows_cli_fallback(status) {
-            OAuthFetchError::Fallback(message)
-        } else {
-            OAuthFetchError::Final(message)
-        });
+        // An expired login or a server fault can still be answered by the
+        // CLI; any other refusal would be refused there too.
+        return Err(
+            if status == StatusCode::UNAUTHORIZED || status.is_server_error() {
+                OAuthFetchError::Fallback(message)
+            } else {
+                OAuthFetchError::Final(message)
+            },
+        );
     }
 
     let bytes = read_bounded_response(response, MAX_OUTPUT_BYTES, "Claude OAuth usage response")

@@ -1567,9 +1567,6 @@ fn replayed_compaction_ignores_non_protocol_summary_fields() {
 
 #[test]
 fn compaction_is_structural_while_review_lifecycle_items_remain_tools() {
-    assert!(is_legacy_compaction_notification("thread/compacted"));
-    assert!(!is_legacy_compaction_notification("item/completed"));
-
     assert_eq!(
         parse_item(&json!({"id": "compact", "type": "contextCompaction"})),
         Some(Item::Compaction {

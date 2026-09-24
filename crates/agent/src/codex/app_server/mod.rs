@@ -50,7 +50,6 @@ use crate::LaunchConfig;
 use crate::chat::{QuestionRequest, QuestionResponse, TeamDecisionRequest};
 use crate::codex::ProviderConfig;
 use crate::codex::app_server::background_tasks::{CodexTasks, ThreadScope, notification_thread_id};
-use crate::codex::app_server::compaction::is_legacy_compaction_notification;
 use crate::codex::app_server::control::{ControlOperation, ControlState, QueryKind};
 use crate::codex::app_server::conversation::ThreadState;
 #[cfg(test)]
@@ -1229,7 +1228,7 @@ impl Session {
             return self.on_host_exit(params);
         }
 
-        if is_legacy_compaction_notification(method) {
+        if method == "thread/compacted" {
             // Current servers can publish this deprecated notification beside
             // the authoritative item lifecycle. Ignoring it prevents a second
             // boundary for the same context rewrite.
@@ -1392,8 +1391,7 @@ impl Session {
     }
 
     pub(super) fn apply_title_generation_result(&mut self, params: &Value) -> Vec<Event> {
-        let Some(result) = parse_title_generation_result(TITLE_GENERATION_RESULT_METHOD, params)
-        else {
+        let Some(result) = parse_title_generation_result(params) else {
             return Vec::new();
         };
 

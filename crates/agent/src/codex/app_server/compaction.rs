@@ -100,10 +100,6 @@ impl CompactionState {
     }
 }
 
-pub(super) fn is_legacy_compaction_notification(method: &str) -> bool {
-    method == "thread/compacted"
-}
-
 pub(super) fn compaction_started(state: &mut CompactionState, item: &Value) -> Vec<Event> {
     let Some(id) = item["id"].as_str().filter(|id| !id.is_empty()) else {
         return Vec::new();

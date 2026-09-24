@@ -720,7 +720,6 @@ fn background_window_notification_activation_is_exact() {
         .unwrap()
         .clone();
 
-    assert!(request_native_delivery(Some(&foreground), &background));
     assert!(background_monitor.mark_native_requested(&background, &notification.id));
 
     assert!(

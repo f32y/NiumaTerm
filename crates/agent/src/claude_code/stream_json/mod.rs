@@ -48,16 +48,16 @@ use crate::claude_code::stream_json::control::{
 };
 use crate::claude_code::stream_json::parse::{
     approval_description, claude_result_error, compaction_progress, initialize_command_catalog,
-    legacy_command_catalog, parse_models, slash_command_text, ui_owns_slash_command,
+    parse_models, parse_slash_commands, slash_command_text, ui_owns_slash_command,
     user_prompt_text,
 };
 #[cfg(test)]
 use crate::claude_code::stream_json::parse::{
-    context_window_usage, parse_claude_usage, parse_slash_commands, update_claude_output,
+    context_window_usage, parse_claude_usage, update_claude_output,
 };
 use crate::claude_code::stream_json::transcript::TranscriptState;
 #[cfg(test)]
-use crate::claude_code::stream_json::transcript::{TurnOutputUsage, window_from_composition};
+use crate::claude_code::stream_json::transcript::TurnOutputUsage;
 use crate::claude_code::tasks::{ClaudeTasks, shell_items};
 use crate::claude_code::workflows::{ClaudeWorkflowSource, ClaudeWorkflows};
 use crate::launcher::AgentCli;
@@ -666,7 +666,7 @@ impl Session {
         }
 
         match self.send_control(
-            file_rewind_request(user_message_id),
+            json!({"subtype": "rewind_files", "user_message_id": user_message_id}),
             PendingControlOperation::FileRewind,
         ) {
             Ok(_) => SlashCommandOutcome::Accepted,
@@ -1141,10 +1141,9 @@ impl Session {
 
         // Older Claude versions only reveal this string catalog when the
         // first turn opens. It must not erase richer initialize metadata.
-        if let Some(commands) = legacy_command_catalog(
-            self.structured_commands_published,
-            &message["slash_commands"],
-        ) {
+        if !self.structured_commands_published {
+            let commands = parse_slash_commands(&message["slash_commands"]);
+
             events.push(Event::Commands(commands));
         }
 
@@ -1342,7 +1341,11 @@ impl Session {
             let permission =
                 Some(configured_permission_mode().unwrap_or_else(|| "default".to_string()));
 
-            let model = initial_ready_model(self.applied_model.as_deref());
+            let model = self
+                .applied_model
+                .as_deref()
+                .unwrap_or("default")
+                .to_string();
 
             self.ready = true;
             self.applied_model = Some(model.clone());
@@ -1403,14 +1406,6 @@ fn launch_model(launch: &LaunchConfig) -> Option<String> {
         })
 }
 
-fn initial_ready_model(model: Option<&str>) -> String {
-    model.unwrap_or("default").to_string()
-}
-
-fn enable_file_checkpointing(command: &mut Command) {
-    command.env(FILE_CHECKPOINTING_ENV, "true");
-}
-
 /// Assemble the CLI invocation for one conversation. Kept apart from the spawn
 /// so the exact argument boundaries can be inspected without starting a
 /// process: a path pushed as its own argument is never re-parsed, which is what
@@ -1439,7 +1434,7 @@ fn claude_command(
     // File snapshots are opt-in for stream-json SDK clients. This is
     // applied after profile overrides so every NiumaTerm Claude session
     // can create checkpoints for subsequent `/rewind` operations.
-    enable_file_checkpointing(&mut command);
+    command.env(FILE_CHECKPOINTING_ENV, "true");
 
     // Recent models omit checklist tools unless the client opts in. Keep an
     // explicit profile or inherited choice while enabling progress by default.
@@ -1496,13 +1491,6 @@ fn claude_command(
     }
 
     command
-}
-
-fn file_rewind_request(user_message_id: &str) -> Value {
-    json!({
-        "subtype": "rewind_files",
-        "user_message_id": user_message_id,
-    })
 }
 
 /// The permission mode the CLI will start in, from its user `settings.json`

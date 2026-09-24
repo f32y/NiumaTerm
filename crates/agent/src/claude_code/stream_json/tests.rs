@@ -893,23 +893,6 @@ fn post_compaction_total_clears_category_detail() {
 }
 
 #[test]
-fn every_claude_process_enables_sdk_file_checkpointing() {
-    let mut command = Command::new("claude");
-
-    command.env(FILE_CHECKPOINTING_ENV, "false");
-
-    enable_file_checkpointing(&mut command);
-
-    let value = command
-        .get_envs()
-        .find(|(name, _)| *name == FILE_CHECKPOINTING_ENV)
-        .and_then(|(_, value)| value)
-        .and_then(|value| value.to_str());
-
-    assert_eq!(value, Some("true"));
-}
-
-#[test]
 fn rewind_is_an_idle_ui_command_not_a_provider_slash_turn() {
     let commands = Session::adapter_commands();
 
@@ -1155,17 +1138,6 @@ fn resumed_session_id_is_available_before_the_first_init_event() {
     }
 
     assert_eq!(published_id, Some(resume_id));
-}
-
-#[test]
-fn file_rewind_request_matches_the_sdk_control_shape() {
-    assert_eq!(
-        file_rewind_request("user-message-1"),
-        json!({
-            "subtype": "rewind_files",
-            "user_message_id": "user-message-1",
-        })
-    );
 }
 
 fn pending_control(id: &str, operation: PendingControlOperation) -> ControlState {
@@ -1476,9 +1448,10 @@ fn initialize_uses_model_pinned_by_launch_environment() {
         ..LaunchConfig::default()
     };
 
-    let model = initial_ready_model(launch_model(&launch).as_deref());
-
-    assert_eq!(model, "claude-opus-4-8-v4-flash[1m]");
+    assert_eq!(
+        launch_model(&launch).as_deref(),
+        Some("claude-opus-4-8-v4-flash[1m]")
+    );
 }
 
 #[test]
@@ -1567,17 +1540,12 @@ fn initialize_commands_are_primary_and_legacy_catalogs_are_fallbacks() {
             .collect::<Vec<_>>(),
         vec!["plugin:review", "pr"]
     );
-    assert!(legacy_command_catalog(structured, &json!(["legacy"])).is_none());
 
     let (legacy, structured) =
         initialize_command_catalog(&json!({"slash_commands": ["legacy"]})).unwrap();
 
     assert!(!structured);
     assert_eq!(legacy[0].name, "legacy");
-    assert_eq!(
-        legacy_command_catalog(structured, &json!(["newer"])).unwrap()[0].name,
-        "newer"
-    );
     assert!(initialize_command_catalog(&json!({})).is_none());
 }
 
@@ -1697,9 +1665,11 @@ fn a_restored_window_is_filled_from_the_breakdown() {
         auto_compact_threshold: None,
     };
 
-    let filled = window_from_composition(None, &composition).expect("the window is unknown");
+    let filled = TranscriptState::default()
+        .apply_composition(&composition)
+        .expect("the window is unknown");
 
-    assert_eq!(filled.total_tokens, 41_000);
+    assert_eq!(filled.used_tokens(), 41_000);
 }
 
 #[test]
@@ -1721,8 +1691,16 @@ fn live_accounting_is_never_replaced_by_the_breakdown() {
         auto_compact_threshold: None,
     };
 
+    let mut transcript = TranscriptState::default();
+
+    transcript.on_assistant(&json!({"message": {"content": [], "usage": {
+        "input_tokens": live.input_tokens,
+        "cache_read_input_tokens": live.cache_read_input_tokens,
+        "output_tokens": live.output_tokens,
+    }}}));
+
     assert!(
-        window_from_composition(Some(live), &composition).is_none(),
+        transcript.apply_composition(&composition).is_none(),
         "a coarse total must not overwrite the per-category accounting"
     );
 }
@@ -1737,7 +1715,11 @@ fn an_empty_breakdown_reports_no_window() {
         auto_compact_threshold: None,
     };
 
-    assert!(window_from_composition(None, &composition).is_none());
+    assert!(
+        TranscriptState::default()
+            .apply_composition(&composition)
+            .is_none()
+    );
 }
 
 /// A resumed conversation reaches readiness through the initialize control

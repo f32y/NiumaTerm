@@ -212,15 +212,6 @@ pub(crate) const COMMAND_LIST_METHOD: &str = "commands/list";
 /// way reaches the model as text.
 const EXECUTE_METHOD: &str = "commands/execute";
 
-/// Named arguments for a gateway call addressed to one session's agent.
-///
-/// The registry resolves the agent from a session id, and the argument is named
-/// by the resolver that does the resolving rather than by the method's own
-/// parameter, so the two names differ.
-pub(crate) fn agent_args(session_id: &str) -> Value {
-    json!({ "agentId": session_id })
-}
-
 /// Run one command line addressed to a session's agent.
 ///
 /// The attachment list is required even when empty. Older hosts name it

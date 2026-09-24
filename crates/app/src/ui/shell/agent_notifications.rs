@@ -2,9 +2,7 @@ use std::sync::OnceLock;
 use std::time;
 
 use gpui::Context;
-use nmt_agent::{
-    AgentMonitor, AgentNotification, AgentRoute, MonitorMutation, request_native_delivery,
-};
+use nmt_agent::{AgentMonitor, AgentNotification, AgentRoute, MonitorMutation};
 use nmt_platform::{
     NativeNotification, remove_notification, show_notification, system_notification_enabled,
 };
@@ -103,7 +101,8 @@ impl AgentNotificationState {
             && system_notification_enabled();
 
         for notification in self.agent_monitor.pending_native_notifications() {
-            if !request_native_delivery(visible_route, &notification.route) {
+            // The route on screen already shows its own notification.
+            if visible_route == Some(&notification.route) {
                 self.acknowledge(&notification.route, &notification.id, cx);
 
                 continue;
