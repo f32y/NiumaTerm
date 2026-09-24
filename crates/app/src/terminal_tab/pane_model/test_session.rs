@@ -135,7 +135,7 @@ pub(crate) fn streaming_controller(
         input: input.clone(),
     };
 
-    let source = TerminalFrameSource::attach(wake_channel().0, 1, |observer| {
+    let source = TerminalFrameSource::attach(wake_channel().0, |observer| {
         TerminalSession::from_pty(
             pty,
             None,

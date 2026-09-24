@@ -25,7 +25,7 @@ use nmt_config::local_state::TabState;
 use nmt_terminal::clipboard::{Clipboard, ClipboardType};
 use nmt_terminal::input::{KeyPhase, WheelDelta};
 use nmt_terminal::session::interaction::{CopyCompletion, PendingCopy};
-use nmt_terminal::session::{HostEvent, SurfaceMouseButton, TerminalSessionConfig};
+use nmt_terminal::session::{HostEvent, SessionChange, SurfaceMouseButton, TerminalSessionConfig};
 use rust_i18n::t;
 use tracing::warn;
 
@@ -220,10 +220,10 @@ impl TerminalPane {
         cx.notify();
     }
 
-    fn on_wake(&mut self, wake: wake::Wake, cx: &mut Context<Self>) {
-        match wake {
-            wake::Wake::Content(_) => self.invalidate(cx),
-            wake::Wake::Chrome(_) => {
+    fn on_wake(&mut self, change: SessionChange, cx: &mut Context<Self>) {
+        match change {
+            SessionChange::Content => self.invalidate(cx),
+            SessionChange::HostEvents => {
                 self.model.invalidate();
 
                 // Background panes cannot clear their dirty bit by rendering, but the
@@ -921,7 +921,7 @@ impl Render for TerminalPane {
             self.attach_image_releases(window, cx);
         }
 
-        self.wake.mark_delivered(self.identity.id);
+        self.wake.mark_delivered();
 
         // Host events are drained by the shell pump (observer), and the surface
         // is resized from the leaf's actual bounds in paint — neither happens

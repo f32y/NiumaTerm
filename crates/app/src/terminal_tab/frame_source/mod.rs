@@ -32,7 +32,7 @@ use crate::terminal_tab::block_list::chrome::DurationLabels;
 use crate::terminal_tab::frame::{BackgroundColors, EngineRowBuilder, TerminalFrame};
 use crate::terminal_tab::graphics::{FrozenImageCache, GenerationStore, prune_frozen_images};
 use crate::terminal_tab::pane_model::FrameTheme;
-use crate::terminal_tab::wake::{Wake, WakeSender, WakeSignal};
+use crate::terminal_tab::wake::WakeSignal;
 use crate::terminal_tab::{block_list, frame, graphics, metrics};
 
 pub struct TerminalFrameSource {
@@ -46,11 +46,11 @@ impl TerminalFrameSource {
     pub fn new(
         config: TerminalSessionConfig,
         id: u64,
-        wake: Option<WakeSender>,
+        wake: Option<WakeSignal>,
         colors: Colors,
     ) -> Result<Self, String> {
         let grid_size = (config.cols, config.rows);
-        let images = Arc::new(SessionBridge::new(id, wake));
+        let images = Arc::new(SessionBridge::new(wake));
 
         let session = TerminalSession::new(&config, id, colors, Some(images.clone()))
             .map_err(|error| format!("{:?}: {}", error.code, error))?;
@@ -69,25 +69,15 @@ impl TerminalFrameSource {
         launch: TerminalSessionConfig,
         colors: Colors,
     ) -> Result<Self, String> {
-        let wake_sender = WakeSender::from_fn(move |kind: Wake| {
-            wake.signal(kind);
-        });
-
-        Self::new(launch, surface_id, Some(wake_sender), colors)
+        Self::new(launch, surface_id, Some(wake), colors)
     }
 
     #[cfg(test)]
     pub(super) fn attach(
         wake: WakeSignal,
-        id: u64,
         connect: impl FnOnce(Arc<dyn SessionObserver>) -> Result<TerminalSession, EngineError>,
     ) -> Result<Self, String> {
-        let images = Arc::new(SessionBridge::new(
-            id,
-            Some(WakeSender::from_fn(move |kind| {
-                wake.signal(kind);
-            })),
-        ));
+        let images = Arc::new(SessionBridge::new(Some(wake)));
 
         let session =
             connect(images.clone()).map_err(|error| format!("{:?}: {}", error.code, error))?;
@@ -367,17 +357,15 @@ pub(super) struct SessionBridge {
     pub(super) generations: Mutex<GenerationStore>,
     pub(super) frozen: FrozenImageCache,
     live_count: AtomicUsize,
-    id: u64,
-    wake: Option<WakeSender>,
+    wake: Option<WakeSignal>,
 }
 
 impl SessionBridge {
-    pub(super) fn new(id: u64, wake: Option<WakeSender>) -> Self {
+    pub(super) fn new(wake: Option<WakeSignal>) -> Self {
         Self {
             generations: Mutex::new(GenerationStore::default()),
             frozen: Arc::default(),
             live_count: AtomicUsize::new(0),
-            id,
             wake,
         }
     }
@@ -408,10 +396,7 @@ impl SessionObserver for SessionBridge {
 
     fn changed(&self, change: SessionChange) {
         if let Some(wake) = &self.wake {
-            wake.send(match change {
-                SessionChange::Content => Wake::Content(self.id),
-                SessionChange::HostEvents => Wake::Chrome(self.id),
-            });
+            wake.signal(change);
         }
     }
 }
