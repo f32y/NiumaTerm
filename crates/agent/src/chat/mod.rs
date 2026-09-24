@@ -546,6 +546,13 @@ pub enum Event {
         /// The handshake itself failed; the session will not become usable.
         fatal: bool,
     },
+    /// The answer to one side question, matched to its request by `id`. A
+    /// side question is answered outside the conversation, so it never opens
+    /// a turn or adds to the transcript.
+    SideQuestionAnswered {
+        id: String,
+        answer: Result<String, String>,
+    },
 }
 
 /// Outcome of a session's `send_user_message`.

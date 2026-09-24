@@ -698,6 +698,27 @@ impl Backend {
         }
     }
 
+    /// Ask a side question, answering with the request id the answer will
+    /// arrive under. `None` means the harness cannot answer one.
+    pub(crate) fn ask_side_question(
+        &mut self,
+        question: &str,
+        history: &[(&str, &str)],
+    ) -> Option<Result<String, String>> {
+        match self {
+            Backend::Claude(session) => Some(session.ask_side_question(question, history)),
+            Backend::Codex(_) | Backend::DeepSeek(_) => None,
+            #[cfg(any(test, feature = "test-support"))]
+            Backend::Test(_) => None,
+        }
+    }
+
+    pub(crate) fn cancel_side_question(&mut self, id: &str) {
+        if let Backend::Claude(session) = self {
+            session.cancel_side_question(id);
+        }
+    }
+
     pub(super) fn interrupt(&mut self) -> bool {
         match self {
             Backend::Codex(session) => session.interrupt(),

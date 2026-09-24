@@ -316,6 +316,66 @@ fn turn_completion_preserves_session_requests_and_retires_prompts() {
     assert!(!control.has_active_request());
 }
 
+#[test]
+fn side_questions_settle_by_request_id_without_holding_the_session() {
+    let mut control = ControlState::default();
+
+    let ask = |control: &mut ControlState| {
+        let (id, _) = control.request(json!({"subtype": "side_question"}));
+
+        control.admit(
+            id.clone(),
+            RequestClass::Mutation,
+            None,
+            PendingControlOperation::SideQuestion(id.clone()),
+            Instant::now(),
+        );
+
+        id
+    };
+
+    let answered = ask(&mut control);
+    let silent = ask(&mut control);
+    let cancelled = ask(&mut control);
+    let orphaned = ask(&mut control);
+
+    // An open side question must not block turns, restores, or shutdown.
+    assert!(!control.has_active_request());
+
+    assert_eq!(
+        control.resolve(&json!({
+            "request_id": answered, "subtype": "success",
+            "response": {"response": " PELICAN \n", "synthetic": false},
+        })),
+        Some(Event::SideQuestionAnswered {
+            id: answered,
+            answer: Ok("PELICAN".into()),
+        })
+    );
+    assert!(matches!(
+        control.resolve(&json!({
+            "request_id": silent, "subtype": "success", "response": {"response": null},
+        })),
+        Some(Event::SideQuestionAnswered { answer: Err(_), .. })
+    ));
+    assert_eq!(
+        control.resolve(&json!({
+            "request_id": cancelled, "subtype": "error", "error": "Side question cancelled",
+        })),
+        Some(Event::SideQuestionAnswered {
+            id: cancelled,
+            answer: Err("Side question cancelled".into()),
+        })
+    );
+    assert_eq!(
+        control.close("Claude exited"),
+        vec![Event::SideQuestionAnswered {
+            id: orphaned,
+            answer: Err("Claude exited".into()),
+        }]
+    );
+}
+
 #[cfg(windows)]
 #[test]
 fn question_ids_reject_stale_answers_and_settle_accepted_responses() {

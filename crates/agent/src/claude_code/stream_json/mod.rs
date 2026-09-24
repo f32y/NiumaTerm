@@ -173,6 +173,17 @@ impl Session {
                 arguments: SlashCommandArguments::Freeform,
                 run_policy: SlashCommandRunPolicy::QueueUntilIdle,
             },
+            // The CLI's own `/btw` runs in its terminal UI and is missing from
+            // the catalog it reports to stream-json clients; the request
+            // behind it is reachable, so the adapter offers the command.
+            SlashCommandInfo {
+                name: "side".into(),
+                description: "Ask a side question without interrupting the conversation".into(),
+                argument_hint: Some("<question>".into()),
+                source: SlashCommandSource::Adapter,
+                arguments: SlashCommandArguments::Freeform,
+                run_policy: SlashCommandRunPolicy::Immediate,
+            },
         ]
     }
 
@@ -646,6 +657,62 @@ impl Session {
         self.control.cancel_generated_title();
 
         true
+    }
+
+    /// Ask a question about the conversation without adding to it. The CLI
+    /// answers from the live context, including a turn still running, in one
+    /// response with no tool execution, so the question needs no idle session
+    /// and cannot change the workspace. The CLI keeps no side history of its
+    /// own for this client: `history` carries the earlier answered exchanges,
+    /// oldest first, so a follow-up can refer back to them.
+    ///
+    /// Returns the request id the answer arrives under as
+    /// [`Event::SideQuestionAnswered`].
+    pub(crate) fn ask_side_question(
+        &mut self,
+        question: &str,
+        history: &[(&str, &str)],
+    ) -> Result<String, String> {
+        if !self.ready || !self.process.has_stdin() {
+            return Err("Claude is not ready".into());
+        }
+
+        let mut request = json!({"subtype": "side_question", "question": question});
+
+        if !history.is_empty() {
+            request["history"] = history
+                .iter()
+                .map(|(question, response)| json!({"question": question, "response": response}))
+                .collect();
+        }
+
+        self.control.check_connected()?;
+
+        let (request_id, message) = self.control.request(request);
+
+        let ticket = self
+            .process
+            .write_tracked(vec![message])
+            .map_err(|error| error.to_string())?;
+
+        // An answer is a model call over the whole context, so it gets the
+        // long deadline; the short query deadline is sized for local reads.
+        self.control.admit(
+            request_id.clone(),
+            RequestClass::Mutation,
+            Some(ticket),
+            PendingControlOperation::SideQuestion(request_id.clone()),
+            Instant::now(),
+        );
+
+        Ok(request_id)
+    }
+
+    /// Stop the model call behind side question `id`. The CLI settles a
+    /// cancelled question with an error response, which is left pending here
+    /// so that response still clears it.
+    pub(crate) fn cancel_side_question(&mut self, id: &str) {
+        let _ = self.try_send(json!({"type": "control_cancel_request", "request_id": id}));
     }
 
     pub(crate) fn rewind_files(&mut self, user_message_id: &str) -> SlashCommandOutcome {

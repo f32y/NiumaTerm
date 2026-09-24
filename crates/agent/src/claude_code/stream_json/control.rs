@@ -34,6 +34,9 @@ pub(super) enum PendingControlOperation {
     FileRewind,
     ContextComposition,
     SessionTitle,
+    /// A side question, named by its request id so the answer can be matched
+    /// to the question that asked it.
+    SideQuestion(String),
 }
 
 /// A request that ran out of time, with what is needed to settle it.
@@ -467,7 +470,25 @@ fn operation_resolved(operation: PendingControlOperation, response: &Value) -> O
 
             None
         }
+        PendingControlOperation::SideQuestion(id) => Some(Event::SideQuestionAnswered {
+            id,
+            answer: match error {
+                Some(error) => Err(error),
+                None => side_question_answer(&response["response"]),
+            },
+        }),
     }
+}
+
+/// The CLI answers with a null response when the model produced no text, so
+/// an empty answer is reported as a failure rather than shown as blank.
+fn side_question_answer(payload: &Value) -> Result<String, String> {
+    payload["response"]
+        .as_str()
+        .map(str::trim)
+        .filter(|answer| !answer.is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| "Claude returned no answer to the side question.".to_string())
 }
 
 /// Categories the CLI lists beside its usage breakdown rather than as part of
@@ -538,6 +559,10 @@ fn fail_pending_control_operations(
             // A conversation that lost its naming request keeps the name it
             // already had, which is what an unnamed one shows anyway.
             PendingControlOperation::SessionTitle => None,
+            PendingControlOperation::SideQuestion(id) => Some(Event::SideQuestionAnswered {
+                id,
+                answer: Err(message.to_string()),
+            }),
         })
         .collect()
 }

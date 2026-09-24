@@ -78,6 +78,7 @@ use nmt_agent::session::input::{
 };
 use nmt_agent::session::lifecycle::InterruptOutcome;
 use nmt_agent::session::restore::{ResumeStart, SettingsSeed};
+use nmt_agent::session::side::{SideAnswer, SideQuestionOutcome};
 use nmt_agent::session::workflows::OpenWorkflowAgent;
 use nmt_agent::session::{ImageAttachment, PromptRequest, SettingsOutcome};
 #[cfg(test)]
@@ -135,6 +136,7 @@ use crate::agent_tab::view::composer_status::{ComposerStatusBar, poll_git_branch
 use crate::agent_tab::view::progress_panel::ProgressPanel;
 use crate::agent_tab::view::recent_sessions::{ListControl, RecentSessionsMode, SessionHistoryUi};
 use crate::agent_tab::view::selection_menu::show_selected_text_menu;
+use crate::agent_tab::view::side_questions::side_questions_card;
 use crate::agent_tab::workflows::WorkflowUi;
 
 #[derive(Clone)]
@@ -1569,6 +1571,7 @@ impl AgentPane {
             SlashRoute::Rename(arguments) => self.rename_conversation(&arguments, cx),
             SlashRoute::Fork => self.open_fork(cx),
             SlashRoute::Find(arguments) => self.search_conversations(&arguments, cx),
+            SlashRoute::Side(arguments) => self.ask_side_question(&arguments, cx),
             SlashRoute::Unapplied => false,
             SlashRoute::Backend { command, policy } => {
                 self.route_backend_command(command, policy, cx)
@@ -2118,6 +2121,82 @@ impl AgentPane {
         );
 
         true
+    }
+
+    /// Ask a question beside the conversation. The answer lands in the side
+    /// card above the composer, which opens with the question itself.
+    pub(crate) fn ask_side_question(&mut self, question: &str, cx: &mut Context<Self>) -> bool {
+        let Some(session_host) = self.host.upgrade() else {
+            return false;
+        };
+
+        let session_kind = session_host.read(cx).kind;
+
+        if !self.binding.is_current() {
+            return false;
+        }
+
+        let question = question.trim();
+
+        let refusal = if question.is_empty() {
+            t!("agent-side-needs-question").into_owned()
+        } else {
+            match self
+                .session
+                .borrow_mut()
+                .ask_side_question(question.to_owned())
+            {
+                SideQuestionOutcome::Asked => {
+                    cx.notify();
+
+                    return true;
+                }
+                SideQuestionOutcome::Busy => t!("agent-side-busy").into_owned(),
+                SideQuestionOutcome::Unsupported => {
+                    t!("agent-side-unsupported", name = session_kind.display()).into_owned()
+                }
+                SideQuestionOutcome::Failed(error) => {
+                    t!("agent-side-failed", error = &error).into_owned()
+                }
+            }
+        };
+
+        self.palette
+            .set_feedback(CommandFeedbackKind::Error, refusal, cx);
+
+        false
+    }
+
+    pub(crate) fn close_side_questions(&mut self, cx: &mut Context<Self>) {
+        self.session.borrow_mut().close_side_questions();
+
+        cx.notify();
+    }
+
+    /// Put side answer `index` into the composer at the cursor. It is only
+    /// placed there: sending it on to the conversation stays the user's call.
+    pub(crate) fn insert_side_answer(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let answer = match self
+            .session
+            .borrow()
+            .side_questions()
+            .exchanges()
+            .get(index)
+            .map(|exchange| &exchange.answer)
+        {
+            Some(SideAnswer::Answered(answer)) => answer.clone(),
+            _ => return,
+        };
+
+        self.input
+            .update(cx, |input, cx| input.replace(&answer, window, cx));
+
+        self.focus(window, cx);
     }
 
     /// Show what one search matched, in place of whatever the list held.
@@ -3753,6 +3832,14 @@ impl Render for AgentPane {
             cx,
         );
 
+        let side_questions = {
+            let session = self.session.borrow();
+            let side = session.side_questions();
+
+            side.is_open()
+                .then(|| side_questions_card(side.exchanges(), cx))
+        };
+
         let approval = self.render_approval_panel(cx);
         let composer_free = !self.branch_flow_holds_composer();
 
@@ -3915,6 +4002,7 @@ impl Render for AgentPane {
                                 .child(
                                     composer_card(cx)
                                         .debug_selector(|| "agent-progress-composer".into())
+                                        .children(side_questions)
                                         .children(approval)
                                         .children(questions)
                                         .children(self.attachments.render(cx))

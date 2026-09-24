@@ -72,6 +72,10 @@ pub struct Capabilities {
     /// the tab rather than quietly working against one directory, and must
     /// never be widened to a common ancestor to look like one that can.
     pub multi_root_access: MultiRootAccess,
+
+    /// A question about the conversation can be answered beside it, from its
+    /// live context and without adding a turn, which is what `/side` offers.
+    pub side_questions: bool,
 }
 
 const CODEX: Capabilities = Capabilities {
@@ -88,6 +92,7 @@ const CODEX: Capabilities = Capabilities {
     session_rename: false,
     session_search: false,
     multi_root_access: MultiRootAccess::Full,
+    side_questions: false,
 };
 
 const CLAUDE: Capabilities = Capabilities {
@@ -104,6 +109,7 @@ const CLAUDE: Capabilities = Capabilities {
     session_rename: false,
     session_search: false,
     multi_root_access: MultiRootAccess::Full,
+    side_questions: true,
 };
 
 /// `skill_references` is false because the harness has no structured skill
@@ -130,6 +136,7 @@ const DEEPSEEK: Capabilities = Capabilities {
     // publishes a per-session multi-root policy this becomes `Full` and the
     // adapter passes every selected root.
     multi_root_access: MultiRootAccess::PrimaryOnly,
+    side_questions: false,
 };
 
 pub trait AgentCapabilities {

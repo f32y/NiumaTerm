@@ -42,6 +42,7 @@ use crate::session::restore::{
     ResumeStart, SettingsSeed,
 };
 use crate::session::settings::ConversationSettings;
+use crate::session::side::{SideQuestionOutcome, SideQuestions};
 use crate::session::update_readiness::{ConversationWork, Readiness, prepare_stop};
 use crate::session::workflows::{RefreshPlan, WorkflowData, WorkflowReader};
 use crate::session::{
@@ -97,6 +98,7 @@ pub struct SessionController {
     commands: CommandQueue,
     children: ChildAgents,
     workflows: WorkflowData,
+    side: SideQuestions,
 }
 
 impl SessionController {
@@ -125,6 +127,7 @@ impl SessionController {
             commands: CommandQueue::default(),
             children: ChildAgents::default(),
             workflows: WorkflowData::default(),
+            side: SideQuestions::default(),
         }
     }
 
@@ -473,6 +476,41 @@ impl SessionController {
         };
 
         Some(outcome)
+    }
+
+    pub fn side_questions(&self) -> &SideQuestions {
+        &self.side
+    }
+
+    /// Ask `question` beside the conversation, with the earlier answers as
+    /// its history.
+    pub fn ask_side_question(&mut self, question: String) -> SideQuestionOutcome {
+        if self.side.pending().is_some() {
+            return SideQuestionOutcome::Busy;
+        }
+
+        let Some(backend) = self.runtime.backend_mut() else {
+            return SideQuestionOutcome::Failed("the session is not running".into());
+        };
+
+        match backend.ask_side_question(&question, &self.side.history()) {
+            Some(Ok(request_id)) => {
+                self.side.ask(question, request_id);
+
+                SideQuestionOutcome::Asked
+            }
+            Some(Err(message)) => SideQuestionOutcome::Failed(message),
+            None => SideQuestionOutcome::Unsupported,
+        }
+    }
+
+    /// Dismiss every side question, stopping the one still being answered.
+    pub fn close_side_questions(&mut self) {
+        if let Some(id) = self.side.close()
+            && let Some(backend) = self.runtime.backend_mut()
+        {
+            backend.cancel_side_question(&id);
+        }
     }
 
     /// Answers whether a session was running to take the search.
@@ -1189,6 +1227,13 @@ impl SessionController {
                     failure,
                 }
             }
+            Event::SideQuestionAnswered { id, answer } => {
+                if self.side.settle(&id, answer) {
+                    SessionEffect::Changed
+                } else {
+                    SessionEffect::Unchanged
+                }
+            }
         };
 
         self.record_content(effect)
@@ -1532,6 +1577,10 @@ impl SessionController {
         self.plan_mode = false;
 
         self.workflows.clear();
+
+        // Answers describe the conversation being cleared, so none of them
+        // still applies to what replaces it.
+        self.close_side_questions();
     }
 }
 
