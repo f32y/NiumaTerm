@@ -16,6 +16,12 @@ use nmt_terminal::termio::{SessionHandles, SessionOptions, start_session};
 const PROMPT: &str = "NMT> ";
 const TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Every scenario configures PSReadLine prediction, which arrived in
+/// PSReadLine 2.1. Windows PowerShell 5.1 ships 2.0 and rejects the option,
+/// and its error text lands on screen among the input being counted, so the
+/// scenarios run under PowerShell 7 resolved from PATH.
+const SHELL: &str = "pwsh.exe";
+
 fn powershell_session(extra_args: &[&str], setup: &str) -> SessionHandles {
     let script = format!(
         r#"$ErrorActionPreference = 'Stop'
@@ -37,7 +43,7 @@ function global:prompt {{ 'NMT> ' }}
     ]);
 
     let pty = create_managed_pty_with_env(PtyOptions {
-        shell: &nmt_platform::default_shell(),
+        shell: SHELL,
         args: &args,
         working_directory: None,
         columns: 80,
