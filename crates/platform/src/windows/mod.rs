@@ -17,11 +17,11 @@ pub mod powershell;
 pub mod process;
 pub mod window;
 
+#[cfg(feature = "clipboard")]
+pub(crate) mod clipboard;
 pub(crate) mod library;
 
 mod child;
-#[cfg(feature = "clipboard")]
-mod clipboard;
 mod conpty;
 mod notifier;
 mod pipes;

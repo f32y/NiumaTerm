@@ -9,6 +9,11 @@ use copypasta::ClipboardProvider;
 use copypasta::nop_clipboard::NopClipboardContext;
 use tracing::warn;
 
+#[cfg(unix)]
+use crate::unix::clipboard::system_clipboard;
+#[cfg(windows)]
+use crate::windows::clipboard::system_clipboard;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClipboardType {
     Clipboard,
@@ -18,6 +23,13 @@ pub enum ClipboardType {
 pub struct Clipboard {
     pub(crate) clipboard: Box<dyn ClipboardProvider>,
     pub(crate) selection: Option<Box<dyn ClipboardProvider>>,
+}
+
+impl Default for Clipboard {
+    /// The system clipboard, or a no-op one where none can be opened.
+    fn default() -> Self {
+        system_clipboard()
+    }
 }
 
 impl Clipboard {

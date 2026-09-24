@@ -11,7 +11,6 @@ workspace = true
 [features]
 clipboard = ["dep:copypasta"]
 x11 = ["clipboard", "copypasta/x11"]
-wayland = ["clipboard", "copypasta/wayland"]
 
 [dependencies]
 copypasta = { workspace = true, optional = true }

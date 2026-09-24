@@ -15,11 +15,11 @@ pub mod process;
 pub mod shell;
 pub mod window;
 
+#[cfg(feature = "clipboard")]
+pub(crate) mod clipboard;
 pub(crate) mod hook_command;
 pub(crate) mod library;
 
-#[cfg(feature = "clipboard")]
-mod clipboard;
 #[cfg(target_os = "macos")]
 mod macos;
 mod notifier;

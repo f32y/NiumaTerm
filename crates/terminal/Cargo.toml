@@ -9,12 +9,9 @@ authors.workspace = true
 workspace = true
 
 [features]
-default = ["wayland", "x11"]
+default = ["x11"]
 x11 = [
     "nmt_platform/x11"
-]
-wayland = [
-    "nmt_platform/wayland",
 ]
 
 test-support = []
