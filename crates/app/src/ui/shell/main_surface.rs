@@ -123,16 +123,9 @@ fn render_pane_node(
             state,
             ..
         } => {
-            let shell = cx.entity();
-
             let mut group = ResizablePanelGroup::new(("pane-split", *id as usize))
                 .axis(*axis)
-                .with_state(state)
-                // Keep the in-memory session mirror's split ratios fresh
-                // after divider drags (the quit hook reads it).
-                .on_resize(move |_, _, cx| {
-                    shell.update(cx, |this, cx| this.sync_session_memory(cx));
-                });
+                .with_state(state);
 
             for child in children {
                 group = group

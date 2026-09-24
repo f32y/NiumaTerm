@@ -34,7 +34,7 @@ use app::agent_tab::execution::AgentSession;
 use app::agent_tab::team::{TeamPane, TeamRuntime};
 use app::agent_tab::{AgentPane, AgentPaneEvent};
 use app::terminal_tab::session::HostEvent;
-use app::terminal_tab::view::{AgentInterrupted, TerminalGridResized, TerminalPane};
+use app::terminal_tab::view::{AgentInterrupted, TerminalPane};
 use dirs::home_dir;
 use gpui::prelude::*;
 use gpui::{
@@ -52,7 +52,7 @@ use gpui_component::{
 use nmt_agent::chat::SessionSummary;
 use nmt_agent::team::model::RoomId;
 use nmt_agent::{
-    AgentActivityPolicy, AgentEvent, AgentEventKind, AgentMonitor, AgentNotification, AgentRoute,
+    AgentActivityPolicy, AgentEvent, AgentMonitor, AgentNotification, AgentRoute,
     AgentRuntimeStatus, AgentWorkspace, MonitorMutation, agent_process, request_native_delivery,
 };
 use nmt_config::local_state::{WindowLocalState, WindowState};
@@ -529,8 +529,6 @@ impl AppWindow {
             settings_close_pending: false,
         };
 
-        this.sync_session_memory(cx);
-
         this.refresh_root_availability(cx);
 
         this
@@ -706,8 +704,6 @@ impl AppWindow {
         self.on_active_tab_changed(window, cx);
 
         self.focus_active(window, cx);
-
-        self.sync_session_memory(cx);
 
         cx.notify();
     }
@@ -1212,8 +1208,6 @@ impl AppWindow {
 
         self.focus_active(window, cx);
 
-        self.sync_session_memory(cx);
-
         cx.notify();
     }
 
@@ -1388,12 +1382,10 @@ impl AppWindow {
         });
     }
 
-    /// Exclude `id` from session persistence and push the trimmed session to
-    /// the registry so the quit hook saves local_state without it.
-    fn doom_workspace(&mut self, id: WorkspaceId, cx: &mut Context<Self>) {
+    /// Exclude `id` from session persistence, so neither the quit hook nor a
+    /// window close saves it into local_state.
+    fn doom_workspace(&mut self, id: WorkspaceId) {
         self.doomed_workspace = Some(id);
-
-        self.sync_session_memory(cx);
     }
 
     /// Swap the last workspace for a fresh default one rooted in the user's
@@ -1549,8 +1541,6 @@ impl AppWindow {
 
             self.focus_active(window, cx);
 
-            self.sync_session_memory(cx);
-
             cx.notify();
         }
     }
@@ -1685,8 +1675,6 @@ impl AppWindow {
         if !tree.resize(direction, PANE_RESIZE_STEP, window, cx) {
             return;
         }
-
-        self.sync_session_memory(cx);
 
         cx.notify();
     }
@@ -2036,8 +2024,6 @@ impl AppWindow {
     ) {
         self.workspaces.set_pinned(id, pinned);
 
-        self.sync_session_memory(cx);
-
         cx.notify();
     }
 
@@ -2051,8 +2037,6 @@ impl AppWindow {
         self.workspaces.reorder(from, to);
 
         self.focus_active(window, cx);
-
-        self.sync_session_memory(cx);
 
         cx.notify();
     }
@@ -2074,8 +2058,6 @@ impl AppWindow {
         tabs.list_mut().reorder(from, to);
 
         self.focus_active(window, cx);
-
-        self.sync_session_memory(cx);
 
         cx.notify();
     }
@@ -2199,8 +2181,6 @@ impl AppWindow {
     pub(crate) fn activate_as_workspace(&mut self, id: WorkspaceId, cx: &mut Context<Self>) {
         self.workspaces.set_temporary(id, false);
 
-        self.sync_session_memory(cx);
-
         cx.notify();
     }
 
@@ -2218,8 +2198,6 @@ impl AppWindow {
         let id = self.create_workspace(name, roots, window, cx);
 
         self.workspaces.set_temporary(id, true);
-
-        self.sync_session_memory(cx);
     }
 
     /// Create a workspace named `name` (empty falls back to the shared default)
@@ -2272,8 +2250,6 @@ impl AppWindow {
         self.focus_active(window, cx);
 
         self.refresh_root_availability(cx);
-
-        self.sync_session_memory(cx);
 
         cx.notify();
 
@@ -2344,8 +2320,6 @@ impl AppWindow {
             let name = input.read(cx).value().trim().to_string();
 
             self.workspaces.rename(id, name);
-
-            self.sync_session_memory(cx);
         }
 
         self.focus_active(window, cx);
@@ -2402,8 +2376,6 @@ impl AppWindow {
                         .list()
                         .find(id)
                         .and_then(|tab| tab.surface().agent().cloned());
-
-                    self.sync_session_memory(cx);
                 }
 
                 // An agent tab's name is the conversation's name, so it goes
@@ -2560,17 +2532,12 @@ impl AppWindow {
         }
     }
 
-    /// Keep background host events and accepted grid changes in the saved session.
+    /// Keep background host events flowing while the pane is not in front.
     pub(crate) fn watch_pane(pane: &Entity<TerminalPane>, cx: &mut Context<Self>) {
         cx.observe(pane, |this, pane, cx| this.on_pane_notified(pane, cx))
             .detach();
 
         cx.subscribe(pane, Self::on_agent_interrupted).detach();
-
-        cx.subscribe(pane, |this, _, _: &TerminalGridResized, cx| {
-            this.sync_session_memory(cx);
-        })
-        .detach();
     }
 
     fn on_agent_interrupted(
@@ -2668,8 +2635,6 @@ impl AppWindow {
                             // Re-run focus_active on the next render (the pump
                             // has no Window).
                             self.chrome.needs_focus = true;
-
-                            self.sync_session_memory(cx);
                         }
 
                         chrome_changed = true;
@@ -2746,8 +2711,6 @@ impl AppWindow {
         }
 
         if session_changed {
-            self.sync_session_memory(cx);
-
             self.sync_git_target(cx);
         }
 
@@ -2786,8 +2749,6 @@ impl AppWindow {
         self.sync_agent_workspaces(id, cx);
 
         self.refresh_root_availability(cx);
-
-        self.sync_session_memory(cx);
 
         cx.notify();
     }
@@ -3032,17 +2993,10 @@ impl AppWindow {
         let route = session.read(cx).agent_route().clone();
 
         let mutation = match event {
-            AgentPaneEvent::Lifecycle(event) if event.route == route => {
-                // A finished turn guarantees the conversation has content
-                // and a provider id, which is what a restore continues.
-                if event.kind == AgentEventKind::Stopped {
-                    self.sync_session_memory(cx);
-                }
-
-                self.agent_notifications
-                    .agent_monitor
-                    .apply(event.clone(), time::Instant::now())
-            }
+            AgentPaneEvent::Lifecycle(event) if event.route == route => self
+                .agent_notifications
+                .agent_monitor
+                .apply(event.clone(), time::Instant::now()),
             AgentPaneEvent::Lifecycle(_) => return,
             AgentPaneEvent::WorkflowActivity => {
                 // Sticky: a finished run stays reachable, so the control
@@ -3082,8 +3036,6 @@ impl AppWindow {
                     && let Some(tabs) = self.workspaces.tabs_for_tab_mut(tab_id)
                     && tabs.set_title(tab_id, title.clone())
                 {
-                    self.sync_session_memory(cx);
-
                     cx.notify();
                 }
 
@@ -3177,10 +3129,9 @@ impl AppWindow {
     }
 
     /// Publish this window's session to the registry the app writes out on
-    /// quit. Called from every path that changes what a restore would rebuild,
-    /// and again when the window closes and when the app quits, because some
-    /// state (an agent tab's remembered thread controls) changes without
-    /// telling the window.
+    /// quit and keeps for reopening a closed window. Both readers take the
+    /// snapshot at their own moment, when the window closes and when the app
+    /// quits, so nothing in between has to keep the registry current.
     pub(crate) fn sync_session_memory(&self, cx: &mut Context<AppWindow>) {
         let session = session_state(&self.workspaces, self.doomed_workspace, cx);
 
@@ -3668,7 +3619,6 @@ impl AppWindow {
         }
 
         self.focus_active(window, cx);
-        self.sync_session_memory(cx);
 
         cx.notify();
     }

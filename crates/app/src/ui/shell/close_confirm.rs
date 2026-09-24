@@ -189,7 +189,7 @@ pub(super) fn close_last_workspace_dialog(
                                         }
 
                                         if shell
-                                            .update(cx, |this, cx| this.doom_workspace(id, cx))
+                                            .update(cx, |this, _| this.doom_workspace(id))
                                             .is_ok()
                                         {
                                             cx.quit();

@@ -11,9 +11,7 @@ use nmt_config::local_state::TabState;
 use crate::terminal_tab::metrics::CellMetrics;
 use crate::terminal_tab::pane_model::test_session::{assert_input, controller};
 use crate::terminal_tab::view::list_state::BlockListState;
-use crate::terminal_tab::view::{
-    AgentInterrupted, PaneIdentity, TerminalGridResized, TerminalPane,
-};
+use crate::terminal_tab::view::{AgentInterrupted, PaneIdentity, TerminalPane};
 use crate::terminal_tab::wake::wake_channel;
 
 fn pane(cx: &mut VisualTestContext) -> Entity<TerminalPane> {
@@ -36,20 +34,11 @@ fn pane(cx: &mut VisualTestContext) -> Entity<TerminalPane> {
 }
 
 #[gpui::test]
-fn layout_saves_the_accepted_grid_and_emits_only_on_resize(cx: &mut TestAppContext) {
+fn layout_saves_the_accepted_grid(cx: &mut TestAppContext) {
     let cx = cx.add_empty_window();
     let pane = pane(cx);
-    let changes = Rc::new(Cell::new(0));
-    let observed = changes.clone();
 
-    cx.update(|_, cx| {
-        cx.subscribe(&pane, move |_, _: &TerminalGridResized, _| {
-            observed.set(observed.get() + 1);
-        })
-        .detach();
-    });
-
-    for (cols, rows, expected_changes) in [(40, 6, 0), (132, 43, 1), (132, 43, 1)] {
+    for (cols, rows) in [(40, 6), (132, 43), (132, 43)] {
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
                 pane.set_content_bounds(
@@ -67,10 +56,6 @@ fn layout_saves_the_accepted_grid_and_emits_only_on_resize(cx: &mut TestAppConte
                 assert_eq!(pane.tab_state().grid_size, Some((cols, rows)));
             });
         });
-
-        cx.run_until_parked();
-
-        assert_eq!(changes.get(), expected_changes);
     }
 }
 

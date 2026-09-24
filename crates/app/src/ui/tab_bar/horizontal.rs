@@ -623,8 +623,6 @@ impl TabStrip {
 
                         this.focus_active(window, cx);
 
-                        this.sync_session_memory(cx);
-
                         cx.notify();
                     }))
             }))
@@ -668,8 +666,6 @@ impl TabStrip {
                         .reorder(drag.from, to);
 
                     this.focus_active(window, cx);
-
-                    this.sync_session_memory(cx);
                 }
 
                 cx.notify();

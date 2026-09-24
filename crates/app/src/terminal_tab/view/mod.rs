@@ -95,8 +95,6 @@ pub struct TerminalPane {
 
 pub struct AgentInterrupted;
 
-pub struct TerminalGridResized;
-
 struct TextCopiedNotification;
 
 struct DesktopClipboard;
@@ -114,8 +112,6 @@ impl ClipboardAccess for DesktopClipboard {
 }
 
 impl EventEmitter<AgentInterrupted> for TerminalPane {}
-
-impl EventEmitter<TerminalGridResized> for TerminalPane {}
 
 impl TerminalPane {
     pub fn spawn(
@@ -273,8 +269,6 @@ impl TerminalPane {
             bounds.size.height.as_f32(),
             cell,
         ) {
-            cx.emit(TerminalGridResized);
-
             cx.notify();
         }
     }
