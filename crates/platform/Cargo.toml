@@ -21,6 +21,7 @@ libc.workspace = true
 tracing.workspace = true
 parking_lot.workspace = true
 tokio.workspace = true
+tempfile.workspace = true
 nmt_runtime.workspace = true
 
 [target.'cfg(unix)'.dependencies]

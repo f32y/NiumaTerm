@@ -3,11 +3,10 @@
 mod persistence_tests;
 
 use std::fs::{self, OpenOptions};
-use std::io::{self, Write as _};
+use std::io;
 use std::path::Path;
 
-use nmt_platform::filesystem::replace_file;
-use tempfile::NamedTempFile;
+use nmt_platform::durable_file;
 
 pub(crate) fn read(path: &Path) -> io::Result<Option<String>> {
     match fs::read_to_string(path) {
@@ -57,15 +56,5 @@ pub(crate) fn update(
     let current = read(path)?;
     let content = edit(current.as_deref())?;
 
-    let mut temporary = NamedTempFile::new_in(parent)?;
-
-    temporary.write_all(content.as_bytes())?;
-
-    temporary.as_file().sync_all()?;
-
-    // Close the temporary handle before replacement; its path still owns
-    // cleanup if replacement fails.
-    let temporary = temporary.into_temp_path();
-
-    replace_file(&temporary, path)
+    durable_file::write(path, content.as_bytes())
 }

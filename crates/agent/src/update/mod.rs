@@ -16,7 +16,8 @@ use std::{fmt, fs, io};
 
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use futures::future::BoxFuture;
-use nmt_platform::filesystem::{installation_path_spelling, replace_file};
+use nmt_platform::durable_file;
+use nmt_platform::filesystem::installation_path_spelling;
 use parking_lot::Mutex;
 use semver::Version;
 use serde::{Deserialize, Serialize};
@@ -848,11 +849,8 @@ fn write_cache(path: &Path, cache: &CacheFile) -> io::Result<()> {
     fs::create_dir_all(parent)?;
 
     let bytes = serde_json::to_vec(cache).map_err(io::Error::other)?;
-    let temporary = path.with_extension("tmp");
 
-    fs::write(&temporary, bytes)?;
-
-    replace_file(&temporary, path)
+    durable_file::write(path, &bytes)
 }
 
 impl From<VersionStatus> for InstallationUpdateState {

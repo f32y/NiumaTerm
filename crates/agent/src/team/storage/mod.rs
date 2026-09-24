@@ -6,13 +6,12 @@ mod validation;
 mod tests;
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write};
+use std::io;
 use std::path::{Path, PathBuf};
 
-use nmt_platform::filesystem::replace_file_durable;
+use nmt_platform::durable_file;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tempfile::NamedTempFile;
 use thiserror::Error;
 
 use crate::team::model::RoomId;
@@ -205,7 +204,7 @@ fn write_snapshot(directory: &Path, room: &Room, revision: u64) -> Result<(), St
         room: room.clone(),
     };
 
-    atomic_write(
+    durable_file::write(
         &directory.join("room.json"),
         &serde_json::to_vec(&snapshot)?,
     )?;
@@ -224,18 +223,4 @@ fn lock_room(directory: &Path) -> Result<File, StorageError> {
     lock.try_lock().map_err(io::Error::other)?;
 
     Ok(lock)
-}
-
-fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let directory = path
-        .parent()
-        .ok_or_else(|| io::Error::other("missing parent directory"))?;
-
-    let mut temporary = NamedTempFile::new_in(directory)?;
-
-    temporary.write_all(bytes)?;
-
-    temporary.as_file().sync_all()?;
-
-    replace_file_durable(temporary.path(), path)
 }

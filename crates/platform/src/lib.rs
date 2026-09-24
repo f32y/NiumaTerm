@@ -6,6 +6,7 @@ pub use crate::windows::*;
 
 #[cfg(feature = "clipboard")]
 pub mod clipboard;
+pub mod durable_file;
 pub mod library;
 #[cfg(target_os = "macos")]
 pub mod macos_notifications;

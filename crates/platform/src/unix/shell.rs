@@ -3,16 +3,14 @@
 mod shell_tests;
 
 use std::path::{Path, PathBuf};
-use std::process::id;
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::{env, fs, io};
 
 use tracing::warn;
 
-use crate::PromptIntegration;
 use crate::unix::hook_command::single_quoted;
-use crate::unix::{ShellUser, environment, filesystem};
+use crate::unix::{ShellUser, environment};
+use crate::{PromptIntegration, durable_file};
 
 /// The shell launched when configuration names none.
 ///
@@ -164,38 +162,12 @@ fn install_files(shell: &str, files: &[(&str, &str)]) -> io::Result<PathBuf> {
 
     fs::create_dir_all(&dir)?;
 
+    // Another instance may be installing the same directory while a shell
+    // is starting up, and a shell that sources a half-written rc file loses
+    // the rest of the user's configuration, so each file is replaced whole.
     for (name, contents) in files {
-        write_atomically(&dir.join(name), contents)?;
+        durable_file::write(&dir.join(name), contents.as_bytes())?;
     }
 
     Ok(dir)
-}
-
-/// Replace a startup file in one step.
-///
-/// Another instance may be installing the same directory while a shell is
-/// starting up, and a shell that sources a half-written rc file loses the rest
-/// of the user's configuration.
-fn write_atomically(path: &Path, contents: &str) -> io::Result<()> {
-    let name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "startup file has no name"))?;
-
-    // The pid separates concurrent installs by different instances, and the
-    // counter separates concurrent calls inside one — two callers sharing a
-    // staging path would rename each other's file away.
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-
-    let staging = path.with_file_name(format!(
-        "{name}.{}-{}.staging",
-        id(),
-        NEXT.fetch_add(1, Ordering::Relaxed)
-    ));
-
-    fs::write(&staging, contents)?;
-
-    filesystem::replace_file(&staging, path).inspect_err(|_| {
-        let _ = fs::remove_file(&staging);
-    })
 }

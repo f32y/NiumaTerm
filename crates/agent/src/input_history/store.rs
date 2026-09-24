@@ -1,13 +1,12 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::fs::{self, OpenOptions};
-use std::io::{self, Write as _};
+use std::io;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use nmt_platform::filesystem::replace_file;
+use nmt_platform::durable_file;
 use serde::{Deserialize, Serialize};
-use tempfile::NamedTempFile;
 use uuid::Uuid;
 
 use crate::input_history::{InputHistoryScope, current_cwd_key};
@@ -234,15 +233,7 @@ pub(super) fn save_to_path(path: &Path, history: &StoredHistory) -> io::Result<(
     let content =
         serde_json::to_vec_pretty::<StoredHistory>(&(&merged).into()).map_err(io::Error::other)?;
 
-    let mut temporary = NamedTempFile::new_in(parent)?;
-
-    temporary.write_all(&content)?;
-
-    temporary.as_file().sync_all()?;
-
-    let temporary = temporary.into_temp_path();
-
-    replace_file(&temporary, path)
+    durable_file::write(path, &content)
 }
 
 impl From<&HistoryStore> for StoredHistory {

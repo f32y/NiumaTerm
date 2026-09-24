@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 use std::fs;
-use std::io::{BufReader, BufWriter, Write as _};
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
 use chrono::{SecondsFormat, Utc};
+use nmt_platform::durable_file;
 use serde_json::Value;
 use tracing::warn;
 use uuid::Uuid;
@@ -275,43 +276,18 @@ pub(super) fn write_fork_file(
     records: &[Value],
 ) -> Result<PathBuf, String> {
     let target = project_dir.join(format!("{session_id}.jsonl"));
-    let temp = project_dir.join(format!(".{session_id}.{}.tmp", Uuid::new_v4()));
 
-    let write_result = write_and_publish_fork(&temp, &target, records);
-
-    if write_result.is_err() {
-        let _ = fs::remove_file(&temp);
-    }
-
-    write_result.map(|()| target)
-}
-
-fn write_and_publish_fork(temp: &Path, target: &Path, records: &[Value]) -> Result<(), String> {
-    let file = fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(temp)
-        .map_err(|error| format!("could not create Claude fork: {error}"))?;
-
-    let mut writer = BufWriter::new(file);
+    let mut bytes = Vec::new();
 
     for record in records {
-        serde_json::to_writer(&mut writer, record)
+        serde_json::to_writer(&mut bytes, record)
             .map_err(|error| format!("could not serialize Claude fork: {error}"))?;
 
-        writer
-            .write_all(b"\n")
-            .map_err(|error| format!("could not write Claude fork: {error}"))?;
+        bytes.push(b'\n');
     }
 
-    writer
-        .flush()
-        .map_err(|error| format!("could not flush Claude fork: {error}"))?;
+    durable_file::write(&target, &bytes)
+        .map_err(|error| format!("could not publish Claude fork: {error}"))?;
 
-    writer
-        .get_ref()
-        .sync_all()
-        .map_err(|error| format!("could not sync Claude fork: {error}"))?;
-
-    fs::rename(temp, target).map_err(|error| format!("could not publish Claude fork: {error}"))
+    Ok(target)
 }
