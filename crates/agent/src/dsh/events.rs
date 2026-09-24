@@ -246,8 +246,13 @@ pub(crate) fn session_address(session_id: &str) -> Value {
     json!({ "kind": "session", "sessionId": session_id })
 }
 
+/// Live tokens travel only on the opted-in assistant stream: the durable log
+/// records a reply once its step commits, so without the flag a reply appears
+/// whole at the end of each step instead of word by word.
 fn follow_args(address: Value, max_messages: u64) -> Value {
-    json!({ "request": { "address": address, "maxMessages": max_messages } })
+    json!({ "request": {
+        "address": address, "maxMessages": max_messages, "assistantStream": true,
+    } })
 }
 
 async fn open_stream(
@@ -351,6 +356,53 @@ struct Streams {
     control_ready: bool,
     snapshot: Option<Value>,
     pending: HashMap<String, &'static str>,
+    attempt: Option<LiveAttempt>,
+}
+
+/// The provider attempt whose tokens the assistant stream is carrying. Chunk
+/// frames name only the attempt, while the transcript keys rows by turn and
+/// step, which the start frame (or the reconnect baseline) announced once.
+struct LiveAttempt {
+    id: String,
+    turn: u64,
+    step: u64,
+}
+
+impl LiveAttempt {
+    fn from_frame(frame: &Value) -> Option<Self> {
+        Some(Self {
+            id: frame["attemptId"].as_str()?.to_string(),
+            turn: frame["turn"].as_u64()?,
+            step: frame["step"].as_u64()?,
+        })
+    }
+
+    fn chunk_event(&self, time: &Value, chunk: &Value) -> Value {
+        json!({
+            "type": "assistant/chunk", "time": time,
+            "data": { "turn": self.turn, "step": self.step, "chunk": chunk },
+        })
+    }
+
+    /// The compact stream a reconnect baseline carries packs consecutive
+    /// deltas of one block into a texts array; the row shape the history
+    /// replay already decodes.
+    fn baseline_event(&self, record: &Value) -> Option<Value> {
+        let kind = match record["type"].as_str()? {
+            "chunk" => return Some(self.chunk_event(&record["time"], &record["chunk"])),
+            "text-chunks" => "chunkrow/text-chunks",
+            "reasoning-chunks" => "chunkrow/reasoning-chunks",
+            _ => return None,
+        };
+
+        Some(json!({
+            "type": kind, "time": record["time0"],
+            "data": {
+                "turn": self.turn, "step": self.step,
+                "index": record["index"], "texts": record["texts"],
+            },
+        }))
+    }
 }
 
 impl Streams {
@@ -361,6 +413,7 @@ impl Streams {
             control_ready: false,
             snapshot: None,
             pending: HashMap::new(),
+            attempt: None,
         }
     }
 
@@ -415,12 +468,49 @@ impl Streams {
                             } }));
 
                 self.snapshot = Some(value.clone());
+
+                // A reply already under way when the follow opened is absent
+                // from the durable page; its prefix arrives as a baseline.
+                let opening = &value["assistantStream"]["activeAttempt"];
+
+                self.attempt = LiveAttempt::from_frame(opening);
+
+                if let Some(attempt) = &self.attempt {
+                    for record in opening["stream"].as_array().into_iter().flatten() {
+                        if let Some(event) = attempt.baseline_event(record) {
+                            self.event(event, deliver);
+                        }
+                    }
+                }
             }
-            Some("event") => deliver(json!({ "payload": {
-                            "type": "session/event", "sessionId": self.session_id, "event": value["event"],
-                        } })),
+            Some("event") => self.event(value["event"].clone(), deliver),
+            Some("assistant-stream") => self.on_assistant_stream(&value["frame"], deliver),
             _ => {}
         }
+    }
+
+    fn on_assistant_stream(&mut self, frame: &Value, deliver: &dyn Fn(Value)) {
+        match frame["type"].as_str() {
+            Some("start") => self.attempt = LiveAttempt::from_frame(frame),
+            Some("chunk") => {
+                if let Some(attempt) = &self.attempt
+                    && frame["attemptId"] == attempt.id.as_str()
+                {
+                    self.event(
+                        attempt.chunk_event(&frame["time"], &frame["chunk"]),
+                        deliver,
+                    );
+                }
+            }
+            Some("end") => self.attempt = None,
+            _ => {}
+        }
+    }
+
+    fn event(&self, event: Value, deliver: &dyn Fn(Value)) {
+        deliver(json!({ "payload": {
+            "type": "session/event", "sessionId": self.session_id, "event": event,
+        } }));
     }
 
     fn on_control(&mut self, value: &Value, deliver: &dyn Fn(Value)) {

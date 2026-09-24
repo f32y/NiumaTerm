@@ -538,3 +538,107 @@ fn session_status_edges_reach_only_their_own_conversation() {
         vec![json!({ "type": "host/session-status", "sessionId": "session-1", "running": false })]
     );
 }
+
+fn assistant_stream(frame: Value) -> Value {
+    item(
+        "follow",
+        json!({ "type": "assistant-stream", "frame": frame }),
+    )
+}
+
+fn text_delta(attempt: &str, text: &str) -> Value {
+    json!({
+        "type": "chunk", "attemptId": attempt, "revision": 1, "index": 0, "time": 5,
+        "chunk": { "type": "text-delta", "index": 0, "text": text },
+    })
+}
+
+#[test]
+fn assistant_stream_chunks_become_chunk_events_of_the_started_attempt() {
+    let frames = RefCell::new(Vec::new());
+    let deliver = |frame| frames.borrow_mut().push(frame);
+
+    let mut streams = Streams::new("session-1");
+
+    for frame in [
+        text_delta("a1", "before start"),
+        json!({
+            "type": "start", "attemptId": "a1", "revision": 1, "startedAfterSeq": 3,
+            "turn": 2, "step": 1,
+        }),
+        text_delta("a1", "hi"),
+        text_delta("other", "wrong attempt"),
+        json!({
+            "type": "end", "attemptId": "a1", "revision": 1, "index": 1,
+            "outcome": { "kind": "abandoned" },
+        }),
+        text_delta("a1", "after end"),
+    ] {
+        streams.process(assistant_stream(frame), &deliver).unwrap();
+    }
+
+    assert_eq!(
+        *frames.borrow(),
+        vec![json!({ "payload": {
+            "type": "session/event", "sessionId": "session-1",
+            "event": {
+                "type": "assistant/chunk", "time": 5,
+                "data": {
+                    "turn": 2, "step": 1,
+                    "chunk": { "type": "text-delta", "index": 0, "text": "hi" },
+                },
+            },
+        } })]
+    );
+}
+
+#[test]
+fn a_reconnect_baseline_replays_the_live_attempt_prefix_then_follows_it() {
+    let frames = RefCell::new(Vec::new());
+    let deliver = |frame| frames.borrow_mut().push(frame);
+
+    let mut streams = Streams::new("session-1");
+
+    let snapshot = json!({
+        "type": "snapshot", "cursor": 4, "records": [],
+        "assistantStream": { "revision": 1, "activeAttempt": {
+            "attemptId": "a1", "startedAfterSeq": 4, "turn": 2, "step": 1, "nextIndex": 3,
+            "stream": [
+                { "type": "chunk", "time": 1,
+                  "chunk": { "type": "block-start", "index": 0, "blockType": "text" } },
+                { "type": "text-chunks", "time0": 2, "index": 0, "dt": [1], "texts": ["he", "llo"] },
+            ],
+        } },
+    });
+
+    streams.process(item("follow", snapshot), &deliver).unwrap();
+
+    streams
+        .process(assistant_stream(text_delta("a1", " world")), &deliver)
+        .unwrap();
+
+    let events: Vec<Value> = frames
+        .borrow()
+        .iter()
+        .filter(|frame| frame["payload"]["type"] == "session/event")
+        .map(|frame| frame["payload"]["event"].clone())
+        .collect();
+
+    assert_eq!(frames.borrow()[0]["payload"]["type"], "nmt/replay");
+    assert_eq!(
+        events,
+        vec![
+            json!({ "type": "assistant/chunk", "time": 1, "data": {
+                "turn": 2, "step": 1,
+                "chunk": { "type": "block-start", "index": 0, "blockType": "text" },
+            } }),
+            json!({ "type": "chunkrow/text-chunks", "time": 2, "data": {
+                "turn": 2, "step": 1, "index": 0, "texts": ["he", "llo"],
+            } }),
+            json!({ "type": "assistant/chunk", "time": 5, "data": {
+                "turn": 2, "step": 1,
+                "chunk": { "type": "text-delta", "index": 0, "text": " world" },
+            } }),
+        ]
+    );
+}
