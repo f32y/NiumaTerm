@@ -99,7 +99,7 @@ impl JsonLineProcess {
         let job = KillOnCloseJob::attach_spawned_or_kill(&mut child)
             .map_err(|error| error.to_string())?;
 
-        let runtime = nmt_runtime::handle();
+        let runtime = nmt_platform::runtime();
         let kill = CancellationToken::new();
         let (exit_sender, exited) = watch::channel(false);
 
@@ -294,7 +294,7 @@ impl Drop for JsonLineProcess {
         // the reader tasks end with their pipes. The forced fallback drops the
         // Job Object, which terminates the npm shim and its descendant together
         // instead of stranding the descendant. Dropping never waits for it.
-        nmt_runtime::handle().spawn(self.shutdown(DROP_SHUTDOWN_GRACE, true));
+        nmt_platform::runtime().spawn(self.shutdown(DROP_SHUTDOWN_GRACE, true));
     }
 }
 

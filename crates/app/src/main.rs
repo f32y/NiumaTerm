@@ -277,7 +277,7 @@ fn on_finish_launching(
     // the process-wide runtime the backends already run on, because a runtime
     // of its own would be a second reactor and thread pool for the same kind
     // of work.
-    gpui_tokio::init_from_handle(cx, nmt_runtime::handle().clone());
+    gpui_tokio::init_from_handle(cx, nmt_platform::runtime().clone());
 
     // Initialize gpui-component (theme, root, component globals) before any
     // component renders. Themes without `[colors.ui]` retain the dark default.

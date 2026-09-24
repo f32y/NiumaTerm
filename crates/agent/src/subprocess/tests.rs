@@ -57,7 +57,7 @@ fn malformed_output_reports_failure_before_eof_and_stops_delivery() {
     assert!(rx.try_recv().is_err());
     assert!(!process.has_stdin());
 
-    nmt_runtime::handle()
+    nmt_platform::runtime()
         .block_on(process.shutdown(Duration::from_secs(1), true))
         .unwrap();
 }
@@ -128,7 +128,7 @@ fn long_stderr_lines_remain_complete_and_separate_from_protocol_output() {
         json!({"ready":true})
     );
 
-    nmt_runtime::handle()
+    nmt_platform::runtime()
         .block_on(process.shutdown(Duration::from_secs(5), false))
         .unwrap();
 }
@@ -175,13 +175,13 @@ fn stalled_input_accepts_a_message_burst_without_closing_the_process() {
 
     process.try_write_line(json!({"interrupt":true})).unwrap();
 
-    nmt_runtime::handle()
+    nmt_platform::runtime()
         .block_on(process.shutdown(Duration::from_millis(20), true))
         .unwrap();
 
     closed_rx.recv_timeout(Duration::from_secs(5)).unwrap();
 
-    nmt_runtime::handle()
+    nmt_platform::runtime()
         .block_on(process.shutdown(Duration::from_secs(1), false))
         .unwrap();
 }
@@ -210,7 +210,7 @@ fn shutdown_drains_accepted_messages_in_order() {
         process.try_write_line(json!({"index":index})).unwrap();
     }
 
-    nmt_runtime::handle()
+    nmt_platform::runtime()
         .block_on(process.shutdown(Duration::from_secs(5), false))
         .unwrap();
 
@@ -279,7 +279,7 @@ fn stdout_close_callback_follows_the_last_json_message() {
         .recv_timeout(Duration::from_secs(5))
         .expect("stdout close callback");
 
-    nmt_runtime::handle()
+    nmt_platform::runtime()
         .block_on(process.shutdown(Duration::from_secs(1), false))
         .expect("exited process should be observable");
 }

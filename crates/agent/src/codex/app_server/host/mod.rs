@@ -304,7 +304,7 @@ impl CodexHost {
 
 impl Drop for CodexHost {
     fn drop(&mut self) {
-        nmt_runtime::handle().spawn(self.shutdown(DROP_SHUTDOWN_GRACE, true));
+        nmt_platform::runtime().spawn(self.shutdown(DROP_SHUTDOWN_GRACE, true));
     }
 }
 

@@ -64,7 +64,7 @@ mod team {
             restore_transcript: false,
         };
 
-        let mut backend = nmt_runtime::handle()
+        let mut backend = nmt_platform::runtime()
             .block_on(Backend::spawn_team(
                 AgentKind::Claude,
                 &launch,
@@ -96,7 +96,7 @@ mod team {
                 .any(|event| matches!(event, Event::ApprovalRequested { .. }))
         );
 
-        nmt_runtime::handle()
+        nmt_platform::runtime()
             .block_on(backend.shutdown(Duration::from_secs(2), true))
             .unwrap();
     }

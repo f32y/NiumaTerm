@@ -21,7 +21,7 @@ use crate::dsh::session::{
 fn failed_background_reads_deliver_results_and_end_pending_discovery() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
 
-    let client = nmt_runtime::handle()
+    let client = nmt_platform::runtime()
         .block_on(ApiClient::new(format!(
             "http://{}",
             listener.local_addr().unwrap()

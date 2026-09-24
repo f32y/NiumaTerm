@@ -67,7 +67,7 @@ pub(crate) enum Direction {
 pub(crate) fn conout_pair() -> io::Result<(ConoutPipe, OwnedHandle)> {
     let (ours, theirs) = pipe_pair(Direction::Inbound)?;
 
-    let _runtime = nmt_runtime::handle().enter();
+    let _runtime = crate::runtime().enter();
 
     // SAFETY: The connected handle has no pending I/O, and ownership moves
     // exclusively to Tokio.

@@ -1,4 +1,5 @@
 pub use crate::async_pty::{AsyncPty, poll_nonblocking};
+pub use crate::tokio_runtime::runtime;
 #[cfg(not(windows))]
 pub use crate::unix::*;
 #[cfg(windows)]
@@ -18,6 +19,7 @@ mod child_output;
 mod environment_override;
 mod ipc_message;
 mod process_lifetime;
+mod tokio_runtime;
 #[cfg(not(windows))]
 mod unix;
 

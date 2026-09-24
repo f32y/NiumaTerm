@@ -142,7 +142,7 @@ impl AgentInputHistory {
 
             // The writer could not confirm the save, so this one writes it
             // directly and reports that outcome instead.
-            nmt_runtime::handle()
+            nmt_platform::runtime()
                 .spawn_blocking(move || save_to_path(&path, &snapshot))
                 .await
                 .unwrap_or_else(|error| Err(io::Error::other(error)))
@@ -204,7 +204,7 @@ impl HistoryWriter {
             stopped: AtomicBool::new(false),
         });
 
-        nmt_runtime::handle().spawn(run_writer(Arc::clone(&shared), save));
+        nmt_platform::runtime().spawn(run_writer(Arc::clone(&shared), save));
 
         Self { shared }
     }
@@ -288,7 +288,7 @@ async fn run_writer(
             continue;
         };
 
-        let Ok((returned, result, request)) = nmt_runtime::handle()
+        let Ok((returned, result, request)) = nmt_platform::runtime()
             .spawn_blocking(move || {
                 let result = save(&request.snapshot);
 

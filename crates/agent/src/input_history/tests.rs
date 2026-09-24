@@ -406,7 +406,7 @@ fn slow_storage_coalesces_saves_and_flush_waits_for_latest_write() {
 
     release_tx.send(()).unwrap();
 
-    nmt_runtime::handle()
+    nmt_platform::runtime()
         .block_on(async { timeout(Duration::from_secs(5), flushed_rx).await })
         .unwrap()
         .unwrap()
@@ -462,7 +462,7 @@ fn background_writer_flushes_the_latest_snapshot_in_order() {
 
     history.record(&scope, "second".into());
 
-    nmt_runtime::handle()
+    nmt_platform::runtime()
         .block_on(history.flush())
         .expect("flush history");
 
@@ -491,7 +491,7 @@ fn service_keeps_entries_when_background_writes_fail() {
 
     history.record(&scope, "still available".into());
 
-    assert!(nmt_runtime::handle().block_on(history.flush()).is_err());
+    assert!(nmt_platform::runtime().block_on(history.flush()).is_err());
     assert_eq!(&*history.entries(&scope), ["still available"]);
 }
 

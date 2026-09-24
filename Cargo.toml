@@ -18,7 +18,6 @@ members = [
     "crates/platform",
     "crates/profiling",
     "crates/profile",
-    "crates/runtime",
     "crates/shell_extension",
     "crates/terminal",
     "crates/tree_sitter_bundle",
@@ -86,7 +85,6 @@ libghostty-vt-sys = { path = "third_party/libghostty-vt-sys" }
 nmt_platform = { path = "crates/platform" }
 nmt_profiling = { path = "crates/profiling" }
 nmt_profile = { path = "crates/profile" }
-nmt_runtime = { path = "crates/runtime" }
 nmt_terminal = { path = "crates/terminal" }
 nmt_updater = { path = "crates/updater" }
 

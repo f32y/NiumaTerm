@@ -74,7 +74,7 @@ pub(super) fn spawn_plan_restore(
     revision: u64,
     deliver: SessionDelivery,
 ) {
-    nmt_runtime::handle().spawn_blocking(move || {
+    nmt_platform::runtime().spawn_blocking(move || {
         deliver(json!({"method": PLAN_RESTORED, "params": {
             "threadId": thread_id, "revision": revision, "value": read_plan(&path)
         }}));

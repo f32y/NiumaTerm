@@ -738,14 +738,14 @@ fn input_released_after_resize_wakes_an_otherwise_idle_loop() {
         .send(event::Msg::Input(b"B".to_vec().into()))
         .unwrap();
 
-    let worker = nmt_runtime::handle().spawn(machine.run_event_loop());
+    let worker = nmt_platform::runtime().spawn(machine.run_event_loop());
 
     let first = received.recv_timeout(time::Duration::from_secs(2));
     let second = received.recv_timeout(time::Duration::from_secs(2));
 
     sender.send(event::Msg::Shutdown).unwrap();
 
-    nmt_runtime::handle().block_on(worker).unwrap();
+    nmt_platform::runtime().block_on(worker).unwrap();
 
     assert_eq!(first.unwrap(), b"A");
     assert_eq!(
@@ -917,14 +917,14 @@ fn powershell_input_deadline_wakes_a_quiet_event_loop() {
 
     let started = time::Instant::now();
 
-    let worker = nmt_runtime::handle().spawn(machine.run_event_loop());
+    let worker = nmt_platform::runtime().spawn(machine.run_event_loop());
 
     let bytes = received.recv_timeout(time::Duration::from_secs(2));
     let elapsed = started.elapsed();
 
     sender.send(event::Msg::Shutdown).unwrap();
 
-    nmt_runtime::handle().block_on(worker).unwrap();
+    nmt_platform::runtime().block_on(worker).unwrap();
 
     assert_eq!(bytes.expect("input deadline did not wake poll"), b"later");
     assert!(elapsed >= RESIZE_INPUT_DELAY);
@@ -1076,7 +1076,7 @@ fn explicit_session_shutdown_releases_worker_resources_before_returning() {
 #[test]
 fn shared_session_shutdown_waits_for_cleanup_from_a_tokio_task() {
     assert_session_cleanup(|handles| {
-        let runtime = nmt_runtime::handle();
+        let runtime = nmt_platform::runtime();
         let handles = Arc::new(handles);
 
         runtime

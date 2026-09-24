@@ -150,14 +150,14 @@ where
 
     let messenger = pipe.channel();
 
-    let task = nmt_runtime::handle().spawn(async move {
+    let task = nmt_platform::runtime().spawn(async move {
         let finished = pipe.run_event_loop().await;
 
         // Dropping the PTY unregisters native wait callbacks, which waits for
         // any callback still running, and sees a cancelled overlapped write
         // through to completion; freeing the engine's scrollback is finite CPU
         // work. Neither belongs on an I/O worker.
-        if let Err(error) = nmt_runtime::handle()
+        if let Err(error) = nmt_platform::runtime()
             .spawn_blocking(move || drop(finished))
             .await
         {

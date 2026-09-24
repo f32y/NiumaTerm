@@ -301,11 +301,11 @@ fn testing_mode_uses_only_fake_maintenance_and_a_process_local_cache() {
     let fake = FakeMaintenance::new(ProviderKind::Claude);
     let launcher = AgentCli::new("this-executable-must-never-run", []);
 
-    let block_on = |future| nmt_runtime::handle().block_on(future);
+    let block_on = |future| nmt_platform::runtime().block_on(future);
 
     assert!(block_on(fake.probe(&launcher)).unwrap().update_available());
 
-    nmt_runtime::handle()
+    nmt_platform::runtime()
         .block_on(fake.update(&launcher))
         .unwrap();
 

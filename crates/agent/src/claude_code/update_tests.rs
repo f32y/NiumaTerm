@@ -22,7 +22,7 @@ fn release_client_rejects_unknown_channels_and_invalid_versions() {
     let client = HttpClaudeReleaseChannel::with_base_url("http://127.0.0.1:9").unwrap();
 
     assert_eq!(
-        nmt_runtime::handle()
+        nmt_platform::runtime()
             .block_on(client.latest("canary"))
             .unwrap_err()
             .kind,

@@ -370,7 +370,7 @@ fn spawn_bounded_reader(
     mut reader: impl AsyncRead + Unpin + Send + 'static,
     limit: usize,
 ) -> JoinHandle<io::Result<Vec<u8>>> {
-    nmt_runtime::handle().spawn(async move {
+    nmt_platform::runtime().spawn(async move {
         let mut retained = Vec::with_capacity(limit.min(64 * 1024));
         let mut buffer = [0_u8; 8 * 1024];
 

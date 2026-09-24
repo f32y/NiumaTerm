@@ -778,7 +778,7 @@ impl UpdateCoordinator {
     fn persist_cache(&self) -> JoinHandle<()> {
         let coordinator = self.clone();
 
-        nmt_runtime::handle().spawn_blocking(move || {
+        nmt_platform::runtime().spawn_blocking(move || {
             // Read the latest snapshot after acquiring the writer lock, so
             // workers scheduled out of order cannot restore an older value.
             let _write = coordinator.cache_write.lock();

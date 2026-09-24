@@ -32,7 +32,7 @@ fn effective_environment_matches_child_case_rules_and_last_override() {
     #[cfg(unix)]
     let body = "[ \"$NMT_CASE_PROBE\" = upper ] && [ \"$nmt_case_probe\" = lower ]";
 
-    let output = nmt_runtime::handle()
+    let output = nmt_platform::runtime()
         .block_on(run_bounded(
             &launcher,
             script(body),
@@ -82,7 +82,7 @@ fn bounded_runner_retains_suffix_and_redacts_environment_values() {
     #[cfg(unix)]
     let body = "echo \"1234567890$NMT_TEST_SECRET\"";
 
-    let output = nmt_runtime::handle()
+    let output = nmt_platform::runtime()
         .block_on(run_bounded(
             &launcher,
             script(body),
@@ -105,7 +105,7 @@ fn structured_probe_parsing_precedes_diagnostic_redaction() {
     #[cfg(unix)]
     let body = "echo '{\"codexVersion\":\"1.2.3\"}'";
 
-    let output = nmt_runtime::handle()
+    let output = nmt_platform::runtime()
         .block_on(run_bounded(
             &launcher,
             script(body),
@@ -126,7 +126,7 @@ fn bounded_runner_times_out_and_reports_bounded_diagnostics() {
     #[cfg(unix)]
     let body = "echo before-timeout; sleep 6";
 
-    let error = nmt_runtime::handle()
+    let error = nmt_platform::runtime()
         .block_on(run_bounded(
             &shell_launcher(),
             script(body),

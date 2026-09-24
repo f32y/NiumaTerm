@@ -41,7 +41,7 @@ impl ProgressMonitor {
     pub(crate) fn new(cwd: Option<String>, deliver: Arc<dyn Fn(Value) + Send + Sync>) -> Self {
         let (sender, mut receiver) = unbounded_channel();
 
-        nmt_runtime::handle().spawn(async move {
+        nmt_platform::runtime().spawn(async move {
             let mut target: Option<(String, PathBuf)> = None;
             let mut reader = ProgressReader::default();
             let mut reported = None;

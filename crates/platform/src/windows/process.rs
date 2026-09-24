@@ -33,7 +33,7 @@ pub struct PipedChild {
 
 /// Spawn `command` with all three standard streams piped to the shared runtime.
 pub fn spawn_piped(mut command: Command) -> io::Result<PipedChild> {
-    let _runtime = nmt_runtime::handle().enter();
+    let _runtime = crate::runtime().enter();
 
     let (stdin, child_stdin) = child_stdio_pair(Direction::Outbound)?;
     let (stdout, child_stdout) = child_stdio_pair(Direction::Inbound)?;

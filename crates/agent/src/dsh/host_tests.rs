@@ -25,7 +25,7 @@ fn a_starting_launch_does_not_block_another_launch() {
             ..LaunchConfig::default()
         };
 
-        let result = nmt_runtime::handle().block_on(shared(&different_launch));
+        let result = nmt_platform::runtime().block_on(shared(&different_launch));
 
         completed
             .send(matches!(result, Err(HostError::NotInstalled(_))))

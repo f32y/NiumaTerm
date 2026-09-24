@@ -315,7 +315,7 @@ fn register_available(
         maintenance,
     );
 
-    let status = nmt_runtime::handle()
+    let status = nmt_platform::runtime()
         .block_on(coordinator.check(&key, true))
         .unwrap();
 
@@ -479,16 +479,16 @@ fn one_claude_update_restores_multiple_sessions_in_place() {
         register_available(&fixture, ProviderKind::Claude, &launches[0], maintenance);
 
     for (session, _) in &mut sessions {
-        nmt_runtime::handle()
+        nmt_platform::runtime()
             .block_on(session.shutdown(Duration::from_secs(5), false))
             .unwrap();
     }
 
-    nmt_runtime::handle()
+    nmt_platform::runtime()
         .block_on(coordinator.run_vendor_update(&key))
         .unwrap();
 
-    let verified = nmt_runtime::handle()
+    let verified = nmt_platform::runtime()
         .block_on(coordinator.verify(&key))
         .unwrap();
 
@@ -508,7 +508,7 @@ fn one_claude_update_restores_multiple_sessions_in_place() {
 
         assert_eq!(wait_for_claude_ready(&mut resumed, &receiver), id);
 
-        nmt_runtime::handle()
+        nmt_platform::runtime()
             .block_on(resumed.shutdown(Duration::from_secs(5), false))
             .unwrap();
     }
@@ -549,7 +549,7 @@ fn one_codex_update_restores_multiple_threads_without_starting_new_ones() {
     for launch in &launches {
         let (sender, receiver) = mpsc::channel();
 
-        let mut session = nmt_runtime::handle()
+        let mut session = nmt_platform::runtime()
             .block_on(app_server::Session::spawn(
                 launch,
                 &launches,
@@ -589,16 +589,16 @@ fn one_codex_update_restores_multiple_threads_without_starting_new_ones() {
         register_available(&fixture, ProviderKind::Codex, &launches[0], maintenance);
 
     for (session, _) in &mut sessions {
-        nmt_runtime::handle()
+        nmt_platform::runtime()
             .block_on(session.shutdown(Duration::from_secs(5), false))
             .unwrap();
     }
 
-    nmt_runtime::handle()
+    nmt_platform::runtime()
         .block_on(coordinator.run_vendor_update(&key))
         .unwrap();
 
-    let verified = nmt_runtime::handle()
+    let verified = nmt_platform::runtime()
         .block_on(coordinator.verify(&key))
         .unwrap();
 
@@ -607,7 +607,7 @@ fn one_codex_update_restores_multiple_threads_without_starting_new_ones() {
     for ((_, id), launch) in sessions.into_iter().zip(&launches) {
         let (sender, receiver) = mpsc::channel();
 
-        let mut resumed = nmt_runtime::handle()
+        let mut resumed = nmt_platform::runtime()
             .block_on(app_server::Session::spawn_resuming(
                 launch,
                 &launches,
@@ -644,7 +644,7 @@ fn one_codex_update_restores_multiple_threads_without_starting_new_ones() {
     );
 
     for resumed in &mut resumed_sessions {
-        nmt_runtime::handle()
+        nmt_platform::runtime()
             .block_on(resumed.shutdown(Duration::from_secs(5), false))
             .unwrap();
     }
@@ -683,7 +683,7 @@ fn failed_and_unchanged_codex_updates_still_restore_all_threads() {
         for launch in &launches {
             let (sender, receiver) = mpsc::channel();
 
-            let mut session = nmt_runtime::handle()
+            let mut session = nmt_platform::runtime()
                 .block_on(app_server::Session::spawn(
                     launch,
                     &launches,
@@ -706,17 +706,17 @@ fn failed_and_unchanged_codex_updates_still_restore_all_threads() {
             register_available(&fixture, ProviderKind::Codex, &launches[0], maintenance);
 
         for (session, _) in &mut sessions {
-            nmt_runtime::handle()
+            nmt_platform::runtime()
                 .block_on(session.shutdown(Duration::from_secs(5), false))
                 .unwrap();
         }
 
-        let update_error = nmt_runtime::handle()
+        let update_error = nmt_platform::runtime()
             .block_on(coordinator.run_vendor_update(&key))
             .err();
 
         let verified = update_error.is_none().then(|| {
-            nmt_runtime::handle()
+            nmt_platform::runtime()
                 .block_on(coordinator.verify(&key))
                 .expect("unchanged install should verify")
         });
@@ -726,7 +726,7 @@ fn failed_and_unchanged_codex_updates_still_restore_all_threads() {
         for ((_, id), launch) in sessions.into_iter().zip(&launches) {
             let (sender, receiver) = mpsc::channel();
 
-            let mut resumed = nmt_runtime::handle()
+            let mut resumed = nmt_platform::runtime()
                 .block_on(app_server::Session::spawn_resuming(
                     launch,
                     &launches,
@@ -769,7 +769,7 @@ fn failed_and_unchanged_codex_updates_still_restore_all_threads() {
         );
 
         for session in &mut resumed_sessions {
-            nmt_runtime::handle()
+            nmt_platform::runtime()
                 .block_on(session.shutdown(Duration::from_secs(5), false))
                 .unwrap();
         }
@@ -819,7 +819,7 @@ fn one_codex_host_starts_threads_for_two_custom_gateways() {
     for (launch, workspace) in launches.iter().zip(&workspaces) {
         let (sender, receiver) = mpsc::channel();
 
-        let mut session = nmt_runtime::handle()
+        let mut session = nmt_platform::runtime()
             .block_on(app_server::Session::spawn(
                 launch,
                 &launches,
@@ -880,7 +880,7 @@ fn one_codex_host_starts_threads_for_two_custom_gateways() {
         1
     );
 
-    nmt_runtime::handle()
+    nmt_platform::runtime()
         .block_on(sessions[0].shutdown(Duration::from_secs(5), false))
         .unwrap();
 
@@ -897,7 +897,7 @@ fn one_codex_host_starts_threads_for_two_custom_gateways() {
         1
     );
 
-    nmt_runtime::handle()
+    nmt_platform::runtime()
         .block_on(sessions[1].shutdown(Duration::from_secs(5), false))
         .unwrap();
 }
@@ -925,7 +925,7 @@ fn simultaneous_codex_sessions_join_one_host_start() {
 
             barrier.wait();
 
-            let session = nmt_runtime::handle()
+            let session = nmt_platform::runtime()
                 .block_on(app_server::Session::spawn(
                     &launches[index],
                     launches.as_ref(),
@@ -971,7 +971,7 @@ fn simultaneous_codex_sessions_join_one_host_start() {
     );
 
     for (session, _) in &mut sessions {
-        nmt_runtime::handle()
+        nmt_platform::runtime()
             .block_on(session.shutdown(Duration::from_secs(5), false))
             .unwrap();
     }
@@ -1005,7 +1005,7 @@ fn simultaneous_codex_sessions_share_one_startup_failure() {
         workers.push(thread::spawn(move || {
             barrier.wait();
 
-            nmt_runtime::handle()
+            nmt_platform::runtime()
                 .block_on(app_server::Session::spawn(
                     &launches[index],
                     launches.as_ref(),
@@ -1057,7 +1057,7 @@ fn one_codex_host_rejects_incompatible_live_launch_settings() {
 
     let (sender, receiver) = mpsc::channel();
 
-    let mut session = nmt_runtime::handle()
+    let mut session = nmt_platform::runtime()
         .block_on(app_server::Session::spawn(
             &first,
             &launches,
@@ -1074,7 +1074,7 @@ fn one_codex_host_rejects_incompatible_live_launch_settings() {
         "thread-compatible"
     );
 
-    let error = nmt_runtime::handle()
+    let error = nmt_platform::runtime()
         .block_on(app_server::Session::spawn(
             &incompatible,
             &launches,
@@ -1097,7 +1097,7 @@ fn one_codex_host_rejects_incompatible_live_launch_settings() {
         1
     );
 
-    nmt_runtime::handle()
+    nmt_platform::runtime()
         .block_on(session.shutdown(Duration::from_secs(5), false))
         .unwrap();
 }
@@ -1121,7 +1121,7 @@ fn two_codex_threads_recover_on_one_replacement_host() {
     for launch in &launches {
         let (sender, receiver) = mpsc::channel();
 
-        let mut session = nmt_runtime::handle()
+        let mut session = nmt_platform::runtime()
             .block_on(app_server::Session::spawn(
                 launch,
                 &launches,
@@ -1161,7 +1161,7 @@ fn two_codex_threads_recover_on_one_replacement_host() {
     for (id, launch) in ids.into_iter().zip(&recovery_launches) {
         let (sender, receiver) = mpsc::channel();
 
-        let mut session = nmt_runtime::handle()
+        let mut session = nmt_platform::runtime()
             .block_on(app_server::Session::spawn_resuming(
                 launch,
                 &recovery_launches,
@@ -1209,7 +1209,7 @@ fn two_codex_threads_recover_on_one_replacement_host() {
     drop(sessions);
 
     for session in &mut recovered {
-        nmt_runtime::handle()
+        nmt_platform::runtime()
             .block_on(session.shutdown(Duration::from_secs(5), false))
             .unwrap();
     }
@@ -1233,7 +1233,7 @@ fn one_failed_codex_resume_does_not_block_another_session() {
 
     let (failed_sender, failed_receiver) = mpsc::channel();
 
-    let mut failed = nmt_runtime::handle()
+    let mut failed = nmt_platform::runtime()
         .block_on(app_server::Session::spawn_resuming(
             &launches[0],
             &launches,
@@ -1251,7 +1251,7 @@ fn one_failed_codex_resume_does_not_block_another_session() {
 
     let (ready_sender, ready_receiver) = mpsc::channel();
 
-    let mut ready = nmt_runtime::handle()
+    let mut ready = nmt_platform::runtime()
         .block_on(app_server::Session::spawn_resuming(
             &launches[1],
             &launches,
@@ -1279,11 +1279,11 @@ fn one_failed_codex_resume_does_not_block_another_session() {
         1
     );
 
-    nmt_runtime::handle()
+    nmt_platform::runtime()
         .block_on(failed.shutdown(Duration::from_secs(5), false))
         .unwrap();
 
-    nmt_runtime::handle()
+    nmt_platform::runtime()
         .block_on(ready.shutdown(Duration::from_secs(5), false))
         .unwrap();
 }

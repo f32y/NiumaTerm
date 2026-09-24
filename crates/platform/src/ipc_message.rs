@@ -38,19 +38,15 @@ mod tests {
         let bytes = vec![b'x'; MAX_MESSAGE_BYTES];
 
         assert_eq!(
-            nmt_runtime::handle().block_on(read_message(bytes.as_slice())),
+            crate::runtime().block_on(read_message(bytes.as_slice())),
             Some(bytes)
         );
         assert!(
-            nmt_runtime::handle()
+            crate::runtime()
                 .block_on(read_message(vec![0; MAX_MESSAGE_BYTES + 1].as_slice()))
                 .is_none()
         );
-        assert!(
-            nmt_runtime::handle()
-                .block_on(read_message(repeat(0)))
-                .is_none()
-        );
+        assert!(crate::runtime().block_on(read_message(repeat(0))).is_none());
 
         struct FailedRead;
 
@@ -65,7 +61,7 @@ mod tests {
         }
 
         assert!(
-            nmt_runtime::handle()
+            crate::runtime()
                 .block_on(read_message(Cursor::new(b"partial").chain(FailedRead)))
                 .is_none()
         );

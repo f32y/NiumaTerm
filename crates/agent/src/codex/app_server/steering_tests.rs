@@ -59,7 +59,7 @@ fn a_steer_rejected_after_completion_automatically_starts_the_next_turn() {
 
         let (tx, rx) = channel();
 
-        let mut session = nmt_runtime::handle()
+        let mut session = nmt_platform::runtime()
             .block_on(Session::spawn(
                 &launch,
                 &[],
@@ -124,7 +124,7 @@ fn a_steer_rejected_after_completion_automatically_starts_the_next_turn() {
                 .any(|event| matches!(event, Event::Error { .. }))
         );
 
-        nmt_runtime::handle()
+        nmt_platform::runtime()
             .block_on(session.shutdown(Duration::from_secs(2), true))
             .unwrap();
 

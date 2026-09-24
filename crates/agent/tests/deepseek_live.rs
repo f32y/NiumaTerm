@@ -116,7 +116,7 @@ fn a_steered_message_is_consumed_without_another_submission() {
 
     let (tx, frames) = channel();
 
-    let mut session = nmt_runtime::handle()
+    let mut session = nmt_platform::runtime()
         .block_on(Session::create(
             &launch(),
             &AgentWorkspace::default(),
@@ -192,7 +192,7 @@ fn a_configured_profile_consumes_steering_without_resubmission() {
 
     let (tx, frames) = channel();
 
-    let mut session = nmt_runtime::handle()
+    let mut session = nmt_platform::runtime()
         .block_on(Session::create(
             &launch,
             &AgentWorkspace::single(Some(workspace.display().to_string())),
@@ -314,7 +314,7 @@ fn a_configured_profile_consumes_steering_without_resubmission() {
 fn a_turn_streams_and_survives_being_stopped() {
     let (tx, frames) = channel();
 
-    let mut session = nmt_runtime::handle()
+    let mut session = nmt_platform::runtime()
         .block_on(Session::create(
             &launch(),
             &AgentWorkspace::default(),
@@ -426,7 +426,7 @@ fn a_turn_streams_and_survives_being_stopped() {
 #[test]
 #[ignore = "starts a real harness host"]
 fn the_host_serves_whether_or_not_it_knows_the_no_browser_flag() {
-    let host = nmt_runtime::handle()
+    let host = nmt_platform::runtime()
         .block_on(Host::start(&launch()))
         .expect("the installed harness should serve");
 
@@ -438,7 +438,7 @@ fn the_host_serves_whether_or_not_it_knows_the_no_browser_flag() {
 fn a_session_opens_and_receives_its_preset_catalog() {
     let (tx, frames) = channel();
 
-    let mut session = nmt_runtime::handle()
+    let mut session = nmt_platform::runtime()
         .block_on(Session::create(
             &launch(),
             &AgentWorkspace::default(),
@@ -465,7 +465,7 @@ fn a_session_opens_and_receives_its_preset_catalog() {
 fn two_sessions_share_one_host_and_do_not_see_each_other() {
     let (first_tx, first_frames) = channel();
 
-    let mut first = nmt_runtime::handle()
+    let mut first = nmt_platform::runtime()
         .block_on(Session::create(
             &launch(),
             &AgentWorkspace::default(),
@@ -477,7 +477,7 @@ fn two_sessions_share_one_host_and_do_not_see_each_other() {
 
     let (second_tx, second_frames) = channel();
 
-    let mut second = nmt_runtime::handle()
+    let mut second = nmt_platform::runtime()
         .block_on(Session::create(
             &launch(),
             &AgentWorkspace::default(),
@@ -527,7 +527,7 @@ fn an_approval_is_raised_answered_and_the_turn_continues() {
 
     let (tx, frames) = channel();
 
-    let mut session = nmt_runtime::handle()
+    let mut session = nmt_platform::runtime()
         .block_on(Session::create(
             &launch(),
             &AgentWorkspace::default(),
@@ -621,7 +621,7 @@ fn a_real_turn_shows_its_commands_and_file_changes() {
 
     let (tx, frames) = channel();
 
-    let mut session = nmt_runtime::handle()
+    let mut session = nmt_platform::runtime()
         .block_on(Session::create(
             &launch(),
             &AgentWorkspace::single(Some(workspace.display().to_string())),
@@ -744,7 +744,7 @@ fn a_profile_pinning_an_unserved_effort_is_told_rather_than_ignored() {
 
     let (tx, frames) = channel();
 
-    let mut session = nmt_runtime::handle()
+    let mut session = nmt_platform::runtime()
         .block_on(Session::create(
             &launch,
             &AgentWorkspace::default(),
@@ -779,7 +779,7 @@ fn a_profile_pinning_an_unserved_effort_is_told_rather_than_ignored() {
 fn the_agent_preset_roster_reaches_the_picker() {
     let (tx, frames) = channel();
 
-    let mut session = nmt_runtime::handle()
+    let mut session = nmt_platform::runtime()
         .block_on(Session::create(
             &launch(),
             &AgentWorkspace::default(),
@@ -825,7 +825,7 @@ fn the_agent_preset_roster_reaches_the_picker() {
 fn a_question_is_answered_and_the_turn_continues() {
     let (tx, frames) = channel();
 
-    let mut session = nmt_runtime::handle()
+    let mut session = nmt_platform::runtime()
         .block_on(Session::create(
             &launch(),
             &AgentWorkspace::default(),
@@ -890,7 +890,7 @@ fn a_profile_can_declare_and_select_an_image_model() {
 
     let (tx, frames) = channel();
 
-    let mut session = nmt_runtime::handle()
+    let mut session = nmt_platform::runtime()
         .block_on(Session::create(
             &launch,
             &AgentWorkspace::default(),
@@ -930,7 +930,7 @@ fn permission_commands_update_the_session_preset() {
 
     let (tx, frames) = channel();
 
-    let mut session = nmt_runtime::handle()
+    let mut session = nmt_platform::runtime()
         .block_on(Session::create(
             &launch,
             &AgentWorkspace::default(),
@@ -1063,7 +1063,7 @@ fn a_conversation_change_is_requested_without_waiting() {
 
     let (tx, frames) = channel();
 
-    let mut session = nmt_runtime::handle()
+    let mut session = nmt_platform::runtime()
         .block_on(Session::create(
             &launch,
             &AgentWorkspace::default(),

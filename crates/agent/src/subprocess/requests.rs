@@ -86,7 +86,7 @@ impl DeadlineTimer {
     pub(crate) fn new(callback: impl Fn() + Send + 'static) -> Self {
         let handle = TimerHandle(Arc::default());
 
-        nmt_runtime::handle().spawn(run_deadlines(handle.clone(), callback));
+        nmt_platform::runtime().spawn(run_deadlines(handle.clone(), callback));
 
         Self { handle }
     }

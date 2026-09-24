@@ -22,7 +22,7 @@ fn closing_downlinks_interrupts_handshakes_and_idle_reads_and_joins_delivery() {
     for ready in [false, true] {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
 
-        let client = nmt_runtime::handle()
+        let client = nmt_platform::runtime()
             .block_on(ApiClient::new(format!(
                 "http://{}",
                 listener.local_addr().unwrap()
@@ -87,7 +87,7 @@ fn closing_downlinks_interrupts_handshakes_and_idle_reads_and_joins_delivery() {
         entered.recv_timeout(Duration::from_secs(3)).unwrap();
 
         if ready {
-            nmt_runtime::handle()
+            nmt_platform::runtime()
                 .block_on(async { timeout(Duration::from_secs(3), connected).await })
                 .unwrap()
                 .unwrap()
@@ -109,7 +109,7 @@ fn closing_downlinks_interrupts_handshakes_and_idle_reads_and_joins_delivery() {
 fn a_lost_stream_without_a_serving_host_reports_the_host_exit() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
 
-    let client = nmt_runtime::handle()
+    let client = nmt_platform::runtime()
         .block_on(ApiClient::new(format!(
             "http://{}",
             listener.local_addr().unwrap()
@@ -144,7 +144,7 @@ fn a_lost_stream_without_a_serving_host_reports_the_host_exit() {
 
     let (frames_tx, frames) = mpsc::channel();
 
-    let (_downlinks, _) = nmt_runtime::handle()
+    let (_downlinks, _) = nmt_platform::runtime()
         .block_on(Downlinks::open(
             client,
             Weak::new(),
@@ -428,7 +428,7 @@ fn an_interaction_for_another_conversation_is_passed_without_being_shown() {
 fn a_stalled_pass_reply_does_not_stop_heartbeat_answers() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
 
-    let client = nmt_runtime::handle()
+    let client = nmt_platform::runtime()
         .block_on(ApiClient::new(format!(
             "http://{}",
             listener.local_addr().unwrap()
@@ -488,7 +488,7 @@ fn a_stalled_pass_reply_does_not_stop_heartbeat_answers() {
         drop(stalled_reply);
     });
 
-    let (downlinks, _) = nmt_runtime::handle()
+    let (downlinks, _) = nmt_platform::runtime()
         .block_on(Downlinks::open(
             client,
             Weak::new(),

@@ -90,7 +90,7 @@ fn scripted_api_server(
 fn closing_a_session_drops_queued_work_before_cancelling_the_turn() {
     let (base, requests, server) = api_server(3);
 
-    let client = nmt_runtime::handle()
+    let client = nmt_platform::runtime()
         .block_on(ApiClient::new(base))
         .expect("create API client");
 
@@ -101,7 +101,7 @@ fn closing_a_session_drops_queued_work_before_cancelling_the_turn() {
     ];
 
     assert_eq!(
-        nmt_runtime::handle().block_on(run_close_actions(&client, SESSION, &actions)),
+        nmt_platform::runtime().block_on(run_close_actions(&client, SESSION, &actions)),
         Vec::<String>::new()
     );
 
@@ -449,7 +449,7 @@ fn an_unresolvable_harness_is_reported_as_missing_rather_than_as_a_failed_start(
     };
 
     assert!(matches!(
-        nmt_runtime::handle().block_on(Session::create(
+        nmt_platform::runtime().block_on(Session::create(
             &launch,
             &AgentWorkspace::default(),
             |_| {}
@@ -2146,11 +2146,11 @@ fn a_new_conversation_is_composed_from_the_remembered_preset() {
         r#"{"result":{"ok":true,"value":{"sessionId":"sess_1","agentPreset":"reviewer"}}}"#,
     ]);
 
-    let client = nmt_runtime::handle()
+    let client = nmt_platform::runtime()
         .block_on(ApiClient::new(base))
         .expect("create API client");
 
-    let (opened, refusal) = nmt_runtime::handle()
+    let (opened, refusal) = nmt_platform::runtime()
         .block_on(open_new_conversation(
             &client,
             Some(r"C:\Work\api"),
@@ -2176,11 +2176,11 @@ fn a_refused_remembered_preset_opens_the_conversation_on_the_default() {
         r#"{"result":{"ok":true,"value":{"sessionId":"sess_1","agentPreset":"default"}}}"#,
     ]);
 
-    let client = nmt_runtime::handle()
+    let client = nmt_platform::runtime()
         .block_on(ApiClient::new(base))
         .expect("create API client");
 
-    let (opened, refusal) = nmt_runtime::handle()
+    let (opened, refusal) = nmt_platform::runtime()
         .block_on(open_new_conversation(
             &client,
             Some(r"C:\Work\api"),

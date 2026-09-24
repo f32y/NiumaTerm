@@ -30,7 +30,7 @@ pub struct PipedChild {
 /// Spawn `command` with all three standard streams piped to the shared runtime.
 /// Unix pipes are nonblocking descriptors, so the reactor drives them directly.
 pub fn spawn_piped(command: Command) -> io::Result<PipedChild> {
-    let _runtime = nmt_runtime::handle().enter();
+    let _runtime = crate::runtime().enter();
 
     let mut command = AsyncCommand::from(command);
 

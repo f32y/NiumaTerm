@@ -93,7 +93,7 @@ impl Downlinks {
             Arc::new(move |frame| gate.deliver(frame))
         };
 
-        let reader = nmt_runtime::handle().spawn(run_downlink(
+        let reader = nmt_platform::runtime().spawn(run_downlink(
             client,
             host,
             session_id,
@@ -231,7 +231,7 @@ async fn read_downlink(
 /// answer. A reply that fails is reported back so the connection is replaced,
 /// which makes the host offer the still-pending interaction again.
 fn pass_event(client: ApiClient, pass: PassedEvent, failed: UnboundedSender<String>) {
-    nmt_runtime::handle().spawn(async move {
+    nmt_platform::runtime().spawn(async move {
         let reply = client
             .respond_event(&pass.client_id, &pass.event_id, json!({ "kind": "next" }))
             .await;

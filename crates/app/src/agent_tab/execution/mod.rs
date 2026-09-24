@@ -223,7 +223,7 @@ impl SessionOwner {
 
         // Cleanup must outlive this owner, so it runs as a detached runtime
         // task rather than work tied to the view.
-        nmt_runtime::handle().spawn(async move {
+        nmt_platform::runtime().spawn(async move {
             if let Some(mut backend) = backend {
                 let _ = backend.shutdown(Duration::from_secs(5), true).await;
             }
@@ -1022,7 +1022,7 @@ impl AgentSession {
 
         // The backend travels with its shutdown so a failure can hand it back
         // to the controller.
-        let worker = nmt_runtime::handle().spawn(async move { (backend, stopping.await) });
+        let worker = nmt_platform::runtime().spawn(async move { (backend, stopping.await) });
 
         cx.spawn(async move |this, cx| Self::finish_suspension(this, worker, epoch, cx).await)
     }
@@ -1742,7 +1742,7 @@ impl AgentSession {
 fn shutdown_in_background(mut backend: Box<Backend>, timeout: Duration) {
     let stopping = backend.shutdown(timeout, true);
 
-    nmt_runtime::handle().spawn(async move {
+    nmt_platform::runtime().spawn(async move {
         let _ = stopping.await;
 
         drop(backend);

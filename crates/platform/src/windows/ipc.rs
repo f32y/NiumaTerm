@@ -77,7 +77,7 @@ pub fn spawn_server(
     testing: bool,
     on_message: impl FnMut(Vec<u8>) -> bool + Send + 'static,
 ) -> io::Result<()> {
-    nmt_runtime::handle().spawn(serve_pipe(testing, on_message));
+    crate::runtime().spawn(serve_pipe(testing, on_message));
 
     Ok(())
 }

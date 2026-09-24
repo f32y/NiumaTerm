@@ -811,7 +811,7 @@ impl Drop for Child {
 /// runs on whichever thread opens the tab, so the runtime context is entered
 /// here; entering only sets a thread-local and keeps creation synchronous.
 fn register_with_runtime(file: &File) -> io::Result<(AsyncFd<OwnedFd>, Signal)> {
-    let _runtime = nmt_runtime::handle().enter();
+    let _runtime = crate::runtime().enter();
 
     Ok((
         AsyncFd::new(file.as_fd().try_clone_to_owned()?)?,

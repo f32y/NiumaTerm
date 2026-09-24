@@ -25,10 +25,10 @@ pub async fn on_runtime<T: Send + 'static>(future: impl Future<Output = T> + Sen
     // runtime task finishing after its test would wake a finished scheduler.
     // Unit tests therefore wait for the runtime work in place.
     #[cfg(test)]
-    return nmt_runtime::handle().block_on(future);
+    return nmt_platform::runtime().block_on(future);
 
     #[cfg(not(test))]
-    match nmt_runtime::handle().spawn(future).await {
+    match nmt_platform::runtime().spawn(future).await {
         Ok(value) => value,
         Err(error) => panic::resume_unwind(error.into_panic()),
     }

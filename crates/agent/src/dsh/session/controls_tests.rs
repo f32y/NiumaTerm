@@ -56,7 +56,7 @@ fn reply(stream: &mut TcpStream, success: bool) {
 fn stalled_http_accepts_large_payloads_and_a_burst_of_distinct_controls() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
 
-    let client = nmt_runtime::handle()
+    let client = nmt_platform::runtime()
         .block_on(ApiClient::new(format!(
             "http://{}",
             listener.local_addr().unwrap()
@@ -132,7 +132,7 @@ fn stalled_http_accepts_large_payloads_and_a_burst_of_distinct_controls() {
 fn failure_releases_admission_for_retry_and_old_completion_is_ignored() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
 
-    let client = nmt_runtime::handle()
+    let client = nmt_platform::runtime()
         .block_on(ApiClient::new(format!(
             "http://{}",
             listener.local_addr().unwrap()
@@ -191,7 +191,7 @@ fn failure_releases_admission_for_retry_and_old_completion_is_ignored() {
 fn cancelled_approval_reports_stop_failure_without_rejecting_the_answer() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
 
-    let client = nmt_runtime::handle()
+    let client = nmt_platform::runtime()
         .block_on(ApiClient::new(format!(
             "http://{}",
             listener.local_addr().unwrap()

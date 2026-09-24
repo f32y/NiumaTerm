@@ -161,7 +161,7 @@ impl Drop for Conpty {
         // An owner that did not await `close` still must not leak the console
         // or its tree. Dropping never waits, so the close continues detached.
         if self.handle != 0 {
-            nmt_runtime::handle().spawn(self.begin_close());
+            crate::runtime().spawn(self.begin_close());
         }
     }
 }

@@ -138,7 +138,7 @@ if ($initialized.method -ne 'initialized' -or $request.method -ne 'account/rateL
 "#,
     );
 
-    let usage = nmt_runtime::handle()
+    let usage = nmt_platform::runtime()
         .block_on(fetch(&launcher, &FetchCancellation::default()))
         .unwrap();
 
@@ -163,7 +163,7 @@ Start-Sleep -Seconds 30
         let cancellation = cancellation.clone();
 
         move || {
-            tx.send(nmt_runtime::handle().block_on(fetch(&launcher, &cancellation)))
+            tx.send(nmt_platform::runtime().block_on(fetch(&launcher, &cancellation)))
                 .unwrap()
         }
     });

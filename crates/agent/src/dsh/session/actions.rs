@@ -602,7 +602,7 @@ fn schedule_close_actions(client: ApiClient, session_id: String, actions: Vec<Cl
         return;
     }
 
-    nmt_runtime::handle().spawn(async move {
+    nmt_platform::runtime().spawn(async move {
         for failure in run_close_actions(&client, &session_id, &actions).await {
             tracing::warn!("deepseek session close cleanup failed: {failure}");
         }

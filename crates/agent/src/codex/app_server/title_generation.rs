@@ -194,7 +194,7 @@ fn start_title_generation(
     let root_thread_id = request.root_thread_id.clone();
     let provisional_title = request.provisional_title.clone();
 
-    nmt_runtime::handle().spawn(run_title_generation(
+    nmt_platform::runtime().spawn(run_title_generation(
         host,
         registration_id,
         rx,

@@ -64,7 +64,7 @@ fn cli_session_starts_sends_images_and_rejects_cross_provider_recovery_without_a
 
     let epoch = runtime.begin_start();
 
-    let backend = nmt_runtime::handle()
+    let backend = nmt_platform::runtime()
         .block_on(Backend::spawn(
             AgentKind::Claude,
             &launch,
@@ -149,7 +149,7 @@ fn cli_session_starts_sends_images_and_rejects_cross_provider_recovery_without_a
 
     let mut backend = runtime.retire().unwrap();
 
-    nmt_runtime::handle()
+    nmt_platform::runtime()
         .block_on(backend.shutdown(Duration::from_secs(2), true))
         .unwrap();
 

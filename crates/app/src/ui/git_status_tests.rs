@@ -160,7 +160,7 @@ fn untracked_diff_has_new_line_numbers_without_added_prefix() {
     fs::write(dir.join("new.txt"), "first\n+second").unwrap();
 
     let rows =
-        nmt_runtime::handle().block_on(fetch_file_diff(dir.to_str().unwrap(), "new.txt", true));
+        nmt_platform::runtime().block_on(fetch_file_diff(dir.to_str().unwrap(), "new.txt", true));
 
     assert_eq!(rows.len(), 2);
     assert_eq!(

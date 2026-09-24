@@ -143,12 +143,12 @@ pub fn spawn_server(
     listener.set_nonblocking(true)?;
 
     let listener = {
-        let _runtime = nmt_runtime::handle().enter();
+        let _runtime = crate::runtime().enter();
 
         AsyncUnixListener::from_std(listener)?
     };
 
-    nmt_runtime::handle().spawn(serve_socket(listener, on_message));
+    crate::runtime().spawn(serve_socket(listener, on_message));
 
     Ok(())
 }

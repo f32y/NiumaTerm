@@ -41,7 +41,7 @@ fn repository() -> PathBuf {
 }
 
 fn branch_of(dir: &Path, max_age: Duration) -> Option<String> {
-    match nmt_runtime::handle()
+    match nmt_platform::runtime()
         .block_on(current_branch(&dir.to_string_lossy(), max_age))
         .unwrap()?
     {
@@ -96,7 +96,7 @@ fn a_missing_working_directory_reports_a_read_error() {
     let missing = directory.path().join("absent");
 
     assert!(
-        nmt_runtime::handle()
+        nmt_platform::runtime()
             .block_on(current_branch(&missing.to_string_lossy(), Duration::ZERO))
             .is_err()
     );

@@ -448,7 +448,7 @@ fn acceptance_uses_one_root_provider_identity_per_turn() {
         |event| matches!(event, Event::ProviderTurnAccepted { id } if id == "response:api-next")
     ));
 
-    nmt_runtime::handle()
+    nmt_platform::runtime()
         .block_on(session.shutdown(Duration::from_secs(2), true))
         .unwrap();
 }
@@ -606,7 +606,7 @@ fn control_responses_do_not_fall_through_or_revive_cancelled_titles() {
 
     session.compacting = true;
 
-    nmt_runtime::handle()
+    nmt_platform::runtime()
         .block_on(session.process.shutdown(Duration::from_secs(1), true))
         .unwrap();
 
@@ -1003,7 +1003,7 @@ fn pending_queries_do_not_block_an_atomic_settings_and_prompt_batch() {
     assert_eq!(session.applied_permission.as_deref(), Some("plan"));
     assert_eq!(session.control.effort(), Some("high"));
 
-    nmt_runtime::handle()
+    nmt_platform::runtime()
         .block_on(session.shutdown(Duration::from_secs(5), false))
         .unwrap();
 

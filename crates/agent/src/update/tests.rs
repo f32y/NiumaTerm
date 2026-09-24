@@ -125,7 +125,7 @@ fn configured_vendor_runners_pass_only_the_allowlisted_update_argument() {
             [("NMT_UPDATE_LOG".to_string(), log.display().to_string())],
         );
 
-        nmt_runtime::handle()
+        nmt_platform::runtime()
             .block_on(vendor_update(&launcher, provider))
             .unwrap();
 
@@ -223,7 +223,7 @@ fn waiting_for_cache_persistence_keeps_update_state_readable() {
     let checked_key = key.clone();
 
     let worker =
-        thread::spawn(move || nmt_runtime::handle().block_on(checker.check(&checked_key, true)));
+        thread::spawn(move || nmt_platform::runtime().block_on(checker.check(&checked_key, true)));
 
     let deadline = Instant::now() + Duration::from_secs(3);
 
@@ -269,7 +269,7 @@ fn dismissing_updates_returns_while_the_cache_writer_is_busy() {
         }),
     );
 
-    nmt_runtime::handle()
+    nmt_platform::runtime()
         .block_on(coordinator.check(&key, true))
         .unwrap();
 
@@ -297,7 +297,7 @@ fn dismissing_updates_returns_while_the_cache_writer_is_busy() {
         "dismissal must not wait for the filesystem"
     );
 
-    nmt_runtime::handle()
+    nmt_platform::runtime()
         .block_on(coordinator.persist_cache())
         .unwrap();
 
@@ -331,11 +331,11 @@ fn fresh_cache_is_reused_and_manual_check_bypasses_it() {
         fake.clone(),
     );
 
-    nmt_runtime::handle()
+    nmt_platform::runtime()
         .block_on(coordinator.check(&key, false))
         .unwrap();
 
-    nmt_runtime::handle()
+    nmt_platform::runtime()
         .block_on(coordinator.check(&key, false))
         .unwrap();
 
@@ -346,7 +346,7 @@ fn fresh_cache_is_reused_and_manual_check_bypasses_it() {
             .contains("do-not-cache-provider-command")
     );
 
-    nmt_runtime::handle()
+    nmt_platform::runtime()
         .block_on(coordinator.check(&key, true))
         .unwrap();
 
@@ -381,7 +381,7 @@ fn operation_claim_serializes_updates_and_dismissal_is_version_keyed() {
     assert_eq!(key, duplicate_key);
     assert_eq!(coordinator.snapshots().len(), 1);
 
-    nmt_runtime::handle()
+    nmt_platform::runtime()
         .block_on(coordinator.check(&key, true))
         .unwrap();
 
@@ -389,7 +389,7 @@ fn operation_claim_serializes_updates_and_dismissal_is_version_keyed() {
 
     assert!(coordinator.begin_update(&key).is_err());
 
-    nmt_runtime::handle()
+    nmt_platform::runtime()
         .block_on(coordinator.run_vendor_update(&key))
         .unwrap();
 
@@ -431,7 +431,7 @@ fn unchanged_and_partial_recovery_outcomes_keep_verified_versions() {
         fake,
     );
 
-    let available = nmt_runtime::handle()
+    let available = nmt_platform::runtime()
         .block_on(coordinator.check(&key, true))
         .unwrap();
 
@@ -492,13 +492,13 @@ fn updater_external_lock_is_preserved_as_an_actionable_failure() {
         Arc::new(LockedMaintenance),
     );
 
-    nmt_runtime::handle()
+    nmt_platform::runtime()
         .block_on(coordinator.check(&key, true))
         .unwrap();
 
     coordinator.begin_update(&key).unwrap();
 
-    let error = nmt_runtime::handle()
+    let error = nmt_platform::runtime()
         .block_on(coordinator.run_vendor_update(&key))
         .unwrap_err();
 

@@ -56,7 +56,7 @@ fn the_panel_supplement_runs_only_for_a_live_reading_without_fable() {
     };
 
     assert_eq!(
-        nmt_runtime::handle().block_on(supplement_from_cli(complete.clone(), &cancelled)),
+        nmt_platform::runtime().block_on(supplement_from_cli(complete.clone(), &cancelled)),
         complete
     );
 
@@ -65,7 +65,7 @@ fn the_panel_supplement_runs_only_for_a_live_reading_without_fable() {
     let empty = UsageSnapshot::default();
 
     assert_eq!(
-        nmt_runtime::handle().block_on(supplement_from_cli(empty.clone(), &cancelled)),
+        nmt_platform::runtime().block_on(supplement_from_cli(empty.clone(), &cancelled)),
         empty
     );
 
@@ -76,7 +76,7 @@ fn the_panel_supplement_runs_only_for_a_live_reading_without_fable() {
     };
 
     assert_eq!(
-        nmt_runtime::handle().block_on(supplement_from_cli(partial.clone(), &cancelled)),
+        nmt_platform::runtime().block_on(supplement_from_cli(partial.clone(), &cancelled)),
         partial
     );
 }
@@ -191,7 +191,7 @@ fn a_cancelled_request_reports_cancellation_not_failure() {
 
     cancelled.cancel();
 
-    let error = nmt_runtime::handle()
+    let error = nmt_platform::runtime()
         .block_on(fetch_with_cancel(&cancelled))
         .expect_err("a cancelled fetch produces no snapshot");
 

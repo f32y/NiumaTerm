@@ -132,7 +132,7 @@ pub(super) fn load_sessions(
     cwd: Option<String>,
     deliver: Arc<dyn Fn(Value) + Send + Sync>,
 ) {
-    nmt_runtime::handle().spawn(async move {
+    nmt_platform::runtime().spawn(async move {
         deliver_read(
             json!({ "type": HISTORY_FRAME, "cwd": cwd }),
             "sessions",
@@ -150,7 +150,7 @@ pub(super) fn check_running(
     session_id: String,
     deliver: Arc<dyn Fn(Value) + Send + Sync>,
 ) {
-    nmt_runtime::handle().spawn(async move {
+    nmt_platform::runtime().spawn(async move {
         let Ok(listed) = client.call("session/list", json!({ "_request": {} })).await else {
             return;
         };
@@ -283,7 +283,7 @@ pub(super) fn load_search(
     query: String,
     deliver: Arc<dyn Fn(Value) + Send + Sync>,
 ) {
-    nmt_runtime::handle().spawn(async move {
+    nmt_platform::runtime().spawn(async move {
         let searched = client
             .request("session/search", json!({ "query": query }))
             .await;
@@ -318,7 +318,7 @@ pub(super) fn load_commands(
     session_id: String,
     deliver: Arc<dyn Fn(Value) + Send + Sync>,
 ) {
-    nmt_runtime::handle().spawn(async move {
+    nmt_platform::runtime().spawn(async move {
         deliver_read(
             json!({ "type": COMMANDS_FRAME, "sessionId": session_id }),
             "commands",
@@ -339,7 +339,7 @@ pub(super) fn load_skills(
     session_id: String,
     deliver: Arc<dyn Fn(Value) + Send + Sync>,
 ) {
-    nmt_runtime::handle().spawn(async move {
+    nmt_platform::runtime().spawn(async move {
         deliver_read(
             json!({ "type": SKILLS_FRAME, "sessionId": session_id }),
             "skills",
@@ -366,7 +366,7 @@ pub(super) fn load_agent_presets(
     refusal: Option<String>,
     deliver: Arc<dyn Fn(Value) + Send + Sync>,
 ) {
-    nmt_runtime::handle().spawn(async move {
+    nmt_platform::runtime().spawn(async move {
         deliver_read(
             json!({
                 "type": PRESETS_FRAME,
@@ -391,7 +391,7 @@ pub(super) fn load_subagents(
     activity: u64,
     deliver: Arc<dyn Fn(Value) + Send + Sync>,
 ) {
-    nmt_runtime::handle().spawn(async move {
+    nmt_platform::runtime().spawn(async move {
         let payload = json!({ "parentSessionId": session_id });
 
         deliver_read(
@@ -411,7 +411,7 @@ pub(super) fn load_subagent_transcript(
     continuable: bool,
     deliver: Arc<dyn Fn(Value) + Send + Sync>,
 ) {
-    nmt_runtime::handle().spawn(async move {
+    nmt_platform::runtime().spawn(async move {
         let address = json!({
             "kind": "subagent",
             "parentSessionId": parent_session_id,
@@ -442,7 +442,7 @@ pub(super) fn load_workflow_transcript(
     child: String,
     deliver: Arc<dyn Fn(Value) + Send + Sync>,
 ) {
-    nmt_runtime::handle().spawn(async move {
+    nmt_platform::runtime().spawn(async move {
         deliver_read(
             json!({
                 "type": WORKFLOW_TRANSCRIPT_FRAME, "sessionId": session_id,
@@ -467,7 +467,7 @@ pub(super) fn load_fork_checkpoints(
     session_id: String,
     deliver: Arc<dyn Fn(Value) + Send + Sync>,
 ) {
-    nmt_runtime::handle().spawn(async move {
+    nmt_platform::runtime().spawn(async move {
         // A failure is delivered rather than only logged: the picker waits on
         // this page, so a read that reported nothing would hold it open on a
         // list never arriving.
@@ -509,7 +509,7 @@ fn load_models(
     declares_image_input: bool,
     deliver: Arc<dyn Fn(Value) + Send + Sync>,
 ) {
-    nmt_runtime::handle().spawn(async move {
+    nmt_platform::runtime().spawn(async move {
         let payload = reconcile_models(
             &client,
             &session_id,

@@ -199,7 +199,7 @@ fn submit_native(request: NativeRequest) {
     let queue = QUEUE.get_or_init(|| {
         let (sender, mut requests) = unbounded_channel::<NativeRequest>();
 
-        nmt_runtime::handle().spawn(async move {
+        nmt_platform::runtime().spawn(async move {
             while let Some(request) = requests.recv().await {
                 let _ = spawn_blocking(move || request.run()).await;
             }

@@ -212,7 +212,7 @@ impl Host {
 
         let retained = Arc::new(Mutex::new(Vec::new()));
         let sink = Arc::clone(&retained);
-        let runtime = nmt_runtime::handle();
+        let runtime = nmt_platform::runtime();
 
         runtime.spawn(async move {
             let mut lines = BufReader::new(stderr).split(b'\n');

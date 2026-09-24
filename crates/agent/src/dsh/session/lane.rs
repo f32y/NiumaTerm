@@ -24,7 +24,7 @@ impl CommandLane {
     pub(super) fn new() -> Self {
         let (sender, mut receiver) = unbounded_channel::<BoxFuture<'static, ()>>();
 
-        let runner = nmt_runtime::handle().spawn(async move {
+        let runner = nmt_platform::runtime().spawn(async move {
             while let Some(command) = receiver.recv().await {
                 command.await;
             }

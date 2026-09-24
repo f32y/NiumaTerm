@@ -20,7 +20,6 @@ nmt_config.workspace = true
 nmt_input.workspace = true
 nmt_terminal.workspace = true
 nmt_platform.workspace = true
-nmt_runtime.workspace = true
 nmt_updater.workspace = true
 
 dirs.workspace = true

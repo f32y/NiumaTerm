@@ -22,11 +22,11 @@ const WORKER_THREADS: usize = 8;
 
 static RUNTIME: OnceLock<Runtime> = OnceLock::new();
 
-/// The shared runtime, started on first use.
+/// The shared tokio runtime, started on first use.
 ///
 /// Blocking on this handle from one of the runtime's own tasks panics; only
 /// threads outside the runtime may wait on a task synchronously.
-pub fn handle() -> &'static Handle {
+pub fn runtime() -> &'static Handle {
     RUNTIME
         .get_or_init(|| {
             Builder::new_multi_thread()
