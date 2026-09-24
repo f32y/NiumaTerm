@@ -48,35 +48,14 @@ pub(super) fn accepts(attempt: &Attempt, provider_turn: &str) -> bool {
             .is_none_or(|id| id == provider_turn)
 }
 
-/// Record that the provider accepted attempt `index` as `provider_turn`. Apart
-/// from a summary turn, the recipient's accepted coverage grows by the context
-/// the attempt delivered.
+/// Record that the provider accepted attempt `index` as `provider_turn`, which
+/// is what counts its delivered context as given to the recipient.
 pub(super) fn accept(room: &mut Room, index: usize, provider_turn: &str) -> Result<(), TeamError> {
     let attempt = &mut room.attempts[index];
 
     attempt.provider_turn = Some(provider_turn.to_owned());
 
     attempt.state = AttemptState::Accepted;
-
-    if attempt.intent.purpose != TurnPurpose::Summary {
-        let recipient = attempt.intent.recipient;
-
-        let member = room
-            .members
-            .iter_mut()
-            .find(|member| member.id == recipient)
-            .ok_or(TeamError::Unavailable)?;
-
-        member
-            .coverage
-            .messages
-            .extend(&attempt.intent.coverage.messages);
-
-        member
-            .coverage
-            .summaries
-            .extend(&attempt.intent.coverage.summaries);
-    }
 
     Ok(())
 }
@@ -132,8 +111,6 @@ pub(super) fn complete(
         text,
         replies_to,
     });
-
-    member.coverage.messages.insert(id);
 
     room.attempts[index].state = AttemptState::Completed { message: id };
 

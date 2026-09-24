@@ -28,7 +28,6 @@ pub struct Member {
     pub(super) roots: AgentWorkspace,
     pub(super) settings: ThreadSettings,
     pub(super) role: String,
-    pub(super) coverage: AcceptedCoverage,
     pub(super) excluded: bool,
     #[serde(default)]
     pub(super) provider_id: Option<String>,
@@ -77,10 +76,6 @@ impl Member {
 
     pub fn role(&self) -> &str {
         &self.role
-    }
-
-    pub fn coverage(&self) -> &AcceptedCoverage {
-        &self.coverage
     }
 
     pub fn excluded(&self) -> bool {

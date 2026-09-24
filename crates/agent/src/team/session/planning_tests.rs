@@ -176,16 +176,7 @@ fn oversized_context_pauses_without_reserving_unavailable_summary_work() {
     assert_eq!(discussion.state(), DiscussionState::Paused);
     assert!(session.store.room().attempts().is_empty());
     assert!(!session.has_live_attempts());
-    assert!(
-        session
-            .store
-            .room()
-            .member(alice)
-            .unwrap()
-            .coverage()
-            .messages
-            .is_empty()
-    );
+    assert!(session.store.room().coverage(alice).messages.is_empty());
 }
 
 #[test]

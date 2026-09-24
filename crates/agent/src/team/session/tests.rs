@@ -268,16 +268,7 @@ fn accepted_coverage_and_root_reply_commit_once_and_survive_reopening() {
 
     session.dispatch(id, |_| SendOutcome::StartedTurn).unwrap();
 
-    assert!(
-        session
-            .store
-            .room()
-            .member(alice)
-            .unwrap()
-            .coverage()
-            .messages
-            .is_empty()
-    );
+    assert!(session.store.room().coverage(alice).messages.is_empty());
 
     let key = AttemptEventKey {
         attempt: id,
@@ -302,9 +293,7 @@ fn accepted_coverage_and_root_reply_commit_once_and_survive_reopening() {
         session
             .store
             .room()
-            .member(alice)
-            .unwrap()
-            .coverage()
+            .coverage(alice)
             .messages
             .contains(&source)
     );
@@ -335,9 +324,7 @@ fn accepted_coverage_and_root_reply_commit_once_and_survive_reopening() {
         session
             .store
             .room()
-            .member(alice)
-            .unwrap()
-            .coverage()
+            .coverage(alice)
             .messages
             .contains(&reply)
     );

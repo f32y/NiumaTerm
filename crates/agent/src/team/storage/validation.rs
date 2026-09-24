@@ -214,14 +214,6 @@ pub(super) fn validate(room: &Room) -> Result<(), StorageError> {
         }
     }
 
-    for member in &room.members {
-        if !member.coverage.messages.is_subset(&messages)
-            || !member.coverage.summaries.is_subset(&summaries)
-        {
-            return Err(invalid("accepted context source is missing"));
-        }
-    }
-
     Ok(())
 }
 

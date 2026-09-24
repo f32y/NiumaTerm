@@ -468,3 +468,29 @@ fn direct_request_budget_stays_scoped_and_bounded_after_reopening() {
 
     assert_eq!(store.room().attempts().len(), 13);
 }
+
+/// Rooms written before member coverage, the input history and the
+/// discussion objective were derived still load.
+#[test]
+fn rooms_with_retired_records_still_load() {
+    let mut room = Room::new(AgentWorkspace::default());
+
+    let alice = room.add_member(config("Alice", "C:/a")).unwrap();
+
+    room.create_discussion(
+        "Compare".into(),
+        vec![alice],
+        DiscussionMode::Moderated { moderator: alice },
+    )
+    .unwrap();
+
+    let mut stored = serde_json::to_value(&room).unwrap();
+
+    stored["members"][0]["coverage"] = serde_json::json!({"messages": [], "summaries": []});
+    stored["input_history"] = serde_json::json!([{"text": "Compare", "references": []}]);
+    stored["discussions"][0]["objective"] = serde_json::json!("Compare");
+
+    let loaded: Room = serde_json::from_value(stored).unwrap();
+
+    assert_eq!(loaded, room);
+}

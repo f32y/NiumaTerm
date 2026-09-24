@@ -7,13 +7,14 @@ use thiserror::Error;
 use crate::AgentWorkspace;
 use crate::chat::ThreadSettings;
 use crate::team::attempt::{Attempt, AttemptState, BudgetScope};
+use crate::team::budget::TurnPurpose;
 use crate::team::discussion::{
     Discussion, DiscussionError, DiscussionMode, DiscussionState, PublicSnapshot,
 };
 use crate::team::member::{AcceptedCoverage, Member, MemberConfig};
 use crate::team::model::{
-    ContextError, ContextLimits, DiscussionId, MemberId, MessageId, PreparedContext, PublicMessage,
-    RoomId, Summary, SummaryId, UserInput,
+    Author, ContextError, ContextLimits, DiscussionId, MemberId, MessageId, PreparedContext,
+    PublicMessage, RoomId, Summary, SummaryId, UserInput,
 };
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -158,7 +159,6 @@ impl Room {
             roots: config.roots,
             settings: config.settings,
             role: config.role,
-            coverage: AcceptedCoverage::default(),
             excluded: false,
             provider_id: None,
             moderator_registered: false,
@@ -221,6 +221,38 @@ impl Room {
         Ok(name.to_owned())
     }
 
+    /// What `member` has already been given: the context of each of its turns
+    /// the provider accepted, apart from summary turns, and its own replies.
+    /// The room keeps every attempt and message for its lifetime, so this is
+    /// read from them rather than kept beside them.
+    pub fn coverage(&self, member: MemberId) -> AcceptedCoverage {
+        let mut coverage = AcceptedCoverage::default();
+
+        for attempt in &self.attempts {
+            if attempt.intent.recipient == member
+                && attempt.provider_turn.is_some()
+                && attempt.intent.purpose != TurnPurpose::Summary
+            {
+                coverage.messages.extend(&attempt.intent.coverage.messages);
+
+                coverage
+                    .summaries
+                    .extend(&attempt.intent.coverage.summaries);
+            }
+        }
+
+        coverage.messages.extend(
+            self.messages
+                .iter()
+                .filter(
+                    |message| matches!(message.author, Author::Member { id, .. } if id == member),
+                )
+                .map(|message| message.id),
+        );
+
+        coverage
+    }
+
     pub(crate) fn public_snapshot(&self) -> PublicSnapshot {
         PublicSnapshot {
             messages: self.messages.iter().map(|message| message.id).collect(),
@@ -235,7 +267,9 @@ impl Room {
         input: &UserInput,
         limits: &ContextLimits,
     ) -> Result<PreparedContext, ContextError> {
-        let member = self.member(member_id).ok_or(ContextError::MissingSource)?;
+        self.member(member_id).ok_or(ContextError::MissingSource)?;
+
+        let coverage = self.coverage(member_id);
         let eligible = self.eligible_messages(boundary)?;
         let eligible_ids: BTreeSet<_> = eligible.iter().map(|message| message.id).collect();
 
@@ -272,7 +306,7 @@ impl Room {
                 continue;
             }
 
-            if !member.coverage.summaries.contains(id) {
+            if !coverage.summaries.contains(id) {
                 summaries.push(summary);
             }
 
@@ -287,7 +321,7 @@ impl Room {
             .iter()
             .enumerate()
             .filter(|(index, message)| {
-                !member.coverage.messages.contains(&message.id)
+                !coverage.messages.contains(&message.id)
                     && (*index >= recent_start || !represented.contains(&message.id))
             })
             .map(|(_, message)| *message)

@@ -44,8 +44,6 @@ fn shared_profile_members_keep_independent_conversations_settings_and_roots() {
 
     room.set_member_settings(alice, settings).unwrap();
 
-    room.members[0].coverage.messages.insert(MessageId::new());
-
     assert_ne!(alice, bob);
     assert_eq!(room.member(bob).unwrap(), &original);
     assert_eq!(
@@ -263,7 +261,11 @@ fn stage_snapshots_and_coverage_keep_late_replies_without_same_stage_leakage() {
 
     let accepted_id = room.messages[2].id;
 
-    room.members[1].coverage.messages.insert(accepted_id);
+    // Bob's own reply is context he already has.
+    room.messages[2].author = Author::Member {
+        id: bob,
+        name: "Bob".into(),
+    };
 
     let input = UserInput {
         text: "Respond to peers".into(),
@@ -290,7 +292,7 @@ fn stage_snapshots_and_coverage_keep_late_replies_without_same_stage_leakage() {
     assert!(!next_stage.coverage.messages.contains(&accepted_id));
     assert!(next_stage.text.contains("Alice completed later"));
     assert!(!next_stage.text.contains("Bob completed first"));
-    assert!(room.member(alice).unwrap().coverage().messages.is_empty());
+    assert!(room.coverage(alice).messages.is_empty());
     assert_eq!(input.text, "Respond to peers");
 }
 
