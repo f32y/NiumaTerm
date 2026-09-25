@@ -1117,3 +1117,8 @@ git-toggle-files = "Toggle file tree"
 "agent-transcript-side-boundary-preview" = "Inherited history above is reference only"
 "agent-transcript-side-instructions" = "Developer instructions"
 "agent-transcript-side-message" = "Injected message"
+
+"settings-agent-token-speed-mode" = "Token speed calculation"
+"settings-agent-token-speed-session" = "Entire session"
+"settings-agent-token-speed-current-turn" = "Current turn"
+"settings-agent-token-speed-description" = "Average output speed across the entire session or the current turn."

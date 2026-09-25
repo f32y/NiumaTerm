@@ -13,6 +13,7 @@ fn indexed_updates_preserve_duplicate_kinds_and_missing_accounting() {
         ReplayTurn {
             items: Vec::new(),
             interrupted: false,
+            generation_samples: Vec::new(),
             seconds: None,
             output_tokens: None,
         },
@@ -102,4 +103,86 @@ fn missed_updates_recover_and_clear_releases_accepted_resources() {
     assert!(weak.upgrade().is_none());
     assert_ne!(conversation.version().0, version.0);
     assert!(conversation.content.entries().is_empty());
+}
+
+#[test]
+fn generation_modes_share_samples_and_prefer_whole_log_totals_after_replay() {
+    use crate::chat::{GenerationSample, SessionStats};
+    use std::time::Duration;
+
+    let mut conversation = ConversationState::default();
+
+    for (turn, tokens, seconds) in [(1, 1000, 10), (2, 100, 2)] {
+        conversation.replay(
+            turn,
+            ReplayTurn {
+                generation_samples: vec![GenerationSample {
+                    response_id: format!("{turn}:1"),
+                    output_tokens: tokens,
+                    elapsed: Duration::from_secs(seconds),
+                    estimated: false,
+                }],
+                ..ReplayTurn::default()
+            },
+        );
+    }
+
+    assert_eq!(
+        conversation
+            .generation_stats
+            .speed()
+            .unwrap()
+            .tokens_per_second,
+        50.0
+    );
+    assert!(
+        (conversation
+            .session_generation_speed()
+            .unwrap()
+            .tokens_per_second
+            - 1100.0 / 12.0)
+            .abs()
+            < 0.001
+    );
+
+    conversation.session_stats = Some(SessionStats {
+        decode_tokens: 6000,
+        decode_ms: 100_000,
+        ..SessionStats::default()
+    });
+
+    assert_eq!(
+        conversation
+            .session_generation_speed()
+            .unwrap()
+            .tokens_per_second,
+        60.0
+    );
+    assert_eq!(
+        conversation
+            .generation_stats
+            .speed()
+            .unwrap()
+            .tokens_per_second,
+        50.0
+    );
+
+    conversation.start();
+
+    assert!(conversation.generation_stats.speed().is_none());
+    assert_eq!(
+        conversation
+            .session_generation_speed()
+            .unwrap()
+            .tokens_per_second,
+        60.0
+    );
+
+    conversation.session_stats = Some(SessionStats::default());
+
+    assert!(conversation.session_generation_speed().is_none());
+
+    conversation.clear();
+
+    assert!(conversation.session_generation_speed().is_none());
 }

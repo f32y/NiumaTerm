@@ -1116,3 +1116,8 @@ git-toggle-files = "显示/隐藏文件树"
 "agent-transcript-side-boundary-preview" = "此前继承的历史仅供参考"
 "agent-transcript-side-instructions" = "开发者指令"
 "agent-transcript-side-message" = "注入消息"
+
+"settings-agent-token-speed-mode" = "Token 速度计算方式"
+"settings-agent-token-speed-session" = "整个会话"
+"settings-agent-token-speed-current-turn" = "当前一轮"
+"settings-agent-token-speed-description" = "按整个会话或当前一轮的输出 token 与生成耗时计算平均速度。"

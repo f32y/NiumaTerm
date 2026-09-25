@@ -12,7 +12,7 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use crate::chat::{ContextComposition, ContextWindowUsage, Item, ReplayTurn, SessionStats};
-use crate::transcript::turns::{GenerationStats, LiveTurn, TurnLedger};
+use crate::transcript::turns::{GenerationSpeed, GenerationStats, LiveTurn, TurnLedger};
 use crate::transcript::{TextAppend, TextField, TranscriptContent, TranscriptEntry};
 
 /// Immutable PNG data retained after an image submission is accepted.
@@ -64,6 +64,17 @@ pub struct ContentChange {
 }
 
 impl ConversationState {
+    pub fn session_generation_speed(&self) -> Option<GenerationSpeed> {
+        match self.session_stats {
+            Some(stats) => GenerationSpeed::from_totals(
+                stats.decode_tokens,
+                Duration::from_millis(stats.decode_ms),
+                false,
+            ),
+            None => self.generation_stats.session_speed(),
+        }
+    }
+
     pub fn attach_last_images(&mut self, images: Vec<Arc<ConversationImage>>) {
         if let Some(metadata) = self.content.last_metadata_mut() {
             metadata.images = images;
@@ -153,6 +164,12 @@ impl ConversationState {
     pub fn replay(&mut self, turn: u64, replay: ReplayTurn) {
         let first = self.content.entries().len();
 
+        self.generation_stats.begin_turn();
+
+        for sample in replay.generation_samples {
+            self.generation_stats.record(sample);
+        }
+
         for entry in replay.items {
             self.content.append(TranscriptEntry {
                 turn,
@@ -196,7 +213,8 @@ impl ConversationState {
 
     pub fn start(&mut self) {
         self.submitted_at = Some(Instant::now());
-        self.generation_stats = GenerationStats::default();
+
+        self.generation_stats.begin_turn();
 
         self.live.start();
 

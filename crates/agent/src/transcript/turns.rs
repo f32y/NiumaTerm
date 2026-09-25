@@ -5,13 +5,16 @@ use std::time::{Duration, Instant};
 
 use crate::chat::GenerationSample;
 
-/// Completed response samples for the current or most recently finished turn.
+/// Completed response totals for both the current turn and the observed session.
 #[derive(Default)]
 pub struct GenerationStats {
     responses: HashSet<String>,
     output_tokens: u64,
     elapsed: Duration,
     estimated: bool,
+    session_output_tokens: u64,
+    session_elapsed: Duration,
+    session_estimated: bool,
 }
 
 /// Weighted speed over completed responses with matching usage and timing.
@@ -21,10 +24,22 @@ pub struct GenerationSpeed {
     pub estimated: bool,
 }
 
+impl GenerationSpeed {
+    pub(crate) fn from_totals(
+        output_tokens: u64,
+        elapsed: Duration,
+        estimated: bool,
+    ) -> Option<Self> {
+        (!elapsed.is_zero()).then(|| Self {
+            tokens_per_second: output_tokens as f64 / elapsed.as_secs_f64(),
+            estimated,
+        })
+    }
+}
+
 impl GenerationStats {
     pub(crate) fn record(&mut self, sample: GenerationSample) -> bool {
-        if sample.output_tokens == 0
-            || sample.elapsed.is_zero()
+        if (sample.estimated && sample.elapsed.is_zero())
             || !self.responses.insert(sample.response_id)
         {
             return false;
@@ -34,14 +49,34 @@ impl GenerationStats {
         self.elapsed = self.elapsed.saturating_add(sample.elapsed);
         self.estimated |= sample.estimated;
 
+        self.session_output_tokens = self
+            .session_output_tokens
+            .saturating_add(sample.output_tokens);
+
+        self.session_elapsed = self.session_elapsed.saturating_add(sample.elapsed);
+        self.session_estimated |= sample.estimated;
+
         true
     }
 
     pub fn speed(&self) -> Option<GenerationSpeed> {
-        (!self.elapsed.is_zero()).then(|| GenerationSpeed {
-            tokens_per_second: self.output_tokens as f64 / self.elapsed.as_secs_f64(),
-            estimated: self.estimated,
-        })
+        GenerationSpeed::from_totals(self.output_tokens, self.elapsed, self.estimated)
+    }
+
+    pub(crate) fn session_speed(&self) -> Option<GenerationSpeed> {
+        GenerationSpeed::from_totals(
+            self.session_output_tokens,
+            self.session_elapsed,
+            self.session_estimated,
+        )
+    }
+
+    pub(crate) fn begin_turn(&mut self) {
+        self.responses.clear();
+
+        self.output_tokens = 0;
+        self.elapsed = Duration::ZERO;
+        self.estimated = false;
     }
 }
 

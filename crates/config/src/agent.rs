@@ -40,6 +40,10 @@ pub struct AgentConfig {
     /// Allow Agent Team tabs to create or resume collaborative sessions.
     #[serde(default, rename = "enable-agent-team")]
     pub enable_agent_team: bool,
+
+    /// Responses included in the composer's generation speed reading.
+    #[serde(default, rename = "token-speed-mode")]
+    pub token_speed_mode: TokenSpeedMode,
 }
 
 impl Default for AgentConfig {
@@ -52,6 +56,33 @@ impl Default for AgentConfig {
             codex_skill_command_compat: true,
             model_list_style: ModelListStyle::default(),
             enable_agent_team: false,
+            token_speed_mode: TokenSpeedMode::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum TokenSpeedMode {
+    #[default]
+    Session,
+    CurrentTurn,
+}
+
+impl From<TokenSpeedMode> for &'static str {
+    fn from(value: TokenSpeedMode) -> Self {
+        match value {
+            TokenSpeedMode::Session => "session",
+            TokenSpeedMode::CurrentTurn => "current-turn",
+        }
+    }
+}
+
+impl From<&str> for TokenSpeedMode {
+    fn from(value: &str) -> Self {
+        match value {
+            "session" => Self::Session,
+            _ => Self::CurrentTurn,
         }
     }
 }

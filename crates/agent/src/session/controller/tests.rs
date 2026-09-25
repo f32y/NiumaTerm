@@ -113,7 +113,25 @@ fn generation_speed_weights_responses_ignores_duplicates_and_resets_next_turn() 
             < 0.001
     );
 
+    let cumulative = session
+        .conversation
+        .borrow()
+        .generation_stats
+        .session_speed()
+        .unwrap();
+
+    assert!((cumulative.tokens_per_second - 230.0 / 3.0).abs() < 0.001);
+
     session.conversation.borrow_mut().clear();
+
+    assert!(
+        session
+            .conversation
+            .borrow()
+            .generation_stats
+            .session_speed()
+            .is_none()
+    );
 
     assert!(
         session

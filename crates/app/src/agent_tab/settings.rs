@@ -7,7 +7,7 @@
 //! type alone.
 
 use gpui::{Font, FontFallbacks, Global, Hsla, Pixels, SharedString, font, px};
-use nmt_config::agent::{CollapseRows, ModelListStyle};
+use nmt_config::agent::{CollapseRows, ModelListStyle, TokenSpeedMode};
 use nmt_config::profile::AgentProfile;
 use nmt_config::system::NewlineShortcut;
 
@@ -34,6 +34,8 @@ pub struct AgentSettings {
 
     /// How the composer's model picker spells each model it offers.
     pub model_list_style: ModelListStyle,
+
+    pub token_speed_mode: TokenSpeedMode,
 
     pub smooth_wheel: bool,
 
@@ -101,6 +103,7 @@ impl Default for AgentSettings {
             collapse_tool_calls: CollapseRows::default(),
             codex_skill_command_compat: false,
             model_list_style: ModelListStyle::default(),
+            token_speed_mode: TokenSpeedMode::default(),
             smooth_wheel: true,
             reduce_motion: false,
             git_status_refresh_interval: 30,

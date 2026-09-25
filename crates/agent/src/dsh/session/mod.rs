@@ -22,6 +22,7 @@ mod loads;
 mod switch;
 
 use std::collections::HashMap;
+use std::mem::take;
 use std::sync::Arc;
 
 use serde_json::{Value, json};
@@ -39,7 +40,7 @@ use crate::chat::{
 use crate::dsh::api::ApiClient;
 use crate::dsh::events::Downlinks;
 use crate::dsh::host::{self, Host, HostError};
-use crate::dsh::mapping::{self, ApprovalRequest, QuestionRequest, ToolTracker};
+use crate::dsh::mapping::{self, ApprovalRequest, EventTracker, QuestionRequest};
 use crate::dsh::models::ModelDirectory;
 use crate::dsh::projections::ProjectionTracker;
 use crate::dsh::session::actions::{prompt_payload, run_slash, schedule_close_actions};
@@ -113,7 +114,7 @@ pub struct Session {
 
     /// Tool calls awaiting their result, so a result can complete the row its
     /// call opened rather than starting a second one.
-    tools: ToolTracker,
+    tools: EventTracker,
 
     /// The usage projections seen so far. Each arrives as its own frame, and
     /// the pane's snapshot is assembled from more than one of them.
@@ -441,7 +442,7 @@ impl Session {
             switch: SwitchSlot::default(),
             pending_approval: None,
             pending_questions: None,
-            tools: ToolTracker::default(),
+            tools: EventTracker::default(),
             usage: ProjectionTracker::default(),
             models: ModelDirectory::default(),
             subagent_activity: 0,
@@ -507,7 +508,7 @@ impl Session {
         self.agent_preset = None;
         self.pending_approval = None;
         self.pending_questions = None;
-        self.tools = ToolTracker::default();
+        self.tools = EventTracker::default();
         self.usage = ProjectionTracker::default();
         self.models = ModelDirectory::default();
         self.subagent_activity = 0;
@@ -1028,7 +1029,7 @@ impl Session {
         // read: a live push reports only what changed after the tab
         // attached, so accounting and the permission preset would otherwise
         // stay blank until one of them happened to move.
-        let mut events = self.usage.apply_baseline(
+        let baseline = self.usage.apply_baseline(
             &page["projections"]["values"],
             page["projections"]["asOfSeq"].as_i64(),
         );
@@ -1036,14 +1037,17 @@ impl Session {
         // A run's rows are folded from the same events the log carries, so
         // a resumed conversation rebuilds them from its own history rather
         // than from a record kept beside it.
+        let mut events = Vec::new();
         let mut folded = false;
 
-        self.tools = ToolTracker::default();
+        self.tools = EventTracker::default();
         self.workflows = WorkflowTracker::default();
         self.running = false;
 
         for entry in page["records"].as_array().into_iter().flatten() {
             folded |= self.workflows.apply(&entry["event"]);
+
+            self.tools.generation.apply(&entry["event"]);
 
             for event in mapping::map_session_event(&entry["event"], &Value::Null, &mut self.tools)
             {
@@ -1059,10 +1063,26 @@ impl Session {
             events.push(Event::Workflows(self.workflows.snapshot(&self.session_id)));
         }
 
-        events.push(Event::Replay(history::replay(page)));
+        let mut replay = history::replay(page);
+
+        let running_samples = if self.running {
+            replay
+                .last_mut()
+                .map(|turn| take(&mut turn.generation_samples))
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+
+        events.push(Event::Replay(replay));
+        events.extend(baseline);
+        // Replay can replace the conversation after a newer projection has
+        // arrived. Republish the retained totals rather than an older page.
+        events.extend(self.usage.session_stats().map(Event::SessionStatsUpdated));
 
         if self.running {
             events.push(Event::TurnStarted);
+            events.extend(running_samples.into_iter().map(Event::GenerationCompleted));
 
             // A log whose last turn never closed reads as running, which is
             // also what a turn whose end record the harness rejected leaves

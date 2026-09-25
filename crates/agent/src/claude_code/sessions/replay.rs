@@ -326,6 +326,7 @@ fn slice_turns(items: Vec<ReplayItem>, turns: Vec<TurnBuilder>) -> Vec<ReplayTur
 
         replay.push(ReplayTurn {
             items,
+            generation_samples: Vec::new(),
             seconds: turn.seconds,
             output_tokens: turn.output_tokens,
             interrupted: turn.interrupted,

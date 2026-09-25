@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 use crate::chat::{Event, Item};
 use crate::dsh::api::ApiClient;
 use crate::dsh::history::sessions;
-use crate::dsh::mapping::{ToolTracker, map_frame};
+use crate::dsh::mapping::{EventTracker, map_frame};
 use crate::dsh::session::{
     CloseAction, open_new_conversation, run_close_actions, session_create_payload,
 };
@@ -147,7 +147,7 @@ fn text_and_reasoning_stream_as_separate_rows() {
             json!({ "type": "block-start", "index": 0, "blockType": "reasoning" }),
         )),
         SESSION,
-        &mut ToolTracker::default(),
+        &mut EventTracker::default(),
     );
 
     assert_eq!(
@@ -163,7 +163,7 @@ fn text_and_reasoning_stream_as_separate_rows() {
             json!({ "type": "reasoning-delta", "index": 0, "text": "thinking" }),
         )),
         SESSION,
-        &mut ToolTracker::default(),
+        &mut EventTracker::default(),
     );
 
     assert_eq!(
@@ -179,7 +179,7 @@ fn text_and_reasoning_stream_as_separate_rows() {
             json!({ "type": "text-delta", "index": 1, "text": "answer" }),
         )),
         SESSION,
-        &mut ToolTracker::default(),
+        &mut EventTracker::default(),
     );
 
     assert_eq!(
@@ -212,7 +212,7 @@ fn a_completed_message_reconciles_with_the_blocks_that_streamed() {
             },
         })),
         SESSION,
-        &mut ToolTracker::default(),
+        &mut EventTracker::default(),
     );
 
     // The tool call sits between them and is skipped without shifting the
@@ -244,7 +244,11 @@ fn only_the_users_own_message_becomes_a_transcript_row() {
     });
 
     assert_eq!(
-        map_frame(&session_frame(prompt), SESSION, &mut ToolTracker::default()),
+        map_frame(
+            &session_frame(prompt),
+            SESSION,
+            &mut EventTracker::default()
+        ),
         vec![Event::ItemStarted(Item::UserMessage {
             text: Some("do the thing".into()),
         })]
@@ -262,7 +266,7 @@ fn only_the_users_own_message_becomes_a_transcript_row() {
         }));
 
         assert_eq!(
-            map_frame(&frame, SESSION, &mut ToolTracker::default()),
+            map_frame(&frame, SESSION, &mut EventTracker::default()),
             Vec::new(),
             "{injected}"
         );
@@ -274,7 +278,7 @@ fn acceptance_uses_the_harness_turn_counter_in_the_correct_session() {
     let frame = session_frame(json!({"type":"turn/start", "data":{"turn":7}}));
 
     assert_eq!(
-        map_frame(&frame, SESSION, &mut ToolTracker::default()),
+        map_frame(&frame, SESSION, &mut EventTracker::default()),
         vec![
             Event::TurnStarted,
             Event::ProviderTurnAccepted {
@@ -282,7 +286,7 @@ fn acceptance_uses_the_harness_turn_counter_in_the_correct_session() {
             }
         ]
     );
-    assert!(map_frame(&frame, "another-session", &mut ToolTracker::default()).is_empty());
+    assert!(map_frame(&frame, "another-session", &mut EventTracker::default()).is_empty());
 }
 
 #[test]
@@ -296,7 +300,7 @@ fn turn_end_reasons_separate_a_failure_from_a_stop() {
         map_frame(
             &session_frame(aborted),
             SESSION,
-            &mut ToolTracker::default()
+            &mut EventTracker::default()
         ),
         vec![
             Event::TurnCompleted { error: None },
@@ -316,7 +320,7 @@ fn turn_end_reasons_separate_a_failure_from_a_stop() {
         map_frame(
             &session_frame(completed),
             SESSION,
-            &mut ToolTracker::default()
+            &mut EventTracker::default()
         ),
         vec![
             Event::TurnCompleted { error: None },
@@ -333,7 +337,11 @@ fn turn_end_reasons_separate_a_failure_from_a_stop() {
     });
 
     assert_eq!(
-        map_frame(&session_frame(failed), SESSION, &mut ToolTracker::default()),
+        map_frame(
+            &session_frame(failed),
+            SESSION,
+            &mut EventTracker::default()
+        ),
         vec![
             Event::TurnCompleted {
                 error: Some("NO_ADAPTER".into()),
@@ -356,7 +364,7 @@ fn frames_for_another_session_are_ignored() {
     }));
 
     assert_eq!(
-        map_frame(&frame, "session-someone-else", &mut ToolTracker::default()),
+        map_frame(&frame, "session-someone-else", &mut EventTracker::default()),
         Vec::new()
     );
 }
@@ -371,7 +379,7 @@ fn unknown_types_produce_nothing_rather_than_failing() {
     }));
 
     assert_eq!(
-        map_frame(&unknown_event, SESSION, &mut ToolTracker::default()),
+        map_frame(&unknown_event, SESSION, &mut EventTracker::default()),
         Vec::new()
     );
 
@@ -381,7 +389,7 @@ fn unknown_types_produce_nothing_rather_than_failing() {
     });
 
     assert_eq!(
-        map_frame(&unknown_frame, SESSION, &mut ToolTracker::default()),
+        map_frame(&unknown_frame, SESSION, &mut EventTracker::default()),
         Vec::new()
     );
 
@@ -391,7 +399,7 @@ fn unknown_types_produce_nothing_rather_than_failing() {
     ));
 
     assert_eq!(
-        map_frame(&unknown_chunk, SESSION, &mut ToolTracker::default()),
+        map_frame(&unknown_chunk, SESSION, &mut EventTracker::default()),
         Vec::new()
     );
 }
@@ -408,7 +416,7 @@ fn host_and_stream_failures_reach_the_transcript() {
     });
 
     assert_eq!(
-        map_frame(&agent_error, SESSION, &mut ToolTracker::default()),
+        map_frame(&agent_error, SESSION, &mut EventTracker::default()),
         vec![Event::ItemStarted(Item::Error {
             text: "the model provider refused the request".into(),
         })]
@@ -416,7 +424,7 @@ fn host_and_stream_failures_reach_the_transcript() {
 
     // An agent error for another tab's session belongs to that tab.
     assert_eq!(
-        map_frame(&agent_error, "session-other", &mut ToolTracker::default()),
+        map_frame(&agent_error, "session-other", &mut EventTracker::default()),
         Vec::new()
     );
 
@@ -429,7 +437,7 @@ fn host_and_stream_failures_reach_the_transcript() {
     });
 
     assert_eq!(
-        map_frame(&stream_error, SESSION, &mut ToolTracker::default()),
+        map_frame(&stream_error, SESSION, &mut EventTracker::default()),
         vec![Event::ItemStarted(Item::Error {
             text: "the stream ended".into(),
         })]
@@ -944,7 +952,7 @@ fn a_compaction_records_itself_only_once_it_produced_a_summary() {
     }));
 
     assert_eq!(
-        map_frame(&start, SESSION, &mut ToolTracker::default()),
+        map_frame(&start, SESSION, &mut EventTracker::default()),
         vec![Event::CompactionStarted]
     );
 
@@ -963,7 +971,7 @@ fn a_compaction_records_itself_only_once_it_produced_a_summary() {
     }));
 
     assert_eq!(
-        map_frame(&summary, SESSION, &mut ToolTracker::default()),
+        map_frame(&summary, SESSION, &mut EventTracker::default()),
         vec![Event::ItemCompleted(Item::Compaction {
             id: "cmp-1".into(),
             detail: Compaction {
@@ -984,7 +992,7 @@ fn a_compaction_records_itself_only_once_it_produced_a_summary() {
     }));
 
     assert_eq!(
-        map_frame(&end, SESSION, &mut ToolTracker::default()),
+        map_frame(&end, SESSION, &mut EventTracker::default()),
         vec![Event::CompactionFinished {
             error: Some("the summarizer failed".into()),
         }]
@@ -1001,7 +1009,7 @@ fn a_compaction_records_itself_only_once_it_produced_a_summary() {
     }));
 
     assert_eq!(
-        map_frame(&replacement, SESSION, &mut ToolTracker::default()),
+        map_frame(&replacement, SESSION, &mut EventTracker::default()),
         Vec::new()
     );
 }
@@ -1027,7 +1035,7 @@ fn a_retry_says_the_turn_is_waiting_rather_than_thinking() {
     }));
 
     assert_eq!(
-        map_frame(&retry, SESSION, &mut ToolTracker::default()),
+        map_frame(&retry, SESSION, &mut EventTracker::default()),
         vec![Event::StatusDetail(Some(TurnRetry {
             attempt: 1,
             total: 2,
@@ -1042,7 +1050,7 @@ fn a_retry_says_the_turn_is_waiting_rather_than_thinking() {
     }));
 
     assert_eq!(
-        map_frame(&started, SESSION, &mut ToolTracker::default()),
+        map_frame(&started, SESSION, &mut EventTracker::default()),
         vec![Event::StatusDetail(None)]
     );
 
@@ -1053,7 +1061,7 @@ fn a_retry_says_the_turn_is_waiting_rather_than_thinking() {
     }));
 
     assert_eq!(
-        map_frame(&coded, SESSION, &mut ToolTracker::default()),
+        map_frame(&coded, SESSION, &mut EventTracker::default()),
         vec![Event::StatusDetail(Some(TurnRetry {
             attempt: 2,
             total: 2,
@@ -1076,7 +1084,7 @@ fn a_todo_write_renders_as_the_shared_checklist_shape() {
         },
     }));
 
-    let events = map_frame(&frame, SESSION, &mut ToolTracker::default());
+    let events = map_frame(&frame, SESSION, &mut EventTracker::default());
 
     let [Event::ItemCompleted(item)] = events.as_slice() else {
         panic!("expected one todo row, got {events:?}");
@@ -1102,7 +1110,7 @@ fn a_todo_write_renders_as_the_shared_checklist_shape() {
     }));
 
     assert_eq!(
-        map_frame(&empty, SESSION, &mut ToolTracker::default()),
+        map_frame(&empty, SESSION, &mut EventTracker::default()),
         Vec::new()
     );
 }
@@ -1543,11 +1551,11 @@ fn a_resolved_approval_takes_the_card_down() {
     });
 
     assert_eq!(
-        map_frame(&frame, SESSION, &mut ToolTracker::default()),
+        map_frame(&frame, SESSION, &mut EventTracker::default()),
         vec![Event::ApprovalResolved]
     );
     assert_eq!(
-        map_frame(&frame, "session-other", &mut ToolTracker::default()),
+        map_frame(&frame, "session-other", &mut EventTracker::default()),
         Vec::new()
     );
 }
@@ -1567,7 +1575,7 @@ fn tool_frame(event: Value, view: Value) -> Value {
 
 #[test]
 fn a_shell_command_becomes_a_command_row_with_its_output_and_exit_code() {
-    let mut tools = ToolTracker::default();
+    let mut tools = EventTracker::default();
 
     let started = map_frame(
         &tool_frame(
@@ -1633,7 +1641,7 @@ fn a_shell_command_becomes_a_command_row_with_its_output_and_exit_code() {
 
 #[test]
 fn an_edit_becomes_a_file_row_whose_result_diff_carries_context() {
-    let mut tools = ToolTracker::default();
+    let mut tools = EventTracker::default();
 
     let started = map_frame(
         &tool_frame(
@@ -1694,7 +1702,7 @@ fn an_edit_becomes_a_file_row_whose_result_diff_carries_context() {
 
 #[test]
 fn a_card_this_build_does_not_model_still_shows_the_call() {
-    let mut tools = ToolTracker::default();
+    let mut tools = EventTracker::default();
 
     // read, search, and web cards all land here, as does any card a later
     // harness release adds. None of them may vanish from the transcript.
@@ -1728,7 +1736,7 @@ fn a_card_this_build_does_not_model_still_shows_the_call() {
 
 #[test]
 fn a_failed_call_reports_the_text_the_model_saw() {
-    let mut tools = ToolTracker::default();
+    let mut tools = EventTracker::default();
 
     map_frame(
         &tool_frame(
@@ -1796,7 +1804,7 @@ fn a_result_for_a_call_this_session_never_saw_is_ignored() {
             json!({ "for": "result", "view": { "card": "terminal", "output": "x" }}),
         ),
         SESSION,
-        &mut ToolTracker::default(),
+        &mut EventTracker::default(),
     );
 
     assert_eq!(completed, Vec::new());
@@ -2015,6 +2023,8 @@ fn the_session_stats_projection_reports_whole_log_counters() {
     assert_eq!(stats.steps, 23);
     assert_eq!(stats.model_ms, 61_000);
     assert_eq!(stats.tool_ms, 4_500);
+    assert_eq!(stats.decode_tokens, 12_000);
+    assert_eq!(stats.decode_ms, 55_000);
 }
 
 #[test]
@@ -2290,7 +2300,7 @@ fn a_frame_missing_a_required_field_is_dropped_not_emptied() {
 
 #[test]
 fn raw_tool_events_keep_commands_output_and_applied_diffs() {
-    let mut tools = ToolTracker::default();
+    let mut tools = EventTracker::default();
 
     let call = json!({"type":"tool/call","data":{
         "callId":"raw-shell","name":"bash","arguments":"{\"command\":\"echo ok\",\"description\":\"Print a marker\"}"

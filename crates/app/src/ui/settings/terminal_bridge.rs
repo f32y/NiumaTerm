@@ -64,6 +64,7 @@ fn agent_snapshot(cx: &App) -> AgentSettings {
         collapse_tool_calls: settings.config().agent.collapse_tool_calls,
         codex_skill_command_compat: settings.config().agent.codex_skill_command_compat,
         model_list_style: settings.config().agent.model_list_style,
+        token_speed_mode: settings.config().agent.token_speed_mode,
         smooth_wheel: settings
             .config()
             .appearance

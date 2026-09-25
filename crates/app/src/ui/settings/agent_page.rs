@@ -158,6 +158,28 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
             .description(
                 t!("settings-appearance-human-friendly-agent-ui-layout-description").into_owned(),
             ),
+        )
+        .item(
+            SettingItem::new(
+                t!("settings-agent-token-speed-mode"),
+                settings_choice(
+                    vec![
+                        (
+                            "session".into(),
+                            t!("settings-agent-token-speed-session").into(),
+                        ),
+                        (
+                            "current-turn".into(),
+                            t!("settings-agent-token-speed-current-turn").into(),
+                        ),
+                    ],
+                    |config| config.agent.token_speed_mode.into(),
+                    |settings, value| {
+                        settings.edit_agent(|section| section.token_speed_mode = value.into());
+                    },
+                ),
+            )
+            .description(t!("settings-agent-token-speed-description").into_owned()),
         );
 
     let mut cli_updates = SettingGroup::new()

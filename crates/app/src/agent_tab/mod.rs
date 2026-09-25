@@ -2964,6 +2964,9 @@ impl AgentPane {
     }
 
     pub fn attach(owner: &SessionOwner, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        cx.observe_global::<AgentSettings>(|_, cx| cx.notify())
+            .detach();
+
         let host = owner.session();
         let profile = host.read(cx).profile.clone();
         let workspace = host.read(cx).workspace.clone();

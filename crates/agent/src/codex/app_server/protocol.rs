@@ -639,6 +639,7 @@ pub(super) fn parse_replay(turns: &Value) -> Vec<ReplayTurn> {
 
         replay.push(ReplayTurn {
             items,
+            generation_samples: Vec::new(),
             seconds: turn["durationMs"].as_u64().map(|ms| ms / 1000),
             // The response reports no per-turn token total.
             output_tokens: None,

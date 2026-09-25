@@ -71,12 +71,12 @@ fn composer_stats_append_generation_speed_and_mark_estimates() {
             })
         )
         .as_deref(),
-        Some("42.7 tok/s")
+        Some("43 tok/s")
     );
 
     for (estimated, expected) in [
-        (false, "2 turns · 90% cached · 42.7 tok/s"),
-        (true, "2 turns · 90% cached · ~42.7 tok/s"),
+        (false, "2 turns · 90% cached · 43 tok/s"),
+        (true, "2 turns · 90% cached · ~43 tok/s"),
     ] {
         assert_eq!(
             composer_stats_label(

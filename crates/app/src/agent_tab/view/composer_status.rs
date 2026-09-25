@@ -11,6 +11,7 @@ use gpui_component::{ActiveTheme as _, Icon, IconName, h_flex};
 use nmt_agent::git;
 use nmt_agent::session::controller::SessionController;
 use nmt_agent::transcript::turns::GenerationSpeed;
+use nmt_config::agent::TokenSpeedMode;
 use rust_i18n::t;
 
 use crate::agent_tab::AgentPane;
@@ -155,7 +156,10 @@ impl ComposerStatusBar {
             .map(|stats| stats.turns)
             .unwrap_or(session.turn());
 
-        let speed = conversation.generation_stats.speed();
+        let speed = match cx.global::<AgentSettings>().token_speed_mode {
+            TokenSpeedMode::CurrentTurn => conversation.generation_stats.speed(),
+            TokenSpeedMode::Session => conversation.session_generation_speed(),
+        };
 
         let stats = composer_stats_label(
             turns,
@@ -297,10 +301,16 @@ pub(super) fn composer_stats_label(
     if let Some(speed) = speed {
         let prefix = if speed.estimated { "~" } else { "" };
 
+        let value = if speed.tokens_per_second >= 10.0 {
+            speed.tokens_per_second.round()
+        } else {
+            (speed.tokens_per_second * 10.0).round() / 10.0
+        };
+
         parts.push(
             t!(
                 "agent-status-generation-speed",
-                value = format!("{prefix}{:.1}", speed.tokens_per_second)
+                value = format!("{prefix}{value}")
             )
             .into_owned(),
         );

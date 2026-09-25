@@ -678,6 +678,7 @@ mod resumed_collapse_tests {
                 .into_iter()
                 .map(|item| ReplayItem { item, at: None })
                 .collect(),
+            generation_samples: Vec::new(),
             seconds: None,
             output_tokens: None,
             interrupted: false,
@@ -1085,6 +1086,7 @@ mod row_rhythm_tests {
     fn replay(items: Vec<ReplayItem>) -> ReplayTurn {
         ReplayTurn {
             items,
+            generation_samples: Vec::new(),
             seconds: None,
             output_tokens: None,
             interrupted: false,

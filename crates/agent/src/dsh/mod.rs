@@ -21,6 +21,7 @@ mod api;
 mod catalogs;
 mod events;
 mod frames;
+mod generation;
 mod history;
 mod host;
 mod mapping;

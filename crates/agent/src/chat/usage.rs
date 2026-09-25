@@ -31,6 +31,11 @@ pub struct SessionStats {
 
     /// Summed tool wall time over matched call/result pairs.
     pub tool_ms: u64,
+
+    /// Output tokens and elapsed decode time over the same completed steps.
+    pub decode_tokens: u64,
+
+    pub decode_ms: u64,
 }
 
 /// Token accounting from one provider reporting scope. The total is

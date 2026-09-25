@@ -76,6 +76,7 @@ fn sample_agent() -> AgentConfig {
         codex_skill_command_compat: false,
         model_list_style: agent::ModelListStyle::IdOnly,
         enable_agent_team: true,
+        token_speed_mode: agent::TokenSpeedMode::Session,
     }
 }
 

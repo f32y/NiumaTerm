@@ -73,6 +73,7 @@ check-agent-updates = true
 codex-skill-command-compat = true
 model-list-style = "name-and-id"
 enable-agent-team = false
+token-speed-mode = "session"
 
 [system]
 restore-last-session-when-opening = true

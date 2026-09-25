@@ -14,7 +14,7 @@ use serde_json::Value;
 use crate::chat::{
     Event, ForkAnchor, ForkCheckpoint, Item, ReplayItem, ReplayTurn, SessionSummary,
 };
-use crate::dsh::mapping::{ToolTracker, map_session_event};
+use crate::dsh::mapping::{EventTracker, map_session_event};
 use crate::json::rfc3339_from_unix_seconds;
 
 /// Read a `session.list` result into the resumable conversations of one
@@ -106,7 +106,7 @@ pub(crate) fn search_results(
 /// Rebuild turns from the follow stream's opening snapshot or a history page.
 /// Packed delta records and live events share the same item identities.
 pub(crate) fn replay(value: &Value) -> Vec<ReplayTurn> {
-    let mut tools = ToolTracker::default();
+    let mut tools = EventTracker::default();
     let mut turns: Vec<ReplayTurn> = Vec::new();
     let mut current = ReplayTurn::default();
     let mut started_at: Option<u64> = None;
@@ -115,11 +115,15 @@ pub(crate) fn replay(value: &Value) -> Vec<ReplayTurn> {
         let event = &entry["event"];
         let time = event["time"].as_u64();
 
+        current
+            .generation_samples
+            .extend(tools.generation.apply(event));
+
         match event["type"].as_str() {
             Some("turn/start") => {
                 // A page can begin mid-turn, and those items belong to a turn
                 // whose start is on an older page rather than to this one.
-                if !current.items.is_empty() {
+                if !current.items.is_empty() || !current.generation_samples.is_empty() {
                     turns.push(take(&mut current));
                 }
 
@@ -210,7 +214,7 @@ pub(crate) fn replay(value: &Value) -> Vec<ReplayTurn> {
         }
     }
 
-    if !current.items.is_empty() {
+    if !current.items.is_empty() || !current.generation_samples.is_empty() || started_at.is_some() {
         turns.push(current);
     }
 
@@ -241,7 +245,7 @@ pub(crate) fn fork_checkpoints(page: &Value) -> Vec<ForkCheckpoint> {
             // rule stays in one place: the log records more than the person's
             // own messages under this type. A prompt maps to exactly one item,
             // and anything else the mapper produced is not one.
-            let mut mapped = map_session_event(event, &Value::Null, &mut ToolTracker::default());
+            let mut mapped = map_session_event(event, &Value::Null, &mut EventTracker::default());
 
             let Some(Event::ItemStarted(Item::UserMessage { text: Some(text) })) = mapped.pop()
             else {

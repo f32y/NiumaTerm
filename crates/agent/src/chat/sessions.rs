@@ -6,7 +6,7 @@
 
 use std::time::SystemTime;
 
-use crate::chat::Item;
+use crate::chat::{GenerationSample, Item};
 
 /// Which directories a session listing covers. A conversation is recorded
 /// against the directory it ran in, and the tab that lists them is rooted in
@@ -51,6 +51,9 @@ pub struct SessionSummary {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ReplayTurn {
     pub items: Vec<ReplayItem>,
+
+    /// Completed responses whose decode timing was retained by the backend.
+    pub generation_samples: Vec<GenerationSample>,
 
     /// Wall time the turn took.
     pub seconds: Option<u64>,
