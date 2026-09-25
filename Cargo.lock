@@ -285,7 +285,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "app"
-version = "1.5.5"
+version = "1.5.6"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3701,7 +3701,7 @@ checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
 
 [[package]]
 name = "libghostty-vt-sys"
-version = "1.5.5"
+version = "1.5.6"
 dependencies = [
  "bindgen",
  "heck",
@@ -4135,7 +4135,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_agent"
-version = "1.5.5"
+version = "1.5.6"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -4167,7 +4167,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_agent_hook_cli"
-version = "1.5.5"
+version = "1.5.6"
 dependencies = [
  "nmt_agent",
  "nmt_platform",
@@ -4178,7 +4178,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_config"
-version = "1.5.5"
+version = "1.5.6"
 dependencies = [
  "dirs",
  "nmt_platform",
@@ -4192,7 +4192,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_input"
-version = "1.5.5"
+version = "1.5.6"
 dependencies = [
  "bitflags 2.13.2",
  "smol_str",
@@ -4200,7 +4200,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_platform"
-version = "1.5.5"
+version = "1.5.6"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -4227,7 +4227,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_profile"
-version = "1.5.5"
+version = "1.5.6"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
@@ -4238,7 +4238,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_profiling"
-version = "1.5.5"
+version = "1.5.6"
 dependencies = [
  "log",
  "parking_lot",
@@ -4248,7 +4248,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_shell_extension"
-version = "1.5.5"
+version = "1.5.6"
 dependencies = [
  "nmt_version",
  "percent-encoding",
@@ -4259,7 +4259,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_terminal"
-version = "1.5.5"
+version = "1.5.6"
 dependencies = [
  "base64 0.22.1",
  "bitflags 2.13.2",
@@ -4279,7 +4279,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_tree_sitter_bundle"
-version = "1.5.5"
+version = "1.5.6"
 dependencies = [
  "nmt_version",
  "tree-sitter",
@@ -4323,7 +4323,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_updater"
-version = "1.5.5"
+version = "1.5.6"
 dependencies = [
  "nmt_config",
  "nmt_platform",
@@ -4344,7 +4344,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_version"
-version = "1.5.5"
+version = "1.5.6"
 
 [[package]]
 name = "nohash-hasher"
