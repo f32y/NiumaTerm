@@ -3,6 +3,44 @@ use tempfile::Builder as TempDirBuilder;
 use crate::application::*;
 
 #[test]
+fn missing_newline_setting_uses_shift_enter_and_preserves_saved_choices() {
+    for text in ["", "[system]\n"] {
+        let config: Config = parse_toml(text).unwrap();
+
+        assert_eq!(
+            config.system.newline_shortcut,
+            system::NewlineShortcut::ShiftEnter
+        );
+    }
+
+    for (value, expected) in [
+        ("shift-enter", system::NewlineShortcut::ShiftEnter),
+        ("ctrl-enter", system::NewlineShortcut::CtrlEnter),
+        ("off", system::NewlineShortcut::Off),
+    ] {
+        let config: Config =
+            parse_toml(&format!("[system]\nnewline-shortcut = \"{value}\"\n")).unwrap();
+
+        let saved = toml::to_string(&config).unwrap();
+        let restored: Config = parse_toml(&saved).unwrap();
+
+        assert_eq!(restored.system.newline_shortcut, expected);
+    }
+}
+
+#[test]
+fn example_system_section_matches_defaults_on_every_platform() {
+    let shipped =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(EXAMPLE_CONFIG_PATH))
+            .unwrap();
+
+    let example: toml::Value = parse_toml(&shipped).unwrap();
+    let defaults = toml::Value::try_from(SystemConfig::default()).unwrap();
+
+    assert_eq!(example.get("system"), Some(&defaults));
+}
+
+#[test]
 fn powershell_compatibility_defaults_on_for_existing_configs_and_preserves_opt_out() {
     for text in ["", "[terminal]\n", "[appearance]\n"] {
         let config: Config = parse_toml(text).unwrap();
@@ -694,7 +732,6 @@ fn top_level_colors_are_ignored() {
     assert_eq!(result.colors, Colors::default());
 }
 
-#[cfg(target_os = "windows")]
 const EXAMPLE_CONFIG_PATH: &str = "../../assets/config-example.toml";
 
 /// `assets/config-example.toml` documents every key with its built-in

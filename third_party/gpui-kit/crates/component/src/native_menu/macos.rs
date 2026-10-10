@@ -2,15 +2,15 @@
 
 use std::{cell::Cell, sync::Arc};
 
-use gpui::{App, AssetSource, Pixels, Point, SharedString, Window};
+use gpui::{App, AssetSource, KeybindingKeystroke, Pixels, Point, SharedString, Window};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObject};
 use objc2::{AnyThread, DefinedClass, MainThreadMarker, define_class, msg_send, sel};
-use objc2_app_kit::{NSImage, NSMenu, NSMenuItem, NSView};
+use objc2_app_kit::{NSEventModifierFlags, NSImage, NSMenu, NSMenuItem, NSView};
 use objc2_foundation::{NSData, NSPoint, NSSize, NSString};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
-use super::{NativeMenuActivation, NativeMenuItem, resolve_icon_image};
+use crate::native_menu::{NativeMenuActivation, NativeMenuItem, resolve_icon_image};
 
 /// Side length (in points) menu item images are scaled to. AppKit does not resize the image to fit
 /// the row, so a large file would otherwise overflow it.
@@ -63,9 +63,17 @@ pub(super) fn show(
     // Inherent `Window::window_handle` (GPUI's `AnyWindowHandle`), not the
     // `raw_window_handle::HasWindowHandle` trait method in scope below.
     let handle = Window::window_handle(window);
+    let mut keystrokes = Vec::new();
+    collect_action_keystrokes(&items, window, &mut keystrokes);
 
     cx.spawn(async move |cx| {
-        let activation = run_menu(view_ptr, &items, asset_source.as_ref(), position);
+        let activation = run_menu(
+            view_ptr,
+            &items,
+            asset_source.as_ref(),
+            position,
+            &keystrokes,
+        );
         let _ = cx.update(move |app| {
             let _ = handle.update(app, move |_, window, app| {
                 if let Some(activation) = activation {
@@ -83,6 +91,37 @@ pub(super) fn show(
     .detach();
 }
 
+fn collect_action_keystrokes(
+    items: &[NativeMenuItem],
+    window: &Window,
+    keystrokes: &mut Vec<Option<KeybindingKeystroke>>,
+) {
+    for item in items {
+        match item {
+            NativeMenuItem::Item {
+                disabled: false,
+                activation: Some(activation),
+                ..
+            } => {
+                let keystroke = match activation {
+                    NativeMenuActivation::Action(action) => window
+                        .highest_precedence_binding_for_action(action.as_ref())
+                        .and_then(|binding| match binding.keystrokes() {
+                            [stroke] if stroke.key().chars().count() == 1 => Some(stroke.clone()),
+                            _ => None,
+                        }),
+                    NativeMenuActivation::Handler(_) => None,
+                };
+                keystrokes.push(keystroke);
+            }
+            NativeMenuItem::Submenu { items, .. } => {
+                collect_action_keystrokes(items, window, keystrokes);
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Build the menu (recursively, including submenus), show it, and return what
 /// the selected item does.
 fn run_menu(
@@ -90,6 +129,7 @@ fn run_menu(
     items: &[NativeMenuItem],
     asset_source: &dyn AssetSource,
     position: Point<Pixels>,
+    keystrokes: &[Option<KeybindingKeystroke>],
 ) -> Option<NativeMenuActivation> {
     let mtm = MainThreadMarker::new()?;
     // SAFETY: `view_ptr` came from the window's AppKit handle, and the window
@@ -98,7 +138,14 @@ fn run_menu(
 
     let target = MenuTarget::new();
     let mut activations: Vec<&NativeMenuActivation> = Vec::new();
-    let ns_menu = build_menu(items, asset_source, &target, mtm, &mut activations);
+    let ns_menu = build_menu(
+        items,
+        asset_source,
+        &target,
+        mtm,
+        &mut activations,
+        keystrokes,
+    );
 
     // `position` is window-relative, logical pixels, origin top-left (GPUI).
     // AppKit view coordinates have their origin at the bottom-left, so flip y.
@@ -128,6 +175,7 @@ fn build_menu<'a>(
     target: &MenuTarget,
     mtm: MainThreadMarker,
     activations: &mut Vec<&'a NativeMenuActivation>,
+    keystrokes: &[Option<KeybindingKeystroke>],
 ) -> Retained<NSMenu> {
     let menu = NSMenu::new(mtm);
     // Items are configured explicitly, so disable AppKit's automatic enabling.
@@ -161,6 +209,24 @@ fn build_menu<'a>(
                     }
                     if let Some(activation) = activation {
                         if !*disabled {
+                            // AppKit processes shortcuts while tracking a popup,
+                            // before GPUI can dispatch them to the owner window.
+                            if let Some(Some(stroke)) = keystrokes.get(activations.len()) {
+                                ns_item.setKeyEquivalent(&NSString::from_str(stroke.key()));
+                                let modifiers = stroke.modifiers();
+                                let mut mask = NSEventModifierFlags::empty();
+                                for (enabled, flag) in [
+                                    (modifiers.platform, NSEventModifierFlags::Command),
+                                    (modifiers.control, NSEventModifierFlags::Control),
+                                    (modifiers.alt, NSEventModifierFlags::Option),
+                                    (modifiers.shift, NSEventModifierFlags::Shift),
+                                ] {
+                                    if enabled {
+                                        mask |= flag;
+                                    }
+                                }
+                                ns_item.setKeyEquivalentModifierMask(mask);
+                            }
                             ns_item.setTag(activations.len() as isize);
                             activations.push(activation);
                             ns_item.setTarget(Some(target as &AnyObject));
@@ -176,7 +242,7 @@ fn build_menu<'a>(
                 items,
             } => {
                 let ns_item = NSMenuItem::new(mtm);
-                let submenu = build_menu(items, asset_source, target, mtm, activations);
+                let submenu = build_menu(items, asset_source, target, mtm, activations, keystrokes);
                 ns_item.setTitle(&NSString::from_str(label));
                 ns_item.setEnabled(!*disabled);
                 ns_item.setSubmenu(Some(&submenu));
@@ -210,4 +276,54 @@ fn ns_view_ptr(window: &Window) -> Option<usize> {
         return None;
     };
     Some(handle.ns_view.as_ptr() as usize)
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::{
+        Context, FocusHandle, InteractiveElement as _, IntoElement, KeyBinding, Render,
+        TestAppContext, Window, div,
+    };
+
+    use crate::input::Copy;
+    use crate::native_menu::NativeMenu;
+    use crate::native_menu::macos::collect_action_keystrokes;
+
+    struct ShortcutTestView {
+        focus: FocusHandle,
+    }
+
+    impl Render for ShortcutTestView {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().key_context("PopupTest").track_focus(&self.focus)
+        }
+    }
+
+    #[gpui::test]
+    fn popup_copy_shortcut_matches_its_activation_after_handlers_and_submenus(
+        cx: &mut TestAppContext,
+    ) {
+        cx.update(|cx| cx.bind_keys([KeyBinding::new("cmd-c", Copy, Some("PopupTest"))]));
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let focus = cx.focus_handle();
+            focus.focus(window, cx);
+            ShortcutTestView { focus }
+        });
+        cx.run_until_parked();
+        let menu = NativeMenu::new()
+            .item("Handler", |_, _| {})
+            .menu_with_disabled("Disabled copy", true, Box::new(Copy))
+            .separator()
+            .submenu("Actions", NativeMenu::new().menu("Copy", Box::new(Copy)));
+
+        cx.update(|window, _| {
+            let mut strokes = Vec::new();
+            collect_action_keystrokes(&menu.items, window, &mut strokes);
+            assert_eq!(strokes.len(), 2);
+            assert!(strokes[0].is_none());
+            let copy = strokes[1].as_ref().expect("copy popup shortcut");
+            assert_eq!(copy.key(), "c");
+            assert!(copy.modifiers().platform);
+        });
+    }
 }

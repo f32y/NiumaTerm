@@ -27,8 +27,8 @@ impl WarnBeforeTerminatingShell {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum NewlineShortcut {
-    #[default]
     CtrlEnter,
+    #[default]
     ShiftEnter,
     Off,
 }
@@ -171,7 +171,8 @@ impl From<&str> for NewlineShortcut {
         match value {
             "shift-enter" => Self::ShiftEnter,
             "off" => Self::Off,
-            _ => Self::CtrlEnter,
+            "ctrl-enter" => Self::CtrlEnter,
+            _ => Self::default(),
         }
     }
 }

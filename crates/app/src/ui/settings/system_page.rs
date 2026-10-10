@@ -187,7 +187,7 @@ pub(super) fn system_page(shell_integration_mismatched: bool, proxy: ProxyMode) 
                         settings.edit_system(|section| section.newline_shortcut = value.into());
                     },
                 )
-                .default_value(SharedString::from(<&str>::from(NewlineShortcut::CtrlEnter))),
+                .default_value(SharedString::from(<&str>::from(NewlineShortcut::default()))),
             )),
     )
     .group(network_group(proxy))

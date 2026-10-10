@@ -10,13 +10,16 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use gpui::prelude::*;
-use gpui::{App, ElementId, Font, SharedString, StyleRefinement, px};
+use gpui::{App, ClipboardItem, ElementId, Font, SharedString, StyleRefinement, px};
 use gpui_component::highlighter::HighlightTheme;
+use gpui_component::modern_menu::ModernMenu;
 use gpui_component::text::TextViewStyle;
-use gpui_component::{ActiveTheme as _, text};
+use gpui_component::{ActiveTheme as _, IconName, text};
+use rust_i18n::t;
 
 use crate::agent_tab::settings::AgentSettings;
 use crate::agent_tab::transcript::render::text_style::file_icons::file_link_icon;
+use crate::copy_toast::show_text_copied;
 
 /// Assistant reply: bare markdown (no bubble, no border); alignment and
 /// surface carry the distinction.
@@ -96,8 +99,21 @@ pub(crate) fn markdown_view(
 ) -> text::TextView {
     text::TextView::markdown(id, markdown)
         .link_icon(file_link_icon)
-        .on_link_click(move |target, _, _, cx| {
-            open_link(target, cwd.as_deref().map(Path::new), cx);
+        .on_link_click(move |target, event, window, cx| {
+            if event.is_right_click() {
+                let target = target.to_string();
+
+                ModernMenu::new()
+                    .item(t!("agent-transcript-copy"), move |window, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(target.clone()));
+
+                        show_text_copied(window, cx);
+                    })
+                    .icon(IconName::Copy)
+                    .show_at(window.mouse_position(), window, cx);
+            } else {
+                open_link(target, cwd.as_deref().map(Path::new), cx);
+            }
         })
 }
 

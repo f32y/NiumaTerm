@@ -1,4 +1,6 @@
-use crate::catalog::{ChoiceError, SlashRefusal, SlashRoute, route_slash};
+use crate::catalog::{
+    ChoiceError, ParsedSlashCommand, SlashRefusal, SlashRoute, parse_slash_command, route_slash,
+};
 use crate::chat::{
     SkillCatalog, SkillInfo, SlashCommandArguments, SlashCommandInfo, SlashCommandRunPolicy,
     SlashCommandSource,
@@ -59,6 +61,51 @@ fn only_a_leading_slash_is_routed() {
     assert_eq!(
         route("/", AgentKind::Codex, None, false),
         SlashRoute::Refused(SlashRefusal::ChooseCommand)
+    );
+}
+
+#[test]
+fn absolute_paths_are_prompt_text_for_every_agent_kind() {
+    for input in [
+        "/xxx/xxx",
+        "/Users/test/My Documents/report.md",
+        "/review/report.md",
+        "//server/share/report.md",
+        "/tmp/",
+        r"/Users\test\report.md",
+    ] {
+        assert_eq!(parse_slash_command(input), None, "{input}");
+
+        for kind in [AgentKind::Codex, AgentKind::Claude, AgentKind::DeepSeek] {
+            assert_eq!(
+                route_slash(input, &catalog(), kind.caps(), None, |_| Vec::new(), false),
+                None,
+                "{kind:?}: {input}"
+            );
+        }
+    }
+}
+
+#[test]
+fn namespaced_commands_preserve_paths_in_arguments() {
+    assert_eq!(
+        parse_slash_command("/plugin:review /Users/test/My Documents/report.md"),
+        Some(ParsedSlashCommand {
+            name: "plugin:review".into(),
+            arguments: "/Users/test/My Documents/report.md".into(),
+            has_argument_separator: true,
+        })
+    );
+
+    assert_eq!(
+        route("/compact /xxx/xxx", AgentKind::Codex, None, false),
+        SlashRoute::Backend {
+            command: PendingSlashCommand {
+                name: "compact".into(),
+                arguments: "/xxx/xxx".into(),
+            },
+            policy: SlashCommandRunPolicy::QueueUntilIdle,
+        }
     );
 }
 

@@ -1,7 +1,7 @@
 use gpui::{AppContext as _, Entity, TestAppContext, VisualTestContext, point, px};
 use gpui_component::Root;
 use nmt_agent::AgentWorkspace;
-use nmt_agent::chat::{Event, QueuedPrompt, SlashCommandOutcome};
+use nmt_agent::chat::{Event, Item, QueuedPrompt, SlashCommandOutcome};
 use nmt_agent::progress::{GoalStatus, Task, TaskList, TaskStatus};
 use nmt_agent::session::test_support::TestBackend;
 use nmt_agent::session::{AgentKind, Backend};
@@ -185,7 +185,7 @@ fn progress_panel_is_narrower_and_expands_above_the_composer(cx: &mut TestAppCon
 }
 
 #[gpui::test]
-fn a_finished_task_list_leaves_the_composer(cx: &mut TestAppContext) {
+fn finished_tasks_leave_the_composer_and_workspace_progress(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_component::init(cx);
 
@@ -236,21 +236,27 @@ fn a_finished_task_list_leaves_the_composer(cx: &mut TestAppContext) {
         cx.notify();
     });
 
-    let list = |status: TaskStatus| TaskList {
+    let list = |statuses: [TaskStatus; 2]| TaskList {
         explanation: None,
-        items: vec![Task {
-            id: "one".into(),
-            title: "Verify build output".into(),
-            description: None,
-            status,
-            owner: None,
-            blocked_by: vec![],
-        }],
+        items: statuses
+            .into_iter()
+            .enumerate()
+            .map(|(index, status)| Task {
+                id: index.to_string(),
+                title: format!("Verify target {index}"),
+                description: None,
+                status,
+                owner: None,
+                blocked_by: vec![],
+            })
+            .collect(),
     };
+
+    deliver_session_event(&pane, Event::TurnStarted, cx);
 
     deliver_session_event(
         &pane,
-        Event::TaskListUpdated(list(TaskStatus::InProgress)),
+        Event::TaskListUpdated(list([TaskStatus::Completed, TaskStatus::InProgress])),
         cx,
     );
 
@@ -262,10 +268,14 @@ fn a_finished_task_list_leaves_the_composer(cx: &mut TestAppContext) {
 
     assert!(cx.debug_bounds("agent-progress-panel").is_some());
     assert!(cx.debug_bounds("agent-task-list").is_none());
+    assert_eq!(
+        pane.read_with(cx, |pane, cx| pane.task_tally(cx)),
+        Some((1, 2))
+    );
 
     deliver_session_event(
         &pane,
-        Event::TaskListUpdated(list(TaskStatus::Completed)),
+        Event::TaskListUpdated(list([TaskStatus::Completed; 2])),
         cx,
     );
 
@@ -282,6 +292,74 @@ fn a_finished_task_list_leaves_the_composer(cx: &mut TestAppContext) {
     assert!(
         cx.debug_bounds("agent-task-list").is_some(),
         "the finished list is read in the transcript instead"
+    );
+    assert_eq!(
+        pane.read_with(cx, |pane, cx| pane.task_tally(cx)),
+        None,
+        "finished tasks must not keep the workspace progress bar visible"
+    );
+
+    deliver_session_event(&pane, Event::TurnCompleted { error: None }, cx);
+    deliver_session_event(&pane, Event::TurnStarted, cx);
+
+    assert_eq!(
+        pane.read_with(cx, |pane, cx| pane.task_tally(cx)),
+        None,
+        "a later turn without task updates must not reuse completed progress"
+    );
+
+    deliver_session_event(
+        &pane,
+        Event::TaskListUpdated(list([TaskStatus::Completed, TaskStatus::InProgress])),
+        cx,
+    );
+
+    assert_eq!(
+        pane.read_with(cx, |pane, cx| pane.task_tally(cx)),
+        Some((1, 2))
+    );
+
+    pane.update(cx, |pane, cx| {
+        pane.session.borrow_mut().clear_conversation();
+
+        pane.transcript.update(cx, |transcript, _| {
+            transcript.push_stamped(
+                1,
+                Item::Other {
+                    id: "restored-tasks".into(),
+                    kind: "TodoWrite".into(),
+                    title: "Tasks".into(),
+                    output: Some("- [x] First target\n- [ ] Second target".into()),
+                    status: None,
+                },
+            );
+        });
+    });
+
+    assert_eq!(
+        pane.read_with(cx, |pane, cx| pane.task_tally(cx)),
+        Some((1, 2))
+    );
+
+    pane.update(cx, |pane, cx| {
+        pane.transcript.update(cx, |transcript, _| {
+            transcript.push_stamped(
+                2,
+                Item::Other {
+                    id: "restored-completed-tasks".into(),
+                    kind: "TodoWrite".into(),
+                    title: "Tasks".into(),
+                    output: Some("- [x] First target\n- [x] Second target".into()),
+                    status: None,
+                },
+            );
+        });
+    });
+
+    assert_eq!(
+        pane.read_with(cx, |pane, cx| pane.task_tally(cx)),
+        None,
+        "completed progress restored from the transcript must also be hidden"
     );
 }
 

@@ -14,7 +14,7 @@ fn system_section_defaults_when_absent() {
     );
     assert!(config.system.confirm_before_closing_workspace);
     assert!(!config.system.prioritize_ui_threads);
-    assert_eq!(config.system.newline_shortcut, NewlineShortcut::CtrlEnter);
+    assert_eq!(config.system.newline_shortcut, NewlineShortcut::ShiftEnter);
 }
 
 #[test]

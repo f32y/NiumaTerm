@@ -5,7 +5,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 use std::{env, fs, process};
 
-use gpui::{Entity, Image, ImageFormat, TestAppContext, VisualTestContext, WindowHandle};
+use gpui::{
+    ClipboardItem, Entity, Image, ImageFormat, TestAppContext, VisualTestContext, WindowHandle,
+};
 use image_rs::{DynamicImage, ImageFormat as EncodedImageFormat, RgbaImage};
 use nmt_agent::AgentWorkspace;
 use nmt_agent::chat::{SendOutcome, SessionSummary, SlashCommandOutcome};
@@ -384,6 +386,78 @@ fn accepted_new_turn_and_steering_record_only_typed_input(cx: &mut TestAppContex
                 ["start the turn", "steer the turn"]
             );
             assert_eq!(pane.input.read(cx).text().len(), 0);
+        });
+    });
+}
+
+#[gpui::test]
+fn pasted_path_supports_default_newlines_and_submits_as_a_prompt(cx: &mut TestAppContext) {
+    let directory = TestDirectory::new();
+    let (pane, window) = open_test_pane(cx, &directory);
+
+    let mut cx = VisualTestContext::from_window(window.into(), cx);
+
+    cx.update(|window, cx| {
+        pane.update(cx, |pane, cx| {
+            let epoch = pane.session.borrow_mut().runtime_mut().begin_start();
+
+            assert!(matches!(
+                pane.session.borrow_mut().runtime_mut().install(
+                    epoch,
+                    Ok(Backend::Test(TestBackend::new(
+                        [SendOutcome::StartedTurn],
+                        SlashCommandOutcome::NotReady,
+                        Vec::new(),
+                    )))
+                ),
+                StartOutcome::Installed
+            ));
+
+            pane.session.borrow_mut().runtime_mut().ready();
+            cx.write_to_clipboard(ClipboardItem::new_string("/xxx/xxx".into()));
+            pane.input.update(cx, |input, cx| input.focus(window, cx));
+        });
+    });
+
+    cx.run_until_parked();
+
+    cx.simulate_keystrokes(if cfg!(target_os = "macos") {
+        "cmd-v"
+    } else {
+        "ctrl-v"
+    });
+
+    cx.run_until_parked();
+
+    cx.update(|_, cx| {
+        pane.update(cx, |pane, cx| {
+            assert_eq!(pane.input.read(cx).text().to_string(), "/xxx/xxx");
+            assert!(pane.palette_model(cx).is_none());
+        });
+    });
+
+    cx.simulate_keystrokes("shift-enter");
+    cx.run_until_parked();
+
+    cx.update(|_, cx| {
+        assert_eq!(
+            pane.read(cx).input.read(cx).text().to_string(),
+            "/xxx/xxx\n"
+        );
+    });
+
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+
+    cx.update(|_, cx| {
+        pane.update(cx, |pane, cx| {
+            assert_eq!(pane.input.read(cx).text().len(), 0);
+            assert_eq!(
+                &*cx.global::<AgentInputHistory>()
+                    .0
+                    .entries(&pane.input_history_scope),
+                ["/xxx/xxx"]
+            );
         });
     });
 }

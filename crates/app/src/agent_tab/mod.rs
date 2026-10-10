@@ -3928,13 +3928,15 @@ impl AgentPane {
         Some(self.host.upgrade()?.read(cx).kind)
     }
 
-    /// Progress through the task list this conversation is working from, as
-    /// completed items out of the total, for the workspace entry's bar.
+    /// Completed and total items for the workspace progress bar. Finished lists
+    /// remain in the transcript but no longer contribute to workspace progress.
     pub fn task_tally(&self, cx: &App) -> Option<(u32, u32)> {
-        match self.session.borrow().task_list() {
+        let tally = match self.session.borrow().task_list() {
             Some(tasks) => tasks.tally(),
             None => self.transcript.read(cx).task_tally(),
-        }
+        };
+
+        tally.filter(|(done, total)| done < total)
     }
 
     /// The launch profile this pane runs, so a tab opened from one of its

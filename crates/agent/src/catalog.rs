@@ -32,15 +32,21 @@ pub struct ParsedSlashCommand {
     pub has_argument_separator: bool,
 }
 
-/// Parse only an input whose first byte is `/`. A slash later in plain
-/// prose is invisible to command routing by design.
+/// Parse a leading `/command` token without path separators. Paths remain
+/// prompt text, while separators in command arguments are preserved.
 pub fn parse_slash_command(input: &str) -> Option<ParsedSlashCommand> {
     let tail = input.strip_prefix('/')?;
     let token_end = tail.find(char::is_whitespace).unwrap_or(tail.len());
+    let name = &tail[..token_end];
+
+    if name.contains(['/', '\\']) {
+        return None;
+    }
+
     let remainder = &tail[token_end..];
 
     Some(ParsedSlashCommand {
-        name: tail[..token_end].to_ascii_lowercase(),
+        name: name.to_ascii_lowercase(),
         arguments: remainder
             .trim_start_matches(char::is_whitespace)
             .to_string(),

@@ -1,11 +1,11 @@
-use gpui::{App, ClipboardItem, Pixels, Point, WeakEntity, Window};
+use gpui::{App, Pixels, Point, WeakEntity, Window};
 use gpui_base::TextSelection;
+use gpui_component::input::Copy;
 use gpui_component::modern_menu::ModernMenu;
 use gpui_component::{Icon, IconName, WindowExt as _};
 use rust_i18n::t;
 
 use crate::agent_tab::AgentPane;
-use crate::copy_toast::show_text_copied;
 
 /// The menu over transcript text the user just selected: copy it, quote it
 /// into the composer of `pane`, or draft it as a Side Chat question. Nothing
@@ -30,8 +30,6 @@ pub(crate) fn show_selected_text_menu(
         .selected_text_bounds(cx)
         .map_or(released_at, |bounds| bounds.origin);
 
-    let copy_text = selected_text.clone();
-
     let side_text = selected_text.clone();
 
     let side_pane = pane.clone();
@@ -46,11 +44,7 @@ pub(crate) fn show_selected_text_menu(
         // stack of labelled rows the pointer has to travel down.
         .commands(|menu| {
             let menu = menu
-                .item(t!("agent-transcript-copy"), move |window, cx| {
-                    cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()));
-
-                    show_text_copied(window, cx);
-                })
+                .action(t!("agent-transcript-copy"), Box::new(Copy))
                 .icon(IconName::Copy)
                 .item(t!("agent-transcript-quote"), move |window, cx| {
                     let selected_text = selected_text.clone();

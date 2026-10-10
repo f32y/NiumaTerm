@@ -43,7 +43,7 @@ use std::{
     time::Duration,
 };
 
-use super::ImageCacheProvider;
+use crate::elements::ImageCacheProvider;
 
 #[cfg(feature = "stacker")]
 type StackSafe<T> = stacksafe::StackSafe<T>;
@@ -2881,6 +2881,14 @@ impl Interactivity {
                     let hitbox = hitbox.clone();
                     move |event: &MouseMoveEvent, phase, window, cx| {
                         if phase == DispatchPhase::Capture {
+                            // Native menus can consume mouse-up. Moving with no button
+                            // pressed cancels the old press without a click or drag.
+                            if event.pressed_button.is_none()
+                                && pending_mouse_down.borrow_mut().take().is_some()
+                            {
+                                *clicked_state.borrow_mut() = ElementClickedState::default();
+                                window.refresh();
+                            }
                             return;
                         }
 
@@ -3142,6 +3150,19 @@ impl Interactivity {
                 let active_state = active_state.clone();
                 window.on_mouse_event(move |_: &MouseUpEvent, phase, window, _cx| {
                     if phase == DispatchPhase::Capture && active_state.borrow().is_clicked() {
+                        *active_state.borrow_mut() = ElementClickedState::default();
+                        window.refresh();
+                    }
+                });
+            }
+
+            {
+                let active_state = active_state.clone();
+                window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, _cx| {
+                    if phase == DispatchPhase::Capture
+                        && event.pressed_button.is_none()
+                        && active_state.borrow().is_clicked()
+                    {
                         *active_state.borrow_mut() = ElementClickedState::default();
                         window.refresh();
                     }
@@ -4315,7 +4336,7 @@ impl ScrollHandle {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::elements::div::*;
     use crate::{
         AnyWindowHandle, AppContext as _, Context, InputEvent, Keystroke, MouseMoveEvent,
         TestAppContext, canvas, util::FluentBuilder as _,
@@ -4536,6 +4557,46 @@ mod tests {
         })
         .unwrap();
         assert_eq!(*hover_transitions.borrow(), [true]);
+    }
+
+    struct ActivePressTestView;
+
+    impl Render for ActivePressTestView {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().child(
+                div()
+                    .id("active-target")
+                    .size(px(20.))
+                    .bg(crate::rgb(0x111111))
+                    .hover(|style| style.bg(crate::rgb(0x222222)))
+                    .active(|style| style.bg(crate::rgb(0x333333))),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn active_style_recovers_after_a_missing_mouse_release(cx: &mut TestAppContext) {
+        let window = cx.add_window(|_, _| ActivePressTestView);
+        let mut cx = crate::VisualTestContext::from_window(window.into(), cx);
+        let background = |cx: &mut crate::VisualTestContext| {
+            cx.update(|window, _| window.painted_quads().last().unwrap().background)
+        };
+
+        cx.refresh().unwrap();
+        cx.simulate_mouse_move(point(px(10.), px(10.)), None, Default::default());
+        assert_eq!(background(&mut cx), crate::rgb(0x222222).into());
+
+        cx.simulate_mouse_down(
+            point(px(10.), px(10.)),
+            MouseButton::Right,
+            Default::default(),
+        );
+        assert_eq!(background(&mut cx), crate::rgb(0x333333).into());
+        cx.simulate_mouse_move(point(px(11.), px(10.)), None, Default::default());
+        assert_eq!(background(&mut cx), crate::rgb(0x222222).into());
+
+        cx.simulate_mouse_move(point(px(40.), px(40.)), None, Default::default());
+        assert_eq!(background(&mut cx), crate::rgb(0x111111).into());
     }
 
     struct ScrollingView(ScrollHandle);

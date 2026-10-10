@@ -574,14 +574,13 @@ impl Root {
     }
 
     fn on_action_copy(&mut self, _: &Copy, window: &mut Window, cx: &mut Context<Self>) {
-        let text = gpui_base::TextSelection::selected_text(window, cx)
-            .trim()
-            .to_string();
+        let text = TextSelection::selected_text(window, cx).trim().to_string();
         if text.is_empty() {
             cx.propagate();
             return;
         }
         cx.write_to_clipboard(ClipboardItem::new_string(text));
+        cx.stop_propagation();
     }
 }
 
@@ -602,7 +601,9 @@ impl Render for Root {
             .key_context(CONTEXT)
             .on_action(cx.listener(Self::on_action_tab))
             .on_action(cx.listener(Self::on_action_tab_prev))
-            .on_action(cx.listener(Self::on_action_copy))
+            // Transcript selection can coexist with a focused input's earlier
+            // selection. Consume Copy before the input replaces the clipboard.
+            .capture_action(cx.listener(Self::on_action_copy))
             .relative()
             .size_full()
             .font_family(cx.theme().font_family.clone())
@@ -627,7 +628,7 @@ impl Render for Root {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::root::*;
     use gpui::{TestAppContext, VisualTestContext, px};
 
     struct TestView;

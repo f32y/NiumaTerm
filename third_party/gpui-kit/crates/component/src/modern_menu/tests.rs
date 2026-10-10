@@ -1,10 +1,13 @@
-use std::rc::Rc;
+use std::{cell::Cell, rc::Rc};
 
-use gpui::{Bounds, Pixels, point, px, size};
+use gpui::{
+    Bounds, Context, InteractiveElement as _, Modifiers, MouseButton, Pixels, Render, Styled as _,
+    Window, div, point, px, size,
+};
 
 use crate::modern_menu::native_menu;
 use crate::modern_menu::{
-    Activation, Entry, Item, ModernMenu, ModernMenuInput, normalize_separators,
+    Activation, Entry, Item, ModernMenu, ModernMenuExt as _, ModernMenuInput, normalize_separators,
 };
 
 use crate::modern_menu::metrics::{
@@ -326,4 +329,100 @@ fn a_native_menu_keeps_the_rows_whose_command_is_a_closure() {
             .item_disabled("paste", true, |_, _| {})
     });
     assert!(!native_menu(commands.entries).is_empty());
+}
+
+struct ContextMenuPressHarness {
+    default_prevented: Rc<Cell<bool>>,
+}
+
+impl Render for ContextMenuPressHarness {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl gpui::IntoElement {
+        let default_prevented = self.default_prevented.clone();
+
+        div()
+            .id("context-menu-trigger")
+            .w(px(100.))
+            .h(px(40.))
+            .modern_context_menu(|menu, _, _| menu)
+            .on_any_mouse_down(move |_, window, _| {
+                default_prevented.set(window.default_prevented());
+            })
+    }
+}
+
+#[gpui::test]
+fn modern_context_menu_claims_secondary_press_before_bubble(cx: &mut gpui::TestAppContext) {
+    cx.update(crate::init);
+    let default_prevented = Rc::new(Cell::new(false));
+    let seen = default_prevented.clone();
+    let (_, cx) = cx.add_window_view(move |_, _| ContextMenuPressHarness {
+        default_prevented: seen,
+    });
+
+    cx.run_until_parked();
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    cx.simulate_mouse_down(
+        point(px(10.), px(10.)),
+        MouseButton::Right,
+        Modifiers::default(),
+    );
+
+    assert!(default_prevented.get());
+}
+
+struct NestedContextMenuHarness {
+    parent_opens: Rc<Cell<usize>>,
+    child_opens: Rc<Cell<usize>>,
+}
+
+impl Render for NestedContextMenuHarness {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl gpui::IntoElement {
+        use gpui::ParentElement as _;
+
+        let parent = self.parent_opens.clone();
+        let child = self.child_opens.clone();
+        div()
+            .id("parent-context-menu")
+            .w(px(100.))
+            .h(px(80.))
+            .modern_context_menu(move |menu, _, _| {
+                parent.set(parent.get() + 1);
+                menu
+            })
+            .child(
+                div()
+                    .w(px(100.))
+                    .h(px(40.))
+                    .on_mouse_up(MouseButton::Right, move |_, _, cx| {
+                        child.set(child.get() + 1);
+                        cx.stop_propagation();
+                    }),
+            )
+    }
+}
+
+#[gpui::test]
+fn child_context_menu_precedes_the_parent_menu(cx: &mut gpui::TestAppContext) {
+    cx.update(crate::init);
+    let parent_opens = Rc::new(Cell::new(0));
+    let child_opens = Rc::new(Cell::new(0));
+    let parent = parent_opens.clone();
+    let child = child_opens.clone();
+    let (_, cx) = cx.add_window_view(move |_, _| NestedContextMenuHarness {
+        parent_opens: parent,
+        child_opens: child,
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    let position = point(px(10.), px(10.));
+    cx.simulate_mouse_down(position, MouseButton::Right, Modifiers::default());
+    assert_eq!(parent_opens.get(), 0);
+    cx.simulate_mouse_up(position, MouseButton::Right, Modifiers::default());
+    assert_eq!(child_opens.get(), 1);
+    assert_eq!(parent_opens.get(), 0);
+
+    let position = point(px(10.), px(60.));
+    cx.simulate_mouse_down(position, MouseButton::Right, Modifiers::default());
+    cx.simulate_mouse_up(position, MouseButton::Right, Modifiers::default());
+    assert_eq!(parent_opens.get(), 1);
 }

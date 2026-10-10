@@ -1,4 +1,4 @@
-use gpui::{App, InteractiveElement, MouseButton, MouseDownEvent, Window};
+use gpui::{App, InteractiveElement, MouseButton, MouseDownEvent, MouseUpEvent, Window};
 
 use crate::modern_menu::ModernMenu;
 
@@ -7,20 +7,30 @@ use crate::modern_menu::ModernMenu;
 ///
 /// Unlike that one this adds no wrapper element. A drawn menu has to be anchored
 /// and clipped inside the window that opens it, which takes an element to anchor
-/// against; a menu with its own window is positioned by the platform, so a press
-/// handler is the whole of it.
+/// against; a menu with its own window is positioned by the platform, so it only
+/// needs mouse handlers.
 pub trait ModernMenuExt: InteractiveElement + Sized {
     /// Open a menu built by `builder` when the element is right-clicked.
     ///
-    /// `builder` runs on every press rather than once, so items can reflect the
-    /// state at the moment the menu is opened.
+    /// `builder` runs on each secondary mouse release, so items reflect the
+    /// current state when the menu opens.
     fn modern_context_menu(
         self,
         builder: impl Fn(ModernMenu, &mut Window, &mut App) -> ModernMenu + 'static,
     ) -> Self {
-        self.on_mouse_down(
+        self.capture_any_mouse_down(move |event: &MouseDownEvent, window, _cx| {
+            if event.button != MouseButton::Right {
+                return;
+            }
+
+            // A secondary press must not activate child controls. Opening on
+            // release lets a child link handle its own context menu first.
+            window.prevent_default();
+        })
+        .on_mouse_up(
             MouseButton::Right,
-            move |event: &MouseDownEvent, window, cx| {
+            move |event: &MouseUpEvent, window, cx| {
+                cx.stop_propagation();
                 builder(ModernMenu::new(), window, cx).show_at(event.position, window, cx);
             },
         )

@@ -475,6 +475,39 @@ mod tests {
     }
 
     #[gpui::test]
+    fn transcript_copy_precedes_a_focused_composer_selection(cx: &mut TestAppContext) {
+        let (chat, cx) = setup(true, cx);
+        chat.update(cx, |chat, cx| {
+            chat.restore_composer_on_mouse_up = true;
+            cx.notify();
+        });
+        let composer = chat.read_with(cx, |chat, _| chat.composer.clone());
+        cx.update(|window, cx| {
+            composer.update(cx, |input, cx| {
+                input.set_value("composer draft", window, cx);
+                input.select_all(window, cx);
+                input.focus(window, cx);
+            });
+            let _ = window.draw(cx);
+        });
+
+        drag(cx, point(px(0.), px(15.)), point(px(300.), px(15.)));
+        assert_eq!(window_selected_text(cx).trim(), "Hello world");
+        cx.simulate_keystrokes("secondary-c");
+        assert_eq!(
+            cx.read_from_clipboard().and_then(|item| item.text()),
+            Some("Hello world".to_string())
+        );
+
+        cx.update(|window, cx| TextSelection::clear(window, cx));
+        cx.simulate_keystrokes("secondary-c");
+        assert_eq!(
+            cx.read_from_clipboard().and_then(|item| item.text()),
+            Some("composer draft".to_string())
+        );
+    }
+
+    #[gpui::test]
     fn move_without_button_ends_lost_drag(cx: &mut TestAppContext) {
         let (_, cx) = setup(true, cx);
         cx.simulate_mouse_down(
