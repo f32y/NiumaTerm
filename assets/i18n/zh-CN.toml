@@ -808,6 +808,7 @@
 "agent-composer-agent-exited" = "智能体已退出"
 "agent-composer-resume-idle-only" = "/resume 仅在智能体空闲时可用。"
 "agent-composer-no-recent-sessions" = "此文件夹没有可用的最近会话。"
+"agent-composer-listing-recent-sessions" = "正在列出此文件夹的最近会话…"
 "agent-composer-skill-discovery-loading" = "Codex 技能发现仍在加载"
 "agent-composer-no-skills" = "此文件夹没有可用的 Codex 技能"
 "agent-composer-no-matching-skills" = "没有匹配的技能"

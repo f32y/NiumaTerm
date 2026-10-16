@@ -3,7 +3,7 @@
 mod history_tests;
 
 use std::cmp::Reverse;
-use std::mem::take;
+use std::mem::{self, take};
 use std::path::PathBuf;
 
 use nmt_profile::AgentProfile;
@@ -43,6 +43,11 @@ pub struct SessionHistory {
 
     /// Rows the tab's own agent reported, in the order it reported them.
     own: Vec<SessionSummary>,
+
+    /// The user asked for the list while it held no rows. A list on its way
+    /// from the harness arrives as a later event, so an empty snapshot here is
+    /// not yet an answer.
+    awaiting_rows: bool,
 
     /// Rows listed from the records of every other configured agent, each
     /// holding the profile that continues it.
@@ -90,6 +95,34 @@ impl SessionHistory {
     pub fn invalidate_filesystem_history(&mut self) {
         self.filesystem_request = None;
         self.pending = None;
+    }
+
+    /// Whether a listing this pane started is still on its way back. A
+    /// filesystem read reserves its rows while the count runs, and a harness
+    /// that lists over the protocol answers with a later event.
+    pub fn list_in_flight(&self) -> bool {
+        self.filesystem_request.is_some()
+            || self.pending.is_some()
+            || self.other_agents_request.is_some()
+    }
+
+    /// Record that the list was asked for before it held any rows, and drop
+    /// what an earlier listing left so the answer is not mixed with it.
+    pub fn await_rows(&mut self) {
+        self.awaiting_rows = true;
+
+        self.clear_rows();
+    }
+
+    /// Whether the list is wanted and still has no rows to show.
+    pub fn is_awaiting_rows(&self) -> bool {
+        self.awaiting_rows
+    }
+
+    /// Clear the wait, reporting whether it was still outstanding. A listing
+    /// that completes after the wait ended is not this request's answer.
+    pub fn resolve_awaiting_rows(&mut self) -> bool {
+        mem::take(&mut self.awaiting_rows)
     }
 
     pub fn begin_filesystem_history(&mut self, cwd: Option<String>) -> FilesystemHistoryRequest {

@@ -110,6 +110,62 @@ fn own_rows_arriving_later_keep_other_agents_rows() {
 }
 
 #[test]
+fn a_listing_in_flight_is_reported_until_it_completes() {
+    let mut history = SessionHistory::default();
+
+    assert!(!history.list_in_flight());
+
+    let listing = history.begin_filesystem_history(Some("project".into()));
+
+    assert!(history.list_in_flight());
+
+    history.publish_filesystem_count(&listing, Some("project"), 2);
+
+    assert!(history.list_in_flight());
+
+    history.publish_filesystem_rows(&listing, Some("project"), vec![row("own", 30, None)]);
+
+    assert!(!history.list_in_flight());
+
+    let _ = history.begin_other_agents();
+
+    assert!(history.list_in_flight());
+}
+
+#[test]
+fn a_wait_for_rows_ends_when_its_listing_completes() {
+    let mut history = SessionHistory::default();
+
+    history.append_page(vec![row("stale", 30, None)]);
+
+    // `/resume` before any rows arrived: the wait drops what an earlier
+    // listing left, so the answer is not mixed with it.
+    history.await_rows();
+
+    assert!(history.is_awaiting_rows());
+    assert!(history.sessions.is_empty());
+
+    assert!(history.resolve_awaiting_rows());
+    assert!(!history.is_awaiting_rows());
+
+    // A second listing completing after the wait ended is not its answer.
+    assert!(!history.resolve_awaiting_rows());
+}
+
+#[test]
+fn a_wait_answers_once() {
+    let mut history = SessionHistory::default();
+
+    history.await_rows();
+
+    assert!(history.resolve_awaiting_rows(), "the wait was outstanding");
+    assert!(
+        !history.resolve_awaiting_rows(),
+        "a later listing completing cannot answer a wait that ended"
+    );
+}
+
+#[test]
 fn each_record_store_is_listed_once_and_the_own_one_not_at_all() {
     let mut proxy = profile("Codex proxy", AgentKind::Codex);
 

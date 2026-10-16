@@ -489,7 +489,8 @@ impl AgentPane {
             }
             BranchUpdate::Branching => {
                 self.branch.draft = Some(self.input.read(cx).text().to_string());
-                self.history_ui.mode = RecentSessionsMode::Loading;
+
+                self.history_ui.show(RecentSessionsMode::Loading);
 
                 self.session.borrow_mut().begin_branched_conversation();
 
@@ -550,7 +551,7 @@ impl AgentPane {
 
         self.clear_conversation_presentation(cx);
 
-        self.history_ui.mode = RecentSessionsMode::Hidden;
+        self.history_ui.show(RecentSessionsMode::Hidden);
 
         self.branch.prepare_prompt(draft, completion.prompt);
 
@@ -711,7 +712,7 @@ impl AgentPane {
                 );
             }
             update @ (BranchUpdate::CreateFork(_) | BranchUpdate::StartSession(_)) => {
-                self.history_ui.mode = RecentSessionsMode::Loading;
+                self.history_ui.show(RecentSessionsMode::Loading);
 
                 self.palette.reset_discovery();
 
@@ -817,6 +818,7 @@ impl AgentPane {
     fn composer_locked(&self) -> bool {
         self.branch_flow_is_working()
             || self.history_ui.mode == RecentSessionsMode::Loading
+            || self.history_ui.mode == RecentSessionsMode::AwaitingRows
             || self
                 .session
                 .borrow()
@@ -1163,21 +1165,65 @@ impl AgentPane {
             return true;
         }
 
-        if !self.history_ui.open() {
-            self.palette.set_feedback(
-                CommandFeedbackKind::Notice,
-                SharedString::from(t!("agent-composer-no-recent-sessions")),
-                cx,
-            );
+        if self.history_ui.open() {
+            self.palette.feedback = None;
+
+            cx.notify();
 
             return true;
         }
 
-        self.palette.feedback = None;
+        // A harness answers with its list later in the same handshake, so the
+        // snapshot can hold no rows while the list is still on its way. Asking
+        // now would report a folder whose sessions are about to arrive, the
+        // report that a second `/resume` used to be needed to correct.
+        if self.history_ui.data.list_in_flight() {
+            self.history_ui.await_listing();
 
-        cx.notify();
+            self.palette.set_feedback(
+                CommandFeedbackKind::Notice,
+                SharedString::from(t!("agent-composer-listing-recent-sessions")),
+                cx,
+            );
+
+            self.await_listing_timeout(cx);
+
+            cx.notify();
+
+            return true;
+        }
+
+        self.palette.set_feedback(
+            CommandFeedbackKind::Notice,
+            SharedString::from(t!("agent-composer-no-recent-sessions")),
+            cx,
+        );
 
         true
+    }
+
+    /// End a `/resume` wait a listing never answered: the harness holds no
+    /// session for this folder, or holds one it does not list. Without this,
+    /// a wait for an answer that never comes would leave the composer locked.
+    fn await_listing_timeout(&mut self, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(LISTING_WAIT_TIMEOUT).await;
+
+            let _ = this.update(cx, |this, cx| {
+                if !this.history_ui.abandon_awaiting_listing() {
+                    return;
+                }
+
+                this.palette.set_feedback(
+                    CommandFeedbackKind::Notice,
+                    SharedString::from(t!("agent-composer-no-recent-sessions")),
+                    cx,
+                );
+
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     pub(crate) fn palette_model(&mut self, cx: &Context<Self>) -> Option<PaletteModel> {
@@ -1940,7 +1986,7 @@ impl AgentPane {
     ) -> bool {
         match outcome {
             SlashCommandOutcome::Accepted => {
-                self.history_ui.mode = RecentSessionsMode::Hidden;
+                self.history_ui.show(RecentSessionsMode::Hidden);
 
                 self.palette.set_feedback(
                     CommandFeedbackKind::Notice,
@@ -2814,7 +2860,8 @@ impl AgentPane {
         }
 
         self.history_ui.selected = 0;
-        self.history_ui.mode = RecentSessionsMode::Open;
+
+        self.history_ui.show(RecentSessionsMode::Open);
 
         self.palette.set_feedback(
             CommandFeedbackKind::Notice,
@@ -2961,7 +3008,8 @@ impl AgentPane {
                 if replay.replace || self.history_ui.mode == RecentSessionsMode::Loading {
                     self.clear_conversation_presentation(cx);
 
-                    self.history_ui.mode = RecentSessionsMode::Hidden;
+                    self.history_ui.show(RecentSessionsMode::Hidden);
+
                     self.palette.feedback = None;
                 }
 
@@ -2992,7 +3040,8 @@ impl AgentPane {
         if ready.replaced {
             self.clear_conversation_presentation(cx);
 
-            self.history_ui.mode = RecentSessionsMode::Hidden;
+            self.history_ui.show(RecentSessionsMode::Hidden);
+
             self.palette.feedback = None;
         }
 
@@ -3122,7 +3171,7 @@ impl AgentPane {
         let resume_failed = failure.resume_failed;
 
         if resume_failed || self.history_ui.mode == RecentSessionsMode::Loading {
-            self.history_ui.mode = RecentSessionsMode::Open;
+            self.history_ui.show(RecentSessionsMode::Open);
 
             self.palette.set_feedback(
                 CommandFeedbackKind::Error,
@@ -3156,6 +3205,16 @@ impl AgentPane {
     /// appended to them.
     fn on_history(&mut self, sessions: Vec<SessionSummary>, cx: &mut Context<Self>) {
         self.history_ui.data.append_page(sessions);
+
+        // A `/resume` that arrived before this listing opens the list it
+        // asked for, and one that arrived with no rows ends the wait, so the
+        // empty notice replaces the notice about listing.
+        if self
+            .history_ui
+            .resolve_awaiting_listing(self.history_ui.data.sessions.len())
+        {
+            self.palette.feedback = None;
+        }
 
         cx.notify();
     }
@@ -3361,7 +3420,7 @@ impl AgentPane {
         if self.remote.is_some() {
             let step = HistoryStep::Resume(summary.clone());
 
-            self.history_ui.mode = RecentSessionsMode::Hidden;
+            self.history_ui.show(RecentSessionsMode::Hidden);
 
             self.palette.set_feedback(
                 CommandFeedbackKind::Notice,
@@ -3434,7 +3493,8 @@ impl AgentPane {
                 return;
             }
             ResumeStart::Rejected => {
-                self.history_ui.mode = RecentSessionsMode::Open;
+                self.history_ui.show(RecentSessionsMode::Open);
+
                 self.history_ui.selected = index;
 
                 self.palette.set_feedback(
@@ -3453,7 +3513,8 @@ impl AgentPane {
             ResumeStart::ReadReplay(request) => Some(request),
         };
 
-        self.history_ui.mode = RecentSessionsMode::Loading;
+        self.history_ui.show(RecentSessionsMode::Loading);
+
         self.history_ui.selected = index;
 
         self.palette.set_feedback(
@@ -4327,7 +4388,7 @@ impl AgentPane {
 
         // The first message commits this tab to its conversation; the
         // history list is no longer offered.
-        self.history_ui.mode = RecentSessionsMode::Hidden;
+        self.history_ui.show(RecentSessionsMode::Hidden);
 
         if submitted.started_turn {
             self.transcript
@@ -4426,11 +4487,11 @@ impl AgentPane {
         // again and offers the list as one does; the reset above dropped any
         // transcript directory read still in flight, so it is read again.
         if self.launch_deferred() {
-            self.history_ui.mode = RecentSessionsMode::Automatic;
+            self.history_ui.show(RecentSessionsMode::Automatic);
 
             self.load_filesystem_history(cx);
         } else {
-            self.history_ui.mode = RecentSessionsMode::Hidden;
+            self.history_ui.show(RecentSessionsMode::Hidden);
         }
 
         cx.notify();
@@ -5557,6 +5618,11 @@ impl Render for AgentPane {
 /// Cap for a tab title taken from a prompt. The strip truncates whatever it is
 /// given, so this only bounds what the tab stores.
 const TAB_TITLE_CHARS: usize = 60;
+
+/// How long `/resume` waits for a listing whose rows have not arrived. A
+/// harness delivers its session list within the handshake that reports ready,
+/// so a wait past this means no list is coming for this folder.
+const LISTING_WAIT_TIMEOUT: Duration = Duration::from_millis(1_500);
 
 /// The name a composed prompt gives its tab: its first non-empty line. A slash
 /// command names nothing, since it instructs the CLI instead of stating a

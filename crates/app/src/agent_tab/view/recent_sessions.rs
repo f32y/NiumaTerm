@@ -39,6 +39,10 @@ pub(crate) enum RecentSessionsMode {
     Hidden,
     Open,
     Loading,
+    /// `/resume` asked for the list before it held a row. A harness answers
+    /// with an event later in the same handshake, so the command waits here
+    /// instead of reporting a folder with no sessions.
+    AwaitingRows,
 }
 
 impl RecentSessionsMode {
@@ -58,7 +62,7 @@ impl RecentSessionsMode {
             && match self {
                 Self::Automatic => transcript_empty && composer_empty,
                 Self::Open => true,
-                Self::Hidden | Self::Loading => false,
+                Self::Hidden | Self::Loading | Self::AwaitingRows => false,
             }
     }
 
@@ -133,6 +137,19 @@ const HISTORY_ROW_HEIGHT: f32 = 32.0;
 const HISTORY_MAX_HEIGHT: f32 = HISTORY_ROW_HEIGHT * 10.0;
 
 impl SessionHistoryUi {
+    /// Put the list in `mode`. Every change of what the list shows goes
+    /// through here so a wait for rows cannot outlive the surface that was
+    /// waiting for them.
+    pub(crate) fn show(&mut self, mode: RecentSessionsMode) {
+        if !matches!(mode, RecentSessionsMode::AwaitingRows) {
+            self.data.resolve_awaiting_rows();
+        }
+
+        self.mode = mode;
+
+        self.selected = 0;
+    }
+
     /// Rows the list lays out: the reserved placeholders while a count result
     /// waits for its entries, the entries themselves once they arrive.
     pub(crate) fn rows(&self) -> usize {
@@ -148,13 +165,12 @@ impl SessionHistoryUi {
     /// leaving the list hidden, when there is nothing to list.
     pub(crate) fn open(&mut self) -> bool {
         if self.rows() == 0 {
-            self.mode = RecentSessionsMode::Hidden;
+            self.show(RecentSessionsMode::Hidden);
 
             return false;
         }
 
-        self.mode = RecentSessionsMode::Open;
-        self.selected = 0;
+        self.show(RecentSessionsMode::Open);
 
         // A list opened from a command was opened without the pointer, and a
         // strip that was on screen the last time the pointer crossed it has
@@ -175,6 +191,48 @@ impl SessionHistoryUi {
 
         self.pointer_inside = false;
         self.pointer = None;
+    }
+
+    /// Wait for a listing whose rows have not arrived. The command that asked
+    /// for the list fires its own request, so the wait ends on the event that
+    /// brings the rows instead of asking again here.
+    pub(crate) fn await_listing(&mut self) {
+        self.data.await_rows();
+
+        self.show(RecentSessionsMode::AwaitingRows);
+
+        self.pointer_inside = false;
+        self.pointer = None;
+    }
+
+    /// Take a listing that completed while the list was awaited, opening the
+    /// list when it brought rows. Returns whether the list is on screen.
+    pub(crate) fn resolve_awaiting_listing(&mut self, rows: usize) -> bool {
+        if !self.data.resolve_awaiting_rows() {
+            return false;
+        }
+
+        if rows == 0 {
+            self.show(RecentSessionsMode::Hidden);
+
+            return false;
+        }
+
+        self.show(RecentSessionsMode::Open);
+
+        true
+    }
+
+    /// Stop waiting for a listing when the wait itself expired. Returns
+    /// whether the wait was still outstanding.
+    pub(crate) fn abandon_awaiting_listing(&mut self) -> bool {
+        if !self.data.resolve_awaiting_rows() {
+            return false;
+        }
+
+        self.show(RecentSessionsMode::Hidden);
+
+        true
     }
 
     pub(crate) fn publish_filesystem_count(
@@ -360,7 +418,7 @@ impl SessionHistoryUi {
             }
             PaletteControl::Activate => ListControl::Resume(self.selected),
             PaletteControl::Dismiss => {
-                self.mode = RecentSessionsMode::Hidden;
+                self.show(RecentSessionsMode::Hidden);
 
                 ListControl::Changed
             }
@@ -552,7 +610,7 @@ impl SessionHistoryUi {
         .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
         .on_mouse_down_out(cx.listener(|this, _, _, cx| {
             if this.history_ui.mode.dismisses_on_outside_click() {
-                this.history_ui.mode = RecentSessionsMode::Hidden;
+                this.history_ui.show(RecentSessionsMode::Hidden);
 
                 cx.notify();
             }

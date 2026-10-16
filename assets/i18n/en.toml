@@ -809,6 +809,7 @@
 "agent-composer-agent-exited" = "Agent has exited"
 "agent-composer-resume-idle-only" = "/resume is available only while the agent is idle."
 "agent-composer-no-recent-sessions" = "No recent sessions are available for this folder."
+"agent-composer-listing-recent-sessions" = "Listing this folder's recent sessions…"
 "agent-composer-skill-discovery-loading" = "Codex skill discovery is still loading"
 "agent-composer-no-skills" = "No Codex skills are available for this folder"
 "agent-composer-no-matching-skills" = "No matching skills"

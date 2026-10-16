@@ -1460,11 +1460,16 @@ mod command_catalog_cache_tests {
 /// launched for it is ready.
 mod failed_start_tests {
     use std::path::PathBuf;
+    use std::time::SystemTime;
     use std::{env, fs, process};
 
-    use gpui::{AppContext as _, Entity, TestAppContext, VisualTestContext, WindowHandle};
+    use gpui::{
+        AppContext as _, Entity, SharedString, TestAppContext, VisualTestContext, WindowHandle,
+    };
     use nmt_agent::AgentWorkspace;
-    use nmt_agent::chat::{Event, SendOutcome, SlashCommandOutcome, ThreadSettings};
+    use nmt_agent::chat::{
+        Event, SendOutcome, SessionSummary, SlashCommandOutcome, ThreadSettings,
+    };
     use nmt_agent::input_history::AgentInputHistory as InputHistoryService;
     use nmt_agent::session::lifecycle::{StartOutcome, Status};
     use nmt_config::profile::{AgentKind, AgentProfile};
@@ -1597,6 +1602,61 @@ mod failed_start_tests {
 
         let _ = fs::remove_file(history.with_extension("json.lock"));
         let _ = fs::remove_file(history);
+    }
+
+    #[gpui::test]
+    fn resume_before_the_session_list_arrives_opens_it_when_it_does(cx: &mut TestAppContext) {
+        let (pane, window) = open_pane(cx);
+
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+
+        cx.update(|window, cx| {
+            pane.update(cx, |pane, cx| {
+                pane.input
+                    .update(cx, |input, cx| input.set_value("/resume", window, cx));
+
+                pane.send_user_message_now(window, cx);
+
+                // The handshake is delivering its list, so the command waits
+                // instead of reporting the folder empty.
+                assert_eq!(pane.history_ui.mode, RecentSessionsMode::AwaitingRows);
+
+                let expected =
+                    SharedString::from(rust_i18n::t!("agent-composer-listing-recent-sessions"));
+
+                assert_eq!(
+                    pane.palette
+                        .feedback
+                        .as_ref()
+                        .map(|feedback| &feedback.message),
+                    Some(&expected)
+                );
+            });
+        });
+
+        deliver_session_event(
+            &pane,
+            Event::History(vec![SessionSummary {
+                id: "listed".into(),
+                title: "listed".into(),
+                branch: None,
+                cwd: None,
+                last_active: SystemTime::UNIX_EPOCH,
+                snippet: None,
+                origin: None,
+            }]),
+            &cx,
+        );
+
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, _| {
+                // The list opens for the command that asked for it, and the
+                // notice about listing stands down.
+                assert_eq!(pane.history_ui.mode, RecentSessionsMode::Open);
+                assert!(pane.palette.feedback.is_none());
+                assert!(pane.history_ui.is_visible(false, true));
+            });
+        });
     }
 
     #[gpui::test]
