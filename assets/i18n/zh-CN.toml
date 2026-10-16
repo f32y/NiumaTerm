@@ -680,6 +680,7 @@
 "agent-history-days" = "%{count}天"
 "agent-transcript-compacting" = "正在压缩上下文…"
 "agent-transcript-copy" = "复制"
+"agent-transcript-open-containing-folder" = "打开所在文件夹"
 "agent-transcript-fork-from-here" = "从这里分支"
 "agent-transcript-rewind-to-here" = "回退到这里"
 "agent-transcript-show-less" = "收起"

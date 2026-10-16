@@ -1,4 +1,5 @@
 use std::cell::Cell;
+use std::fs;
 use std::path::Path;
 use std::rc::Rc;
 
@@ -7,8 +8,11 @@ use gpui::{
     Render, Styled as _, TestAppContext, Window, div, point, px,
 };
 use gpui_component::modern_menu::ModernMenuExt as _;
+use tempfile::tempdir;
 
-use crate::agent_tab::transcript::render::text_style::{markdown_view, resolve_local_path};
+use crate::agent_tab::transcript::render::text_style::{
+    markdown_view, resolve_local_path, revealable_file,
+};
 
 struct TranscriptLinkTestView {
     row_menu_opens: Rc<Cell<usize>>,
@@ -121,4 +125,33 @@ fn resolves_agent_file_locations() {
         resolve_local_path("https://example.com/file.rs:42", Some(cwd)),
         None
     );
+}
+
+#[test]
+fn offering_a_folder_needs_a_file_that_is_there() {
+    let directory = tempdir().unwrap();
+    let source = directory.path().join("src");
+    let file = source.join("main.rs");
+
+    fs::create_dir(&source).unwrap();
+    fs::write(&file, "fn main() {}\n").unwrap();
+
+    let cwd = directory.path().to_str().unwrap();
+
+    // The file itself is what the reveal call takes, because the platform
+    // selects that entry inside the folder it derives from it.
+    assert_eq!(
+        revealable_file("src/main.rs:12", Some(Path::new(cwd))),
+        Some(file)
+    );
+    assert_eq!(
+        revealable_file("src/missing.rs:12", Some(Path::new(cwd))),
+        None
+    );
+    assert_eq!(
+        revealable_file("https://example.com/main.rs", Some(Path::new(cwd))),
+        None
+    );
+    // A name with no folder in it leaves nothing to reveal it against.
+    assert_eq!(revealable_file("main.rs", Some(directory.path())), None);
 }

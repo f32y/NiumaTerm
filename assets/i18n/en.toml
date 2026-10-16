@@ -681,6 +681,7 @@
 "agent-history-days" = "%{count}d"
 "agent-transcript-compacting" = "Compacting context…"
 "agent-transcript-copy" = "Copy"
+"agent-transcript-open-containing-folder" = "Open containing folder"
 "agent-transcript-fork-from-here" = "Fork from here"
 "agent-transcript-rewind-to-here" = "Rewind to here"
 "agent-transcript-show-less" = "Show less"
