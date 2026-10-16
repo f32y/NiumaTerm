@@ -13,8 +13,9 @@ use tracing::trace;
 use crate::background_task::BackgroundTaskKey;
 use crate::catalog::adapter_commands;
 use crate::chat::{
-    Event, ForkAnchor, MessageImage, QuestionRequest, QuestionResponse, SendOutcome, SessionScope,
-    SkillReference, SlashCommandInfo, SlashCommandOutcome, TeamDecisionRequest, ThreadSettings,
+    Event, ForkAnchor, MessageImage, QuestionAnswer, QuestionRequest, QuestionResponse,
+    SendOutcome, SessionScope, SkillReference, SlashCommandInfo, SlashCommandOutcome,
+    TeamDecisionRequest, ThreadSettings,
 };
 use crate::claude_code::sessions::{RestoredTask, load_task_history};
 use crate::claude_code::stream_json;
@@ -886,7 +887,7 @@ impl Backend {
     pub fn respond_input(
         &mut self,
         id: &str,
-        answers: Option<Vec<Vec<String>>>,
+        answers: Option<Vec<QuestionAnswer>>,
         settings: &ThreadSettings,
     ) -> Result<QuestionResponse, String> {
         match self {

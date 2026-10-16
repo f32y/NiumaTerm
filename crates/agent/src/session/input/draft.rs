@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-use crate::chat::{Question, QuestionInput, QuestionMode, QuestionRequest};
+use crate::chat::{Question, QuestionAnswer, QuestionInput, QuestionMode, QuestionRequest};
 use crate::session::RecoveryIdentity;
 use crate::session::input::{QuestionError, QuestionKey};
 use crate::session::view::{DraftAnswers, DraftView, Since};
@@ -259,20 +259,33 @@ impl QuestionDraft {
         !self.questions.is_empty() && (0..self.questions.len()).all(|index| self.is_answered(index))
     }
 
-    pub fn answers(&self) -> Vec<Vec<String>> {
+    pub fn answers(&self) -> Vec<QuestionAnswer> {
         self.questions
             .iter()
             .zip(&self.selected)
             .enumerate()
             .map(|(index, (question, picks))| {
-                if self.custom[index] || question.options.is_empty() {
-                    vec![self.text[index].trim().to_string()]
-                } else {
+                let labels = || {
                     picks
                         .iter()
                         .filter_map(|index| question.options.get(*index))
                         .map(|option| option.label.clone())
-                        .collect()
+                        .collect::<Vec<_>>()
+                };
+
+                // A typed answer is the one the user chose to give, so it
+                // stands alone: a pick the card displays as unselected is not
+                // part of what they answered with.
+                if self.custom[index] || question.options.is_empty() {
+                    QuestionAnswer {
+                        selected: Vec::new(),
+                        custom: Some(self.text[index].trim().to_string()),
+                    }
+                } else {
+                    QuestionAnswer {
+                        selected: labels(),
+                        custom: None,
+                    }
                 }
             })
             .collect()

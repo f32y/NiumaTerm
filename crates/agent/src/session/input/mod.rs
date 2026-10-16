@@ -84,7 +84,11 @@ impl SessionInput {
             .filter(|draft| draft.key == key)
     }
 
-    pub(crate) fn has_submission(&self) -> bool {
+    /// Whether an answer of this input is still unconfirmed.
+    ///
+    /// The question panel reports this state in the card, because a batch whose
+    /// answer is unconfirmed refuses every control it draws.
+    pub fn has_submission(&self) -> bool {
         self.batches
             .iter()
             .any(|draft| draft.status == QuestionStatus::Submitting)
@@ -165,6 +169,14 @@ impl SessionInput {
         self.batches.len() - 1
     }
 
+    /// Admits one answer to one batch.
+    ///
+    /// A backend confirms one answer at a time, so a batch whose answer is
+    /// unconfirmed holds the whole input: `Submitting` refuses a second answer
+    /// to the same batch, and the test over every batch refuses a different
+    /// question until that confirmation arrives. The question panel reports
+    /// this state in the card, because it is the one condition that leaves a
+    /// question the user is expected to answer with no control that accepts it.
     pub(crate) fn can_submit(&self, runtime: &SessionRuntime, key: QuestionKey) -> bool {
         self.epoch == runtime.epoch()
             && !self.disconnected

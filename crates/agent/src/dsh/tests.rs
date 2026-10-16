@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
-use crate::chat::{Event, Item};
+use crate::chat::{Event, Item, QuestionAnswer, QuestionInput};
 use crate::dsh::api::ApiClient;
 use crate::dsh::history::sessions;
 use crate::dsh::mapping::{EventTracker, map_frame};
@@ -1200,8 +1200,49 @@ fn a_question_request_holds_the_ids_an_answer_is_matched_against() {
     );
     assert!(questions[1].multi_select);
 
+    // The harness answers with the picked labels and, separately, the text the
+    // user typed where the labels did not cover the answer, so the card has to
+    // offer somewhere to type.
+    assert_eq!(questions[0].input, QuestionInput::Text);
+    assert_eq!(questions[1].input, QuestionInput::Text);
+
     // Another tab's question belongs to that tab.
     assert_eq!(question_request(&frame, "session-other"), None);
+}
+
+#[test]
+fn a_typed_question_answer_is_reported_apart_from_the_picked_labels() {
+    use crate::dsh::session::question_answer;
+
+    // A pick is the labels the harness matches against its own options.
+    assert_eq!(
+        question_answer(
+            "q1",
+            &QuestionAnswer {
+                selected: vec!["Postgres".into()],
+                custom: None,
+            }
+        ),
+        json!({ "id": "q1", "selected": ["Postgres"] })
+    );
+
+    // Text the options did not cover is the field the harness reads as the
+    // user's own answer. It is left out, not sent empty, when the user only
+    // picked.
+    assert_eq!(
+        question_answer(
+            "q1",
+            &QuestionAnswer {
+                selected: Vec::new(),
+                custom: Some("neither, use SQLite in WAL mode".into()),
+            }
+        ),
+        json!({
+            "id": "q1",
+            "selected": [],
+            "custom": "neither, use SQLite in WAL mode",
+        })
+    );
 }
 
 #[test]

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::chat::{
-    ForkAnchor, QuestionRequest, QuestionResponse, SendOutcome, SlashCommandInfo,
+    ForkAnchor, QuestionAnswer, QuestionRequest, QuestionResponse, SendOutcome, SlashCommandInfo,
     SlashCommandOutcome,
 };
 use crate::session::team_capabilities::RecoveredTeamTurn;
@@ -13,7 +13,7 @@ use crate::workflow::{WorkflowRefreshRequest, WorkflowSource};
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct InputResponse {
     pub id: String,
-    pub answers: Option<Vec<Vec<String>>>,
+    pub answers: Option<Vec<QuestionAnswer>>,
 }
 
 pub struct TestBackend {

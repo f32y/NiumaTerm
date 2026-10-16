@@ -18,7 +18,7 @@ use std::sync::mpsc::{Receiver, channel};
 use std::time::{Duration, Instant};
 use std::{env, fs};
 
-use nmt_agent::chat::{Event, Item, SendOutcome, SlashCommandOutcome};
+use nmt_agent::chat::{Event, Item, QuestionAnswer, SendOutcome, SlashCommandOutcome};
 use nmt_agent::dsh::{Host, Session};
 use nmt_agent::profile::agent_launch;
 use nmt_agent::{AgentWorkspace, LaunchConfig};
@@ -903,7 +903,13 @@ fn a_question_is_answered_and_the_turn_continues() {
         .unwrap();
 
     session
-        .respond_input(id, Some(vec![vec!["Yes".into()]]))
+        .respond_input(
+            id,
+            Some(vec![QuestionAnswer {
+                selected: vec!["Yes".into()],
+                custom: None,
+            }]),
+        )
         .unwrap();
 
     let (after, ended) = collect_until(&mut session, &frames, Duration::from_secs(60), |event| {

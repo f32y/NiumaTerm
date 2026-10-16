@@ -953,7 +953,7 @@
 "agent-transcript-image-open" = "打开图片"
 "agent-transcript-image-close" = "关闭图片"
 "agent-question-free-text" = "输入你的回答"
-"agent-question-custom" = "自定义回答"
+"agent-question-custom" = "用自己输入的文字回答"
 "agent-question-count" = "待回答问题 · %{count} 组"
 "agent-question-async" = "你回答时，Agent 可以继续工作"
 "agent-question-submitting" = "正在提交回答…"
@@ -972,6 +972,8 @@
 "agent-question-step" = "第 %{index} / %{total} 题"
 "agent-question-back" = "上一题"
 "agent-question-next" = "下一题"
+"agent-question-waiting-submission" = "正在等待上一个回答被确认。"
+"agent-question-waiting-session" = "会话当前无法接收回答。"
 
 # macOS menu bar
 "menu-check-for-updates" = "检查更新..."

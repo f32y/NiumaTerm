@@ -954,7 +954,7 @@
 "agent-transcript-image-open" = "Open image"
 "agent-transcript-image-close" = "Close image"
 "agent-question-free-text" = "Type your answer"
-"agent-question-custom" = "Custom answer"
+"agent-question-custom" = "Answer with your own text"
 "agent-question-count" = "Questions for you · %{count} pending"
 "agent-question-async" = "The agent can continue while you answer"
 "agent-question-submitting" = "Submitting answers…"
@@ -973,6 +973,8 @@
 "agent-question-step" = "Question %{index} of %{total}"
 "agent-question-back" = "Back"
 "agent-question-next" = "Next"
+"agent-question-waiting-submission" = "Waiting for the previous answer to be confirmed."
+"agent-question-waiting-session" = "The session cannot take an answer yet."
 
 # macOS menu bar
 "menu-check-for-updates" = "Check for Updates..."

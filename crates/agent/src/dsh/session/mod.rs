@@ -32,7 +32,7 @@ use crate::background_task::{
     BackgroundTaskSummary, BackgroundTaskTranscriptUpdate,
 };
 use crate::chat::{
-    Event, ForkAnchor, Item, MessageImage, Question, QuestionMode,
+    Event, ForkAnchor, Item, MessageImage, Question, QuestionAnswer, QuestionMode,
     QuestionRequest as ChatQuestionRequest, QuestionResolution, QuestionResponse, QueuedPrompt,
     SendOutcome, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome,
     SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
@@ -262,6 +262,23 @@ fn settled(session_id: &str, command: Value) -> Value {
     json!({ "payload": {
         "type": SETTLED_FRAME, "sessionId": session_id, "command": command,
     } })
+}
+
+/// One answered question in the shape the harness reads it.
+///
+/// The harness keeps the picked labels and the typed answer in separate fields
+/// on purpose: a typed answer replaces the choice of a single-select question
+/// and adds to a multi-select one. An absent typed answer is left out instead
+/// of sent empty, which is the shape the harness documents for an answer
+/// that only picked.
+pub(crate) fn question_answer(id: &str, answer: &QuestionAnswer) -> Value {
+    let mut answered = json!({ "id": id, "selected": answer.selected });
+
+    if let Some(custom) = &answer.custom {
+        answered["custom"] = json!(custom);
+    }
+
+    answered
 }
 
 async fn open_conversation(
@@ -1283,7 +1300,7 @@ impl Session {
     pub fn respond_input(
         &mut self,
         id: &str,
-        answers: Option<Vec<Vec<String>>>,
+        answers: Option<Vec<QuestionAnswer>>,
     ) -> Result<QuestionResponse, String> {
         let request = self
             .pending_questions
@@ -1299,7 +1316,7 @@ impl Session {
                     .ids
                     .iter()
                     .zip(answers)
-                    .map(|(id, selected)| json!({"id": id, "selected": selected}))
+                    .map(|(id, answer)| question_answer(id, &answer))
                     .collect();
 
                 json!({"kind": "result", "value": {"answers": answers}})

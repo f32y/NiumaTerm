@@ -47,7 +47,7 @@ use futures::future::{BoxFuture, FutureExt as _, ready};
 use serde_json::{Value, json};
 
 use crate::LaunchConfig;
-use crate::chat::{QuestionRequest, QuestionResponse, TeamDecisionRequest};
+use crate::chat::{QuestionAnswer, QuestionRequest, QuestionResponse, TeamDecisionRequest};
 use crate::codex::ProviderConfig;
 use crate::codex::app_server::background_tasks::{CodexTasks, ThreadScope, notification_thread_id};
 use crate::codex::app_server::control::{ControlOperation, ControlState, QueryKind};
@@ -1717,7 +1717,7 @@ impl Session {
     pub fn respond_input(
         &mut self,
         id: &str,
-        answers: Option<Vec<Vec<String>>>,
+        answers: Option<Vec<QuestionAnswer>>,
         settings: &ThreadSettings,
     ) -> Result<QuestionResponse, String> {
         respond_input(self, id, answers, settings)

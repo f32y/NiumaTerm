@@ -2,7 +2,7 @@
 use std::thread;
 use std::time::Instant;
 
-use crate::chat::{ContextComposition, Item, QuestionInput, TokenUsageBreakdown};
+use crate::chat::{ContextComposition, Item, QuestionAnswer, QuestionInput, TokenUsageBreakdown};
 use crate::claude_code::stream_json::*;
 use crate::session::input::QuestionDraft;
 use crate::subprocess::InputTicket;
@@ -431,13 +431,25 @@ fn question_ids_reject_stale_answers_and_settle_accepted_responses() {
     }, Event::InputRequested(request)] if id == "old" && request.id == "current"));
     assert!(
         session
-            .respond_input("old", Some(vec![vec!["Yes".into()]]))
+            .respond_input(
+                "old",
+                Some(vec![QuestionAnswer {
+                    selected: vec!["Yes".into()],
+                    custom: None,
+                }])
+            )
             .is_err()
     );
     assert!(session.control.cancel_prompt("old").is_empty());
     assert!(session.respond_input("current", Some(Vec::new())).is_err());
     assert_eq!(
-        session.respond_input("current", Some(vec![vec!["Yes".into()]])),
+        session.respond_input(
+            "current",
+            Some(vec![QuestionAnswer {
+                selected: vec!["Yes".into()],
+                custom: None,
+            }])
+        ),
         Ok(QuestionResponse::Settled)
     );
     assert!(session.control.pending_questions.is_none());
@@ -1540,8 +1552,14 @@ fn answered_questions_merge_into_the_original_tool_input() {
         input,
         &questions,
         vec![
-            vec!["Postgres".to_owned()],
-            vec!["Metrics".to_owned(), "Tracing".to_owned()],
+            QuestionAnswer {
+                selected: vec!["Postgres".to_owned()],
+                custom: None,
+            },
+            QuestionAnswer {
+                selected: vec!["Metrics".to_owned(), "Tracing".to_owned()],
+                custom: None,
+            },
         ],
     );
 
@@ -1599,7 +1617,16 @@ fn unanswered_questions_are_omitted_rather_than_reported_as_empty() {
     let merged = merge_question_answers(
         json!({"questions": []}),
         &questions,
-        vec![vec![], vec!["Tracing".to_owned()]],
+        vec![
+            QuestionAnswer {
+                selected: Vec::new(),
+                custom: None,
+            },
+            QuestionAnswer {
+                selected: vec!["Tracing".to_owned()],
+                custom: None,
+            },
+        ],
     );
 
     let answers = merged["answers"].as_object().expect("answers object");
