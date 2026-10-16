@@ -8,7 +8,7 @@ use std::collections::VecDeque;
 
 use serde::{Deserialize, Serialize};
 
-use crate::chat::{QueuedPrompt, SendOutcome, SkillReference};
+use crate::chat::{PromptPlacement, QueuedPrompt, SendOutcome, SkillReference};
 use crate::session::AgentKind;
 
 /// What a backend does with a prompt submitted while a turn is running.
@@ -93,7 +93,9 @@ impl MessageDelivery {
     ) -> SendOutcome {
         match &outcome {
             SendOutcome::NotReady | SendOutcome::Rejected { .. } => {}
-            SendOutcome::Steered => self.pending.push_back(QueuedPrompt::local(text)),
+            SendOutcome::Steered => self
+                .pending
+                .push_back(QueuedPrompt::local(text, PromptPlacement::Steering)),
             SendOutcome::StartedTurn => {
                 self.begin_turn();
 
@@ -259,6 +261,19 @@ impl MessageDelivery {
     pub(crate) fn removed(&mut self, id: &str) {
         self.pending
             .retain(|prompt| prompt.id.as_deref() != Some(id));
+    }
+
+    /// Mark one prompt as read by the running turn. The provider republishes
+    /// the placement it committed, so this covers only the interval before that
+    /// report arrives; a request it refused changes nothing here.
+    pub(crate) fn promoted(&mut self, id: &str) {
+        if let Some(prompt) = self
+            .pending
+            .iter_mut()
+            .find(|prompt| prompt.id.as_deref() == Some(id))
+        {
+            prompt.placement = PromptPlacement::Steering;
+        }
     }
 
     pub fn reset(&mut self) {

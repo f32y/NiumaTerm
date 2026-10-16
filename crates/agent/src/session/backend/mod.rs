@@ -357,6 +357,19 @@ impl Backend {
         }
     }
 
+    /// Ask the backend to read one waiting prompt at the running turn's next
+    /// step. Answers whether the request could be put, not whether the backend
+    /// accepted it: only a backend that names its pending work can be asked,
+    /// and it reports the placement it committed.
+    pub fn promote_queued_prompt(&mut self, item_id: &str) -> bool {
+        match self {
+            Backend::DeepSeek(session) => session.promote_queued_prompt(item_id),
+            Backend::Codex(_) | Backend::Claude(_) => false,
+            #[cfg(any(test, feature = "test-support"))]
+            Backend::Test(_) => false,
+        }
+    }
+
     /// Ask which prompts this conversation can be branched in front of. The
     /// answer arrives as [`Event::ForkCheckpoints`], so there is nothing to
     /// return here beyond whether the question could be put at all.

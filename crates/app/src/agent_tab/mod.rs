@@ -74,9 +74,10 @@ use nmt_agent::session::branch::{
 use nmt_agent::session::capabilities::AgentCapabilities as _;
 use nmt_agent::session::children::ChildTranscript;
 use nmt_agent::session::command::{
-    AdmitSlashCommand, AgentCommand, AnswerQuestion, ApplyModelSelection, Interrupt, Prompt,
-    PromptImage, RenameConversation, RespondApproval, RunSlashCommand, SelectAgentPreset,
-    SubmitPrompt, SubmitRefusal, Submitted, UpdateSettings, WithdrawQueuedPrompt,
+    AdmitSlashCommand, AgentCommand, AnswerQuestion, ApplyModelSelection, Interrupt,
+    PromoteQueuedPrompt, Prompt, PromptImage, RenameConversation, RespondApproval, RunSlashCommand,
+    SelectAgentPreset, SubmitPrompt, SubmitRefusal, Submitted, UpdateSettings,
+    WithdrawQueuedPrompt,
 };
 use nmt_agent::session::commands::CommandAdmission;
 use nmt_agent::session::controller::{
@@ -143,7 +144,7 @@ use crate::agent_tab::view::blocking_overlay::{
 use crate::agent_tab::view::cache_expiry::cache_expiry_dialog;
 use crate::agent_tab::view::composer_layout::{
     ComposerEnterBehavior, composer_card, composer_controls_row, composer_enter_behavior,
-    composer_input_row, composer_notice_panel, send_button,
+    composer_input_row, composer_notice_panel, send_button, steer_button,
 };
 use crate::agent_tab::view::composer_notices::{
     last_response_mark, multi_root_notice, multi_root_strip, queued_prompts,
@@ -2851,6 +2852,37 @@ impl AgentPane {
         });
     }
 
+    /// Ask the backend to read one waiting prompt at the running turn's next
+    /// step instead of after that turn ends.
+    ///
+    /// The row keeps its place and takes the placement the harness reports. A
+    /// backend that cannot be asked at all reports the notice; a harness that
+    /// refuses the move puts its own reason in the transcript, because that
+    /// refusal concerns the turn and not this tab.
+    pub(crate) fn promote_queued_prompt(&mut self, item_id: &str, cx: &mut Context<Self>) {
+        if !self.binding.is_current() {
+            return;
+        }
+
+        let command = PromoteQueuedPrompt {
+            item_id: item_id.to_owned(),
+        };
+
+        self.dispatch(command, cx, |this, promoted, cx| {
+            if !promoted {
+                this.palette.set_feedback(
+                    CommandFeedbackKind::Error,
+                    t!("agent-session-queued-steer-failed").to_string(),
+                    cx,
+                );
+
+                return;
+            }
+
+            cx.notify();
+        });
+    }
+
     pub(super) fn present_session_effect(&mut self, effect: SessionEffect, cx: &mut Context<Self>) {
         // A pane outliving its session has no effect left to present.
         if self.host.upgrade().is_none() {
@@ -5170,6 +5202,11 @@ impl Render for AgentPane {
         // composer takes no more until it has gone out.
         let input_held = self.send_on_ready;
 
+        // Nothing sends while a branch flow, a conversation load, an update or a
+        // held launch owns the composer. The trailing control stops a running
+        // turn instead, which stays available in every one of these states.
+        let send_blocked = branch_flow_active || session_loading || update_suspended || input_held;
+
         let held = input_held.then(|| {
             held_prompt(
                 self.held_draft.as_ref().map(|draft| draft.text.as_str()),
@@ -5192,6 +5229,11 @@ impl Render for AgentPane {
         // result reserves placeholder rows until the full entries arrive.
         let transcript_empty = self.transcript.read(cx).is_empty();
         let composer_empty = self.input.read(cx).text().len() == 0;
+
+        // Text the composer is holding. A correction written while a turn runs
+        // is the one message that reaches the model before that turn ends, so
+        // it gets a control of its own while there is something to send.
+        let composer_has_text = !composer_empty;
 
         // A side chat starts empty on purpose and cannot switch to another
         // conversation, so it never offers the list.
@@ -5441,15 +5483,29 @@ impl Render for AgentPane {
                                                 // the last thing the eye reaches on its
                                                 // way out of the card. Stop replaces
                                                 // Send in place while a turn runs.
+                                                .children((running && composer_has_text).then(
+                                                    || {
+                                                        // A correction needs its own control
+                                                        // while a turn runs. The trailing
+                                                        // button stops that turn, so without
+                                                        // this one a correction could only be
+                                                        // sent from the keyboard.
+                                                        steer_button("agent-steer", send_blocked)
+                                                            .debug_selector(|| "agent-steer".into())
+                                                            .on_click(cx.listener(
+                                                                |this, _, window, cx| {
+                                                                    this.send_user_message(
+                                                                        window, cx,
+                                                                    )
+                                                                },
+                                                            ))
+                                                    },
+                                                ))
                                                 .child(
                                                     send_button(
                                                         "agent-send",
                                                         running,
-                                                        !running
-                                                            && (branch_flow_active
-                                                                || session_loading
-                                                                || update_suspended
-                                                                || input_held),
+                                                        !running && send_blocked,
                                                     )
                                                     .on_click(cx.listener(
                                                         move |this, _, window, cx| {

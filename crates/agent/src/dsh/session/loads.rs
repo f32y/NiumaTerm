@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use crate::background_task::{
     BackgroundTaskKey, BackgroundTaskLoadState, BackgroundTaskTranscriptUpdate,
 };
-use crate::chat::{Event, Item, QueuedPrompt};
+use crate::chat::{Event, Item, PromptPlacement, QueuedPrompt};
 use crate::dsh::api::{ApiClient, CallError};
 use crate::dsh::events::{RemoteRevision, session_address};
 use crate::dsh::models::ModelDirectory;
@@ -222,6 +222,10 @@ pub(crate) fn queued_prompts(items: &Value) -> Vec<QueuedPrompt> {
             (!text.trim().is_empty()).then(|| QueuedPrompt {
                 id: item["id"].as_str().map(str::to_string),
                 text,
+                placement: match item["placement"].as_str() {
+                    Some("steering") => PromptPlacement::Steering,
+                    _ => PromptPlacement::Queued,
+                },
             })
         })
         .collect()

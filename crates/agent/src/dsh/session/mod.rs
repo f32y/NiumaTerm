@@ -960,7 +960,8 @@ impl Session {
                 steering: true,
                 error,
             }
-            | frames::SettledCommand::QueueRemovalRefused { error } => vec![
+            | frames::SettledCommand::QueueRemovalRefused { error }
+            | frames::SettledCommand::QueuePromotionRefused { error } => vec![
                 Event::QueuedPrompts(self.queued_prompts.clone()),
                 Event::ItemStarted(Item::Error { text: error }),
             ],
@@ -1614,6 +1615,42 @@ impl Session {
                 deliver(settled(
                     &session_id,
                     json!({ "kind": "queueRemovalRefused", "error": error.message() }),
+                ));
+            }
+        });
+
+        true
+    }
+
+    /// Ask the harness to read one waiting prompt at the running turn's next
+    /// step instead of after that turn ends.
+    ///
+    /// The harness accepts this only while a turn runs and while the prompt is
+    /// still waiting for the next turn, so a refusal leaves the prompt exactly
+    /// where it was. The refusal is reported, and the last queue the harness
+    /// published is published again so a row this side moved on request returns
+    /// to the placement the harness kept.
+    pub fn promote_queued_prompt(&mut self, item_id: &str) -> bool {
+        let payload = json!({
+            "sessionId": self.session_id,
+            "itemId": item_id,
+            "action": { "kind": "steer" },
+        });
+
+        let client = self.client.clone();
+        let deliver = Arc::clone(&self.deliver);
+        let session_id = self.session_id.clone();
+
+        self.lane.run(async move {
+            if let Err(error) = client.request("session/updateQueue", payload).await {
+                tracing::warn!(
+                    "deepseek queued prompt could not be moved into the running turn: {}",
+                    error.message()
+                );
+
+                deliver(settled(
+                    &session_id,
+                    json!({ "kind": "queuePromotionRefused", "error": error.message() }),
                 ));
             }
         });

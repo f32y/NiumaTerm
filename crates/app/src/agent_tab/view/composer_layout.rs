@@ -143,3 +143,11 @@ pub(crate) fn send_button(id: impl Into<ElementId>, running: bool, disabled: boo
         .tooltip(label.clone())
         .accessibility_label(label)
 }
+
+/// The control that sends a correction into a turn that is already running,
+/// drawn beside the one that stops it. It shows the send glyph because that is
+/// what a click does, and it has its own label because the trailing button
+/// stops the turn instead of sending while one runs.
+pub(crate) fn steer_button(id: impl Into<ElementId>, disabled: bool) -> Button {
+    send_button(id, false, disabled).tooltip(t!("agent-action-steer-message"))
+}

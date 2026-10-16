@@ -579,15 +579,16 @@ mod queued_prompt_placement_tests {
     use gpui::{AppContext as _, Entity, TestAppContext, VisualTestContext, WindowHandle};
     use nmt_agent::AgentWorkspace;
     use nmt_agent::chat::{
-        Event as SessionEvent, Item as SessionItem, QueuedPrompt, SendOutcome, SlashCommandOutcome,
+        Event as SessionEvent, Item as SessionItem, PromptPlacement, QueuedPrompt, SendOutcome,
+        SlashCommandOutcome,
     };
     use nmt_agent::session::lifecycle::StartOutcome;
     use nmt_config::profile::{AgentKind, AgentProfile};
 
-    use crate::agent_tab::AgentPane;
     use crate::agent_tab::session::{Backend, Status, TestBackend};
     use crate::agent_tab::settings::AgentSettings;
     use crate::agent_tab::tests::deliver_session_event;
+    use crate::agent_tab::{AgentPane, input_history};
 
     fn open_pane(
         cx: &mut TestAppContext,
@@ -839,6 +840,7 @@ mod queued_prompt_placement_tests {
             SessionEvent::QueuedPrompts(vec![QueuedPrompt {
                 id: Some("afd4d197".into()),
                 text: text.clone(),
+                placement: PromptPlacement::Queued,
             }]),
             &cx,
         );
@@ -873,6 +875,159 @@ mod queued_prompt_placement_tests {
                 );
                 assert!(pane.session.borrow().queued_prompts().is_empty());
             })
+        });
+    }
+
+    #[gpui::test]
+    fn a_correction_control_appears_only_while_a_turn_runs_with_text_to_send(
+        cx: &mut TestAppContext,
+    ) {
+        let (pane, window) = open_pane(cx, AgentKind::Codex);
+
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, _| {
+                let epoch = pane.session.borrow_mut().runtime_mut().begin_start();
+
+                assert!(matches!(
+                    pane.session.borrow_mut().runtime_mut().install(
+                        epoch,
+                        Ok(Backend::Test(TestBackend::new(
+                            [],
+                            SlashCommandOutcome::NotReady,
+                            Vec::new(),
+                        )))
+                    ),
+                    StartOutcome::Installed
+                ));
+
+                pane.session.borrow_mut().runtime_mut().ready();
+            });
+        });
+
+        let draw = |cx: &mut VisualTestContext| {
+            cx.run_until_parked();
+
+            cx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+        };
+
+        // Idle with an empty composer: the trailing button is the only control.
+        draw(&mut cx);
+
+        assert!(cx.debug_bounds("agent-steer").is_none());
+
+        // Text written while idle is a message like any other, and the trailing
+        // button already sends it.
+        cx.update(|window, cx| {
+            pane.update(cx, |pane, cx| {
+                pane.input.update(cx, |input, cx| {
+                    input.set_value("stop at the parser", window, cx)
+                });
+            });
+        });
+
+        draw(&mut cx);
+
+        assert!(cx.debug_bounds("agent-steer").is_none());
+
+        // The same text while a turn runs is a correction, and the trailing
+        // button stops that turn instead of sending, so the correction needs a
+        // control of its own.
+        deliver_session_event(&pane, SessionEvent::TurnStarted, &cx);
+
+        draw(&mut cx);
+
+        assert!(cx.debug_bounds("agent-steer").is_some());
+
+        // It goes away again once there is nothing to correct.
+        cx.update(|window, cx| {
+            pane.update(cx, |pane, cx| {
+                pane.input
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+            });
+        });
+
+        draw(&mut cx);
+
+        assert!(cx.debug_bounds("agent-steer").is_none());
+    }
+
+    #[gpui::test]
+    fn clicking_the_correction_control_sends_the_message_into_the_running_turn(
+        cx: &mut TestAppContext,
+    ) {
+        let (pane, window) = open_pane(cx, AgentKind::Codex);
+
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+
+        // Sending records what the composer held. The application installs that
+        // store at startup, and a window opened by a test has to do the same.
+        cx.update(|_, app| input_history::initialize(true, app));
+
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, _| {
+                let epoch = pane.session.borrow_mut().runtime_mut().begin_start();
+
+                assert!(matches!(
+                    pane.session.borrow_mut().runtime_mut().install(
+                        epoch,
+                        Ok(Backend::Test(TestBackend::new(
+                            [SendOutcome::Steered],
+                            SlashCommandOutcome::NotReady,
+                            Vec::new(),
+                        )))
+                    ),
+                    StartOutcome::Installed
+                ));
+
+                pane.session.borrow_mut().runtime_mut().ready();
+            });
+        });
+
+        cx.update(|window, cx| {
+            pane.update(cx, |pane, cx| {
+                pane.input.update(cx, |input, cx| {
+                    input.set_value("stop at the parser", window, cx)
+                });
+            });
+        });
+
+        deliver_session_event(&pane, SessionEvent::TurnStarted, &cx);
+
+        cx.run_until_parked();
+
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+
+        let correction = cx
+            .debug_bounds("agent-steer")
+            .expect("the correction control is drawn while a turn runs");
+
+        cx.simulate_click(correction.center(), Default::default());
+
+        cx.run_until_parked();
+
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, cx| {
+                let waiting = pane.session.borrow().queued_prompts().clone();
+
+                assert_eq!(waiting.len(), 1, "the correction waits on the running turn");
+                assert_eq!(waiting[0].text, "stop at the parser");
+                assert_eq!(
+                    waiting[0].placement,
+                    PromptPlacement::Steering,
+                    "the model reads it at this turn's next step"
+                );
+                assert_eq!(
+                    pane.input.read(cx).text().len(),
+                    0,
+                    "the correction left the composer"
+                );
+            });
         });
     }
 }

@@ -1,5 +1,5 @@
 use gpui_component::input::Enter;
-use nmt_agent::chat::QueuedPrompt;
+use nmt_agent::chat::{PromptPlacement, QueuedPrompt};
 use nmt_agent::session::capabilities::AgentCapabilities as _;
 use nmt_agent::transcript::turns::GenerationSpeed;
 use nmt_agent::{AgentWorkspace, MultiRootAccess};
@@ -14,13 +14,23 @@ use crate::agent_tab::view::composer_notices::{multi_root_notice, queued_message
 use crate::agent_tab::view::composer_status::composer_stats_label;
 
 #[test]
-fn queued_message_label_omits_response_annotation_context() {
+fn waiting_message_labels_omit_response_annotation_context_and_name_their_turn() {
     let submitted = prompt_with_response_annotations("Explain this", &["selected text".into()]);
-    let prompt = QueuedPrompt::local(submitted);
 
     assert_eq!(
-        queued_message_label(&prompt),
+        queued_message_label(&QueuedPrompt::local(
+            submitted.clone(),
+            PromptPlacement::Queued
+        )),
         "Queued message: Explain this"
+    );
+
+    // A correction the running turn reads at its next step makes a different
+    // promise from one that waits for that turn to end, and the row is the only
+    // place the difference shows.
+    assert_eq!(
+        queued_message_label(&QueuedPrompt::local(submitted, PromptPlacement::Steering)),
+        "Read at the next step: Explain this"
     );
 }
 

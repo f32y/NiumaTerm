@@ -239,6 +239,21 @@ impl AgentCommand for WithdrawQueuedPrompt {
 }
 
 #[derive(Serialize, Deserialize)]
+pub struct PromoteQueuedPrompt {
+    pub item_id: String,
+}
+
+impl AgentCommand for PromoteQueuedPrompt {
+    const METHOD: &'static str = "promote_queued_prompt";
+
+    type Outcome = bool;
+
+    fn run(self, controller: &mut SessionController) -> Self::Outcome {
+        controller.promote_queued_prompt(&self.item_id)
+    }
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct RenameConversation {
     pub title: String,
 }
@@ -333,6 +348,7 @@ pub fn run_remote(
         ApplyModelSelection::METHOD => run::<ApplyModelSelection>(params, controller),
         SelectAgentPreset::METHOD => run::<SelectAgentPreset>(params, controller),
         WithdrawQueuedPrompt::METHOD => run::<WithdrawQueuedPrompt>(params, controller),
+        PromoteQueuedPrompt::METHOD => run::<PromoteQueuedPrompt>(params, controller),
         RenameConversation::METHOD => run::<RenameConversation>(params, controller),
         RunSlashCommand::METHOD => run::<RunSlashCommand>(params, controller),
         AdmitSlashCommand::METHOD => run::<AdmitSlashCommand>(params, controller),

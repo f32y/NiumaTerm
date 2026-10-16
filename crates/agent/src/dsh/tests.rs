@@ -1534,7 +1534,7 @@ fn a_result_for_a_call_this_session_never_saw_is_ignored() {
 
 #[test]
 fn a_pending_inbox_snapshot_becomes_the_queued_prompt_rows() {
-    use crate::chat::QueuedPrompt;
+    use crate::chat::{PromptPlacement, QueuedPrompt};
     use crate::dsh::session::queued_prompts;
 
     let items = json!([
@@ -1560,16 +1560,20 @@ fn a_pending_inbox_snapshot_becomes_the_queued_prompt_rows() {
         },
     ]);
 
+    // The placement is what tells the user which turn reads a waiting message,
+    // so the row keeps it instead of dropping it here.
     assert_eq!(
         queued_prompts(&items),
         vec![
             QueuedPrompt {
                 id: Some("msg-1".into()),
                 text: "and then run the tests".into(),
+                placement: PromptPlacement::Queued,
             },
             QueuedPrompt {
                 id: Some("msg-2".into()),
                 text: "wait, stop at the parser".into(),
+                placement: PromptPlacement::Steering,
             },
         ]
     );
