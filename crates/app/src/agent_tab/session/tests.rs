@@ -1615,6 +1615,8 @@ mod failed_start_tests {
                 pane.input
                     .update(cx, |input, cx| input.set_value("/resume", window, cx));
 
+                pane.history_ui.data.begin_filesystem_history(None);
+
                 pane.send_user_message_now(window, cx);
 
                 // The handshake is delivering its list, so the command waits
@@ -1797,6 +1799,77 @@ mod failed_start_tests {
                     Some("pinned-model")
                 );
                 assert_eq!(session.controls.settings.effort.as_deref(), Some("high"));
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn disk_history_completes_resume_wait_without_a_protocol_event(cx: &mut TestAppContext) {
+        let (pane, window) = open_pane(cx);
+
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, cx| {
+                let request = pane.history_ui.data.begin_filesystem_history(None);
+
+                pane.history_ui.await_listing();
+                pane.history_ui.publish_filesystem_count(&request, None, 1);
+
+                pane.history_ui.publish_filesystem_rows(
+                    &request,
+                    None,
+                    vec![SessionSummary {
+                        id: "disk".into(),
+                        title: "disk".into(),
+                        branch: None,
+                        cwd: None,
+                        last_active: SystemTime::UNIX_EPOCH,
+                        snippet: None,
+                        origin: None,
+                    }],
+                );
+
+                pane.finish_history_listing(cx);
+
+                assert_eq!(pane.history_ui.mode, RecentSessionsMode::Open);
+                assert!(pane.palette.feedback.is_none());
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn resume_history_waits_for_remaining_sources_after_an_empty_result(cx: &mut TestAppContext) {
+        let (pane, window) = open_pane(cx);
+
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, cx| {
+                let request = pane.history_ui.data.begin_other_agents(2);
+
+                pane.history_ui.await_listing();
+                pane.history_ui.data.finish_other_agent(&request);
+                pane.on_history(Vec::new(), cx);
+
+                assert_eq!(pane.history_ui.mode, RecentSessionsMode::AwaitingRows);
+
+                pane.history_ui.data.finish_other_agent(&request);
+                pane.finish_history_listing(cx);
+
+                assert_eq!(pane.history_ui.mode, RecentSessionsMode::Hidden);
+
+                let expected =
+                    SharedString::from(rust_i18n::t!("agent-composer-no-recent-sessions"));
+
+                assert_eq!(
+                    pane.palette
+                        .feedback
+                        .as_ref()
+                        .map(|feedback| &feedback.message),
+                    Some(&expected)
+                );
+                assert!(!pane.history_ui.data.list_in_flight());
             });
         });
     }

@@ -28,7 +28,7 @@ const LISTING_HOST_LINGER: Duration = Duration::from_secs(5 * 60);
 /// or for every directory when `cwd` is `None`. A harness that is missing or
 /// fails to start lists nothing: its absence is not an error for a list of
 /// other agents' work.
-pub(crate) async fn list_sessions(launch: &LaunchConfig, cwd: Option<&str>) -> Vec<SessionSummary> {
+pub async fn list_sessions(launch: &LaunchConfig, cwd: Option<&str>) -> Vec<SessionSummary> {
     let host = match shared(launch).await {
         Ok(host) => host,
         Err(error) => {

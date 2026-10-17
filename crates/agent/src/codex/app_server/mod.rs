@@ -698,6 +698,10 @@ impl Session {
         Ok(())
     }
 
+    pub fn history_in_flight(&self) -> bool {
+        self.control.history_in_flight()
+    }
+
     /// Ask for the first page of session history over `scope`. Replaces
     /// whatever an earlier scope was paging through, so the caller drops the
     /// rows it already holds.

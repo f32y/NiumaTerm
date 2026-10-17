@@ -1177,7 +1177,7 @@ impl AgentPane {
         // snapshot can hold no rows while the list is still on its way. Asking
         // now would report a folder whose sessions are about to arrive, the
         // report that a second `/resume` used to be needed to correct.
-        if self.history_ui.data.list_in_flight() {
+        if self.history_listing_in_flight() {
             self.history_ui.await_listing();
 
             self.palette.set_feedback(
@@ -1210,6 +1210,12 @@ impl AgentPane {
             cx.background_executor().timer(LISTING_WAIT_TIMEOUT).await;
 
             let _ = this.update(cx, |this, cx| {
+                if this.history_ui.data.is_awaiting_rows() && this.history_listing_in_flight() {
+                    this.await_listing_timeout(cx);
+
+                    return;
+                }
+
                 if !this.history_ui.abandon_awaiting_listing() {
                     return;
                 }
@@ -3206,14 +3212,40 @@ impl AgentPane {
     fn on_history(&mut self, sessions: Vec<SessionSummary>, cx: &mut Context<Self>) {
         self.history_ui.data.append_page(sessions);
 
-        // A `/resume` that arrived before this listing opens the list it
-        // asked for, and one that arrived with no rows ends the wait, so the
-        // empty notice replaces the notice about listing.
-        if self
-            .history_ui
-            .resolve_awaiting_listing(self.history_ui.data.sessions.len())
-        {
+        self.finish_history_listing(cx);
+
+        cx.notify();
+    }
+
+    fn history_listing_in_flight(&self) -> bool {
+        self.history_ui.data.list_in_flight()
+            || self
+                .session
+                .borrow()
+                .runtime()
+                .backend()
+                .is_some_and(|backend| backend.history_in_flight())
+    }
+
+    fn finish_history_listing(&mut self, cx: &mut Context<Self>) {
+        if !self.history_ui.data.is_awaiting_rows() {
+            return;
+        }
+
+        let rows = self.history_ui.data.sessions.len();
+
+        if rows == 0 && self.history_listing_in_flight() {
+            return;
+        }
+
+        if self.history_ui.resolve_awaiting_listing(rows) {
             self.palette.feedback = None;
+        } else {
+            self.palette.set_feedback(
+                CommandFeedbackKind::Notice,
+                SharedString::from(t!("agent-composer-no-recent-sessions")),
+                cx,
+            );
         }
 
         cx.notify();
@@ -3292,6 +3324,15 @@ impl AgentPane {
         };
 
         let session_kind = session_host.read(cx).kind;
+
+        if session_kind == AgentKind::DeepSeek {
+            let launch = agent_launch(session_host.read(cx).profile());
+            let cwd = self.cwd(cx);
+
+            self.history_ui.load_deepseek_history(launch, cwd, cx);
+
+            return;
+        }
 
         if !session_kind.caps().filesystem_session_history {
             return;
@@ -5619,9 +5660,8 @@ impl Render for AgentPane {
 /// given, so this only bounds what the tab stores.
 const TAB_TITLE_CHARS: usize = 60;
 
-/// How long `/resume` waits for a listing whose rows have not arrived. A
-/// harness delivers its session list within the handshake that reports ready,
-/// so a wait past this means no list is coming for this folder.
+/// How often a pending `/resume` checks whether a listing ended without a
+/// completion event. Active reads continue waiting, including slow disk reads.
 const LISTING_WAIT_TIMEOUT: Duration = Duration::from_millis(1_500);
 
 /// The name a composed prompt gives its tab: its first non-empty line. A slash

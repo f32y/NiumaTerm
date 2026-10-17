@@ -54,6 +54,7 @@ pub struct SessionHistory {
     other_agents: Vec<SessionSummary>,
 
     other_agents_request: Option<OtherAgentsRequest>,
+    other_agents_remaining: usize,
 
     /// Show only the tab's own agent's rows, even where other agents' rows
     /// were listed.
@@ -103,15 +104,12 @@ impl SessionHistory {
     pub fn list_in_flight(&self) -> bool {
         self.filesystem_request.is_some()
             || self.pending.is_some()
-            || self.other_agents_request.is_some()
+            || self.other_agents_remaining > 0
     }
 
-    /// Record that the list was asked for before it held any rows, and drop
-    /// what an earlier listing left so the answer is not mixed with it.
+    /// Wait for rows without cancelling the requests already reading them.
     pub fn await_rows(&mut self) {
         self.awaiting_rows = true;
-
-        self.clear_rows();
     }
 
     /// Whether the list is wanted and still has no rows to show.
@@ -245,12 +243,15 @@ impl SessionHistory {
         self.other_agents.clear();
 
         self.other_agents_request = None;
+        self.other_agents_remaining = 0;
         self.showing_search = false;
     }
 
     /// Start a listing of other agents' conversations under the current
     /// scope, retiring any listing still running and the rows it placed.
-    pub fn begin_other_agents(&mut self) -> OtherAgentsRequest {
+    pub fn begin_other_agents(&mut self, sources: usize) -> OtherAgentsRequest {
+        self.other_agents_remaining = sources;
+
         self.other_agents.clear();
 
         self.merge();
@@ -268,6 +269,18 @@ impl SessionHistory {
         self.other_agents_request = Some(request.clone());
 
         request
+    }
+
+    /// Complete one source, including an empty or failed read. Requests for
+    /// an earlier scope cannot complete a newer listing.
+    pub fn finish_other_agent(&mut self, request: &OtherAgentsRequest) -> bool {
+        if self.other_agents_request.as_ref() != Some(request) || self.scope != request.scope {
+            return false;
+        }
+
+        self.other_agents_remaining = self.other_agents_remaining.saturating_sub(1);
+
+        true
     }
 
     /// Add the rows one source of `request` listed, unless the list has moved

@@ -18,6 +18,7 @@ use nmt_agent::session::history::{
     CountPublication, HistorySource, SessionHistory, count_scoped_sessions, list_scoped_sessions,
     list_source,
 };
+use nmt_agent::{LaunchConfig, dsh};
 use rust_i18n::t;
 
 use crate::agent_tab::commands::move_palette_selection;
@@ -318,7 +319,7 @@ impl SessionHistoryUi {
         cwd: Option<String>,
         cx: &mut Context<AgentPane>,
     ) {
-        let request = self.data.begin_other_agents();
+        let request = self.data.begin_other_agents(sources.len());
         let scope = self.data.scope;
 
         for source in sources {
@@ -326,20 +327,18 @@ impl SessionHistoryUi {
             let request = request.clone();
 
             cx.spawn(async move |this, cx| {
-                let Ok(rows) = listing.await else {
-                    return;
-                };
-
-                if rows.is_empty() {
-                    return;
-                }
+                let rows = listing.await.unwrap_or_default();
 
                 let _ = this.update(cx, |this, cx| {
-                    if this.history_ui.data.publish_other_agents(&request, rows) {
-                        this.history_ui.clamp_selection();
-
-                        cx.notify();
+                    if !this.history_ui.data.finish_other_agent(&request) {
+                        return;
                     }
+
+                    this.history_ui.data.publish_other_agents(&request, rows);
+                    this.history_ui.clamp_selection();
+                    this.finish_history_listing(cx);
+
+                    cx.notify();
                 });
             })
             .detach();
@@ -383,6 +382,40 @@ impl SessionHistoryUi {
 
         cx.spawn(async move |this, cx| load_history_passes(this, request, scope, cwd, cx).await)
             .detach();
+    }
+
+    /// Query the shared host without creating a conversation. A blank tab
+    /// defers its backend launch until a prompt or a history selection.
+    pub(crate) fn load_deepseek_history(
+        &mut self,
+        launch: LaunchConfig,
+        cwd: Option<String>,
+        cx: &mut Context<AgentPane>,
+    ) {
+        let request = self.data.begin_filesystem_history(cwd.clone());
+
+        let listing = nmt_platform::runtime()
+            .spawn(async move { dsh::list_sessions(&launch, cwd.as_deref()).await });
+
+        cx.notify();
+
+        cx.spawn(async move |this, cx| {
+            let rows = listing.await.unwrap_or_default();
+
+            let _ = this.update(cx, |this, cx| {
+                let cwd = this.cwd(cx);
+
+                if this
+                    .history_ui
+                    .publish_filesystem_rows(&request, cwd.as_deref(), rows)
+                {
+                    this.finish_history_listing(cx);
+
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
     }
 
     /// Answer a navigation key while the list is on screen. The composer has
@@ -785,6 +818,8 @@ async fn load_history_passes(
             {
                 CountPublication::Stale => false,
                 CountPublication::Empty => {
+                    this.finish_history_listing(cx);
+
                     cx.notify();
 
                     false
@@ -822,6 +857,8 @@ async fn load_history_passes(
             .history_ui
             .publish_filesystem_rows(&request, cwd.as_deref(), sessions)
         {
+            this.finish_history_listing(cx);
+
             cx.notify();
         }
     });

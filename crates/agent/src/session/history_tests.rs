@@ -38,7 +38,7 @@ fn other_agents_fall_in_among_own_rows_by_recency() {
 
     history.append_page(vec![row("own-new", 30, None), row("own-old", 10, None)]);
 
-    let request = history.begin_other_agents();
+    let request = history.begin_other_agents(1);
 
     assert!(history.publish_other_agents(
         &request,
@@ -67,8 +67,8 @@ fn other_agents_fall_in_among_own_rows_by_recency() {
 fn a_replaced_listing_cannot_add_rows() {
     let mut history = SessionHistory::default();
 
-    let old = history.begin_other_agents();
-    let new = history.begin_other_agents();
+    let old = history.begin_other_agents(1);
+    let new = history.begin_other_agents(1);
 
     assert!(!history.publish_other_agents(&old, vec![row("late", 5, None)]));
     assert!(history.publish_other_agents(&new, vec![row("fresh", 5, None)]));
@@ -88,7 +88,7 @@ fn a_replaced_listing_cannot_add_rows() {
 fn own_rows_arriving_later_keep_other_agents_rows() {
     let mut history = SessionHistory::default();
 
-    let request = history.begin_other_agents();
+    let request = history.begin_other_agents(1);
 
     history.publish_other_agents(
         &request,
@@ -127,7 +127,7 @@ fn a_listing_in_flight_is_reported_until_it_completes() {
 
     assert!(!history.list_in_flight());
 
-    let _ = history.begin_other_agents();
+    let _ = history.begin_other_agents(1);
 
     assert!(history.list_in_flight());
 }
@@ -138,12 +138,10 @@ fn a_wait_for_rows_ends_when_its_listing_completes() {
 
     history.append_page(vec![row("stale", 30, None)]);
 
-    // `/resume` before any rows arrived: the wait drops what an earlier
-    // listing left, so the answer is not mixed with it.
     history.await_rows();
 
     assert!(history.is_awaiting_rows());
-    assert!(history.sessions.is_empty());
+    assert_eq!(ids(&history), ["stale"]);
 
     assert!(history.resolve_awaiting_rows());
     assert!(!history.is_awaiting_rows());
@@ -210,4 +208,39 @@ fn each_record_store_is_listed_once_and_the_own_one_not_at_all() {
         from_codex,
         ["Claude", "Codex proxy", "Codex work", "DeepSeek"]
     );
+}
+
+#[test]
+fn awaiting_rows_preserves_pending_sources_until_all_complete() {
+    let mut history = SessionHistory::default();
+
+    let request = history.begin_other_agents(2);
+
+    history.await_rows();
+
+    assert!(history.finish_other_agent(&request));
+    assert!(history.list_in_flight());
+    assert!(history.publish_other_agents(
+        &request,
+        vec![row("codex", 20, Some((AgentKind::Codex, "Codex")))]
+    ));
+    assert_eq!(ids(&history), ["codex"]);
+    assert!(history.finish_other_agent(&request));
+    assert!(!history.list_in_flight());
+
+    let newer = history.begin_other_agents(1);
+
+    assert!(!history.finish_other_agent(&request));
+    assert!(history.list_in_flight());
+    assert!(history.finish_other_agent(&newer));
+    assert!(!history.list_in_flight());
+}
+
+#[test]
+fn no_other_sources_does_not_start_a_pending_read() {
+    let mut history = SessionHistory::default();
+
+    history.begin_other_agents(0);
+
+    assert!(!history.list_in_flight());
 }

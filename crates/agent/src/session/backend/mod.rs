@@ -589,6 +589,16 @@ impl Backend {
         }
     }
 
+    pub fn history_in_flight(&self) -> bool {
+        match self {
+            Backend::Codex(session) => session.history_in_flight(),
+            Backend::DeepSeek(session) => session.history_in_flight(),
+            Backend::Claude(_) => false,
+            #[cfg(any(test, feature = "test-support"))]
+            Backend::Test(_) => false,
+        }
+    }
+
     /// Ask for recent sessions over `scope`, replacing whatever an earlier
     /// scope produced. Only Codex lists over the protocol, and its server
     /// takes the scope as a filter it either applies or omits; Claude Code

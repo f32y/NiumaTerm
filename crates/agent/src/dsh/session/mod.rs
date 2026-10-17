@@ -86,6 +86,8 @@ pub struct Session {
     /// turn is running.
     running: bool,
 
+    history_pending: bool,
+
     /// The Harness's latest whole-inbox snapshot. Closing removes its entries
     /// before cancelling the current turn, and a refused change to the inbox
     /// republishes it so the composer shows what is still pending.
@@ -337,6 +339,10 @@ pub(super) async fn open_new_conversation(
 }
 
 impl Session {
+    pub fn history_in_flight(&self) -> bool {
+        self.history_pending
+    }
+
     /// Commands this adapter serves itself, beside the ones the harness's own
     /// registry reports.
     ///
@@ -460,6 +466,7 @@ impl Session {
             deliver,
             profile,
             running: false,
+            history_pending: true,
             queued_prompts: Vec::new(),
             agent_preset: None,
             lane: CommandLane::new(),
@@ -545,6 +552,8 @@ impl Session {
 
         self.workflows = WorkflowTracker::default();
 
+        self.history_pending = true;
+
         load_conversation(
             &self.client,
             &opened,
@@ -566,6 +575,10 @@ impl Session {
     /// Map one delivered frame into transcript events. Frames for other
     /// sessions and types this build does not know produce nothing.
     pub fn process(&mut self, frame: Value) -> Vec<Event> {
+        if frame["payload"]["type"] == HISTORY_FRAME {
+            self.history_pending = false;
+        }
+
         if let Some(events) = failed_read_events(&frame["payload"], &self.session_id) {
             return events;
         }
@@ -794,6 +807,7 @@ impl Session {
     /// tab is told to replace the host instead of sending into a closed port.
     fn on_host_exited(&mut self, message: Option<&str>) -> Vec<Event> {
         self.running = false;
+        self.history_pending = false;
 
         let mut events = self.on_connection_reset();
 
