@@ -9,11 +9,12 @@ use vte::Parser;
 
 use crate::agent_tab::transcript::code::CodeView;
 use crate::agent_tab::transcript::code::ansi::{AnsiColor, AnsiText};
+use crate::agent_tab::transcript::code::parser::CodeParser;
 use crate::agent_tab::transcript::code::prepared::PreparedCode;
 use crate::agent_tab::transcript::code::source::CodeSource;
 use crate::agent_tab::transcript::{detect_output_language, entry_copy_text};
 
-fn register_languages() {
+pub(super) fn register_languages() {
     static INIT: Once = Once::new();
 
     INIT.call_once(|| {
@@ -61,11 +62,11 @@ fn command(command: &str, output: &str) -> Item {
 fn prepare(item: &Item) -> PreparedCode {
     register_languages();
 
-    let mut result = PreparedCode::new(&CodeSource::from_item(item).unwrap());
+    let mut result = CodeParser::new(CodeSource::from_item(item).unwrap());
 
-    result.parse_syntax();
+    result.prepared.parse_syntax();
 
-    result
+    result.prepared
 }
 
 fn styles(
@@ -87,14 +88,17 @@ fn color_at(styles: &[(Range<usize>, HighlightStyle)], at: usize) -> Option<Hsla
 fn bash_command_and_json_output_receive_independent_highlights() {
     let prepared = prepare(&command("echo \"$HOME\"", "{\"count\":42}"));
 
-    assert_eq!(prepared.text.as_str(), "$ echo \"$HOME\"\n\n{\"count\":42}");
+    assert_eq!(
+        prepared.text.to_string(),
+        "$ echo \"$HOME\"\n\n{\"count\":42}"
+    );
 
     let theme = HighlightTheme::default_dark();
     let spans = styles(&prepared, 0..prepared.text.len(), &theme);
 
-    assert!(color_at(&spans, prepared.text.find("HOME").unwrap()).is_some());
+    assert!(color_at(&spans, prepared.text.to_string().find("HOME").unwrap()).is_some());
     assert_eq!(
-        color_at(&spans, prepared.text.find("42").unwrap()),
+        color_at(&spans, prepared.text.to_string().find("42").unwrap()),
         theme.style("number").unwrap().color
     );
 }
@@ -110,7 +114,7 @@ fn powershell_script_arguments_are_parsed_inside_the_launcher_quotes() {
         let spans = styles(&prepared, 0..prepared.text.len(), &theme);
 
         assert_eq!(
-            color_at(&spans, prepared.text.find("hello").unwrap()),
+            color_at(&spans, prepared.text.to_string().find("hello").unwrap()),
             theme.style("string").unwrap().color,
             "{source}"
         );
@@ -131,7 +135,7 @@ fn literal_file_reads_color_source_but_transformed_commands_do_not_guess() {
             &HighlightTheme::default_dark(),
         );
 
-        assert!(color_at(&spans, prepared.text.find("fn main").unwrap()).is_some());
+        assert!(color_at(&spans, prepared.text.to_string().find("fn main").unwrap()).is_some());
     }
 
     for source in [
@@ -160,7 +164,7 @@ fn literal_file_reads_color_source_but_transformed_commands_do_not_guess() {
 
     let prepared = prepare(&item);
 
-    assert_eq!(prepared.text.as_str(), "fn main() {}\n");
+    assert_eq!(prepared.text.to_string(), "fn main() {}\n");
     assert!(
         color_at(
             &styles(
@@ -200,8 +204,8 @@ fn output_detection_accepts_streaming_json_and_unified_diffs_without_coloring_lo
         &HighlightTheme::default_dark(),
     );
 
-    let removed = color_at(&spans, prepared.text.find("-old").unwrap());
-    let added = color_at(&spans, prepared.text.find("+new").unwrap());
+    let removed = color_at(&spans, prepared.text.to_string().find("-old").unwrap());
+    let added = color_at(&spans, prepared.text.to_string().find("+new").unwrap());
 
     assert!(removed.is_some() && added.is_some());
     assert_ne!(removed, added);
@@ -265,10 +269,10 @@ fn ansi_color_overrides_syntax_and_copy_contains_only_displayed_text() {
     );
 
     assert_eq!(
-        color_at(&spans, prepared.text.find("42").unwrap()),
+        color_at(&spans, prepared.text.to_string().find("42").unwrap()),
         Some(rgb(0x0c2238).into())
     );
-    assert_eq!(entry_copy_text(&item), prepared.text.as_str());
+    assert_eq!(entry_copy_text(&item), prepared.text.to_string());
 }
 
 #[test]
@@ -282,13 +286,14 @@ fn virtual_rows_keep_highlights_at_distant_offsets_and_remap_theme_colors() {
 
     assert!(prepared.virtualized);
 
-    let at = prepared.text.rfind("900").unwrap();
+    let at = prepared.text.to_string().rfind("900").unwrap();
 
     let row = prepared
         .segments
         .iter()
-        .find(|range| range.contains(&at))
+        .find(|row| row.range.contains(&at))
         .unwrap()
+        .range
         .clone();
 
     let dark = styles(&prepared, row.clone(), &HighlightTheme::default_dark());
@@ -335,7 +340,7 @@ fn latest_stream_revision_replaces_same_length_content_and_finishes_pending_ansi
 
     view.read_with(cx, |view, _| {
         assert_eq!(
-            view.prepared.as_ref().unwrap().text.as_str(),
+            view.prepared.as_ref().unwrap().text.to_string(),
             "$ echo\n\nnew red"
         );
         assert!(view.parse_task.is_none());

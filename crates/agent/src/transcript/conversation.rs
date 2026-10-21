@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
+use smallvec::{SmallVec, smallvec};
 use uuid::Uuid;
 
 use crate::chat::{ContextComposition, ContextWindowUsage, Item, ReplayTurn, SessionStats};
@@ -56,11 +57,23 @@ pub struct ConversationState {
     changes: VecDeque<ContentChange>,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct ContentChange {
     pub revision: u64,
     pub first: usize,
     pub reply: Option<(usize, usize)>,
+
+    /// Text updates do not invalidate cached output for neighbouring entries.
+    pub entries: SmallVec<[(usize, EntryChange); 1]>,
+
+    /// Unknown mutations and expired history require reading current content.
+    pub reset_from: Option<usize>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EntryChange {
+    Append { previous_bytes: usize },
+    Replace,
 }
 
 impl ConversationState {
@@ -79,7 +92,7 @@ impl ConversationState {
         if let Some(metadata) = self.content.last_metadata_mut() {
             metadata.images = images;
 
-            self.changed(self.content.entries().len().saturating_sub(1), None);
+            self.presentation_changed(self.content.entries().len().saturating_sub(1));
         }
     }
 
@@ -104,6 +117,8 @@ impl ConversationState {
                 revision: self.revision,
                 first: 0,
                 reply: None,
+                entries: SmallVec::new(),
+                reset_from: Some(0),
             });
         }
 
@@ -111,6 +126,8 @@ impl ConversationState {
             revision: self.revision,
             first: self.content.entries().len(),
             reply: None,
+            entries: SmallVec::new(),
+            reset_from: None,
         };
 
         for next in self
@@ -123,12 +140,50 @@ impl ConversationState {
             if next.reply.is_some() {
                 change.reply = next.reply;
             }
+
+            if let Some(first) = next.reset_from {
+                change.reset_from = Some(change.reset_from.map_or(first, |old| old.min(first)));
+            }
+
+            for &(index, update) in &next.entries {
+                if let Some((_, previous)) = change.entries.iter_mut().find(|(i, _)| *i == index) {
+                    *previous = match (*previous, update) {
+                        (
+                            EntryChange::Append {
+                                previous_bytes: old,
+                            },
+                            EntryChange::Append {
+                                previous_bytes: new,
+                            },
+                        ) => EntryChange::Append {
+                            previous_bytes: old.min(new),
+                        },
+                        _ => EntryChange::Replace,
+                    };
+                } else {
+                    change.entries.push((index, update));
+                }
+            }
         }
 
         Some(change)
     }
 
     pub fn changed(&mut self, first: usize, reply: Option<(usize, usize)>) {
+        self.record_change(first, reply, SmallVec::new(), Some(first));
+    }
+
+    fn presentation_changed(&mut self, first: usize) {
+        self.record_change(first, None, SmallVec::new(), None);
+    }
+
+    fn record_change(
+        &mut self,
+        first: usize,
+        reply: Option<(usize, usize)>,
+        entries: SmallVec<[(usize, EntryChange); 1]>,
+        reset_from: Option<usize>,
+    ) {
         self.revision += 1;
 
         if self.changes.len() == 64 {
@@ -139,13 +194,15 @@ impl ConversationState {
             revision: self.revision,
             first,
             reply,
+            entries,
+            reset_from,
         });
     }
 
     pub fn append(&mut self, entry: TranscriptEntry<EntryMetadata>) -> usize {
         let index = self.content.append(entry);
 
-        self.changed(index.saturating_sub(1), None);
+        self.presentation_changed(index.saturating_sub(1));
 
         index
     }
@@ -188,12 +245,22 @@ impl ConversationState {
             replay.output_tokens,
         );
 
-        self.changed(first.saturating_sub(1), None);
+        self.presentation_changed(first.saturating_sub(1));
     }
 
     pub fn merge_completed(&mut self, item: &Item) {
         if let Some(index) = self.content.merge_completed(item) {
-            self.changed(index, None);
+            match item {
+                Item::CommandExecution {
+                    aggregated_output: None,
+                    ..
+                }
+                | Item::FileChange { diff: None, .. }
+                | Item::Other { output: None, .. } => self.presentation_changed(index),
+                _ => {
+                    self.record_change(index, None, smallvec![(index, EntryChange::Replace)], None)
+                }
+            }
         }
     }
 
@@ -206,7 +273,17 @@ impl ConversationState {
         let update = self.content.append_delta(item_id, delta, field)?;
         let reply = (field == TextField::Reply).then_some((update.index, update.previous_bytes));
 
-        self.changed(update.index, reply);
+        self.record_change(
+            update.index,
+            reply,
+            smallvec![(
+                update.index,
+                EntryChange::Append {
+                    previous_bytes: update.previous_bytes
+                }
+            )],
+            None,
+        );
 
         Some(update)
     }
@@ -218,7 +295,7 @@ impl ConversationState {
 
         self.live.start();
 
-        self.changed(self.content.entries().len(), None);
+        self.presentation_changed(self.content.entries().len());
     }
 
     pub(crate) fn visible_output(&mut self) {
@@ -248,7 +325,7 @@ impl ConversationState {
             .position(|entry| entry.turn == turn)
             .unwrap_or(self.content.entries().len());
 
-        self.changed(first, None);
+        self.presentation_changed(first);
     }
 
     /// Replace every entry from `from` on, as a replica following another

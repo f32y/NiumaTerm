@@ -8,6 +8,7 @@ use gpui::{
     Render, Styled as _, TestAppContext, Window, div, point, px,
 };
 use gpui_component::modern_menu::ModernMenuExt as _;
+use gpui_component::text::TextView;
 use tempfile::tempdir;
 
 use crate::agent_tab::transcript::render::text_style::{
@@ -31,7 +32,10 @@ impl Render for TranscriptLinkTestView {
 
                 menu
             })
-            .child(markdown_view("reply-text", self.markdown, None))
+            .child(markdown_view(
+                TextView::markdown("reply-text", self.markdown),
+                None,
+            ))
     }
 }
 

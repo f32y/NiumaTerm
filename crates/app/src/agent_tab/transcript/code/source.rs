@@ -3,7 +3,9 @@ use std::ops::Range;
 
 use nmt_agent::chat::Item;
 
-use crate::agent_tab::transcript::{detect_output_language, file_extension_lang};
+#[cfg(test)]
+use crate::agent_tab::transcript::code::streaming_tests::record_copied;
+use crate::agent_tab::transcript::file_extension_lang;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct CodeSource {
@@ -50,6 +52,9 @@ impl CodeSource {
             _ => return None,
         };
 
+        #[cfg(test)]
+        record_copied(output.len());
+
         Some(Self {
             command,
             output,
@@ -58,10 +63,16 @@ impl CodeSource {
         })
     }
 
-    pub(super) fn output_language<'a>(&'a self, clean_output: &'a str) -> &'a str {
-        self.language
-            .as_deref()
-            .unwrap_or_else(|| detect_output_language(clean_output))
+    pub(super) fn output(item: &Item) -> &str {
+        match item {
+            Item::CommandExecution {
+                aggregated_output, ..
+            } => aggregated_output.as_deref(),
+            Item::FileChange { diff, .. } => diff.as_deref(),
+            Item::Other { output, .. } => output.as_deref(),
+            _ => None,
+        }
+        .unwrap_or("")
     }
 }
 

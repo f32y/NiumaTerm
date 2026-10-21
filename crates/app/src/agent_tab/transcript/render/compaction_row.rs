@@ -13,7 +13,6 @@ use gpui_component::{ActiveTheme as _, IconName, h_flex, v_flex};
 use nmt_agent::chat::Compaction;
 use rust_i18n::t;
 
-use crate::agent_tab::profile::AgentKind;
 use crate::agent_tab::settings::UI_RADIUS;
 use crate::agent_tab::transcript::disclosure_row::{
     AGENT_CARD_BODY_PADDING_Y, AGENT_CARD_PADDING_X, AgentDisclosureRow, agent_card,
@@ -22,6 +21,7 @@ use crate::agent_tab::transcript::render::bounded_scroll;
 use crate::agent_tab::transcript::render::menus::copy_entry_menu;
 use crate::agent_tab::transcript::render::text_style::markdown_view;
 use crate::agent_tab::transcript::reveal::{Disclosures, RevealKey, RevealedPart, revealed_block};
+use crate::agent_tab::transcript::text::{TextPart, TranscriptTextCache};
 use crate::agent_tab::transcript::{
     TranscriptView, compact_token_count, compaction_accounting, compaction_label,
     compaction_row_is_expandable, compaction_trigger_label,
@@ -32,14 +32,16 @@ use crate::agent_tab::transcript::{
 /// are no longer what the model sees. Expanding reveals the accounting and
 /// the summary the thread continued from when the provider exposes it.
 pub(crate) fn render_compaction_row(
-    kind: AgentKind,
-    cwd: Option<&str>,
-    disclosures: &Disclosures,
+    view: &mut TranscriptView,
     index: usize,
     detail: Compaction,
     window: &mut Window,
     cx: &mut Context<TranscriptView>,
 ) -> AnyElement {
+    let kind = view.kind;
+    let cwd = view.cwd.as_deref();
+    let disclosures = &view.disclosures;
+    let text_views = &mut view.text_views;
     let label = compaction_label(&detail);
     let preview = compaction_accounting(&detail).join(" · ");
     let expandable = compaction_row_is_expandable(kind);
@@ -86,13 +88,9 @@ pub(crate) fn render_compaction_row(
         // The rule sits above the heading: it closes off the conversation
         // that the summary below replaced.
         .child(div().w_full().h(px(1.)).bg(accent.opacity(0.35)))
-        .child(
-            agent_card().child(header).children(
-                expanded.then(|| {
-                    render_compaction_detail(cwd, disclosures, index, &detail, window, cx)
-                }),
-            ),
-        )
+        .child(agent_card().child(header).children(expanded.then(|| {
+            render_compaction_detail(cwd, disclosures, text_views, index, &detail, window, cx)
+        })))
         .into_any_element()
 }
 
@@ -102,6 +100,7 @@ pub(crate) fn render_compaction_row(
 fn render_compaction_detail(
     cwd: Option<&str>,
     disclosures: &Disclosures,
+    text_views: &mut TranscriptTextCache,
     index: usize,
     detail: &Compaction,
     window: &mut Window,
@@ -186,8 +185,11 @@ fn render_compaction_detail(
                     .bg(cx.theme().tokens.muted)
                     .text_color(cx.theme().muted_foreground)
                     .child(
-                        markdown_view(("compaction-md", index), summary, cwd.map(str::to_owned))
-                            .selectable(true),
+                        markdown_view(
+                            text_views.view(index, TextPart::Summary, &summary, cx),
+                            cwd.map(str::to_owned),
+                        )
+                        .selectable(true),
                     ),
             )
             .mt_1()

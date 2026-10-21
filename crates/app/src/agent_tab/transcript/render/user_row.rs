@@ -9,7 +9,7 @@ use gpui::prelude::*;
 use gpui::{AnyElement, App, Bounds, Context, Image, ObjectFit, Window, div, img, px, relative};
 use gpui_component::modern_menu::{ModernMenu, ModernMenuExt as _};
 use gpui_component::{
-    ActiveTheme as _, ElementExt as _, Icon, IconName, Sizable as _, h_flex, text, v_flex,
+    ActiveTheme as _, ElementExt as _, Icon, IconName, Sizable as _, h_flex, v_flex,
 };
 use rust_i18n::t;
 
@@ -22,7 +22,8 @@ use crate::agent_tab::transcript::disclosure_row::{
 };
 use crate::agent_tab::transcript::render::TRANSCRIPT_THUMBNAIL;
 use crate::agent_tab::transcript::render::message_rows::hover_stamp;
-use crate::agent_tab::transcript::reveal::{Disclosures, RevealKey, revealed};
+use crate::agent_tab::transcript::reveal::{RevealKey, revealed};
+use crate::agent_tab::transcript::text::TextPart;
 use crate::agent_tab::transcript::{TranscriptView, truncated_user_prompt};
 
 /// User prompt: right-aligned quiet bubble (muted surface, no border).
@@ -35,14 +36,16 @@ use crate::agent_tab::transcript::{TranscriptView, truncated_user_prompt};
 /// `images` are the thumbnails the prompt included, `at` is when it was sent,
 /// and `menu` is the row's right-click menu.
 pub(crate) fn user_prompt_row(
+    view: &mut TranscriptView,
     index: usize,
     text: &str,
-    disclosures: &Disclosures,
     images: Vec<Arc<Image>>,
     at: Option<i64>,
     menu: impl Fn(ModernMenu, &mut Window, &mut App) -> ModernMenu + 'static,
     cx: &mut Context<TranscriptView>,
 ) -> AnyElement {
+    let disclosures = &view.disclosures;
+    let text_views = &mut view.text_views;
     let parsed = parse_annotated_prompt(text);
     let text = parsed.as_ref().map_or(text, |parsed| parsed.prompt);
     let head_len = truncated_user_prompt(text).map(str::len);
@@ -126,11 +129,14 @@ pub(crate) fn user_prompt_row(
                                 )
                                 .child(
                                     div().flex_1().min_w_0().child(
-                                        text::TextView::plain(
-                                            format!("entry-response-annotation-{index}-{position}"),
-                                            annotation.text.clone(),
-                                        )
-                                        .selectable(true),
+                                        text_views
+                                            .view(
+                                                index,
+                                                TextPart::Annotation(position),
+                                                &annotation.text,
+                                                cx,
+                                            )
+                                            .selectable(true),
                                     ),
                                 )
                         },
@@ -211,7 +217,11 @@ pub(crate) fn user_prompt_row(
         .bg(cx.theme().muted)
         // Plain, not markdown: the prompt is user-authored text and
         // must render verbatim, but stays drag-selectable.
-        .child(text::TextView::plain(("user-text", index), shown).selectable(true))
+        .child(
+            text_views
+                .view(index, TextPart::Prompt, &shown, cx)
+                .selectable(true),
+        )
         .children(toggle)
         .children(entry_images(index, images, cx));
 

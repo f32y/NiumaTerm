@@ -1,4 +1,6 @@
 #[cfg(test)]
+mod render_tests;
+#[cfg(test)]
 mod tests;
 
 use std::cell::RefCell;
@@ -50,6 +52,7 @@ use crate::agent_tab::transcript::rows::{
     PickerReservation, RowGap, TranscriptRow, folds_turns, is_run_row, spaced_rows,
     turn_opening_prompts,
 };
+use crate::agent_tab::transcript::text::{TextPart, TranscriptTextCache};
 use crate::agent_tab::transcript::typewriter::ReplyTyping;
 use crate::agent_tab::transcript::{
     CodeTranscriptCache, Entry, RowSpec, is_work_row, should_show_jump_to_latest,
@@ -95,6 +98,8 @@ pub struct TranscriptView {
     /// Expanded technical output retains its parsed source and scroll position.
     /// Collapsing a row releases the extra source, syntax trees, and worker.
     pub(crate) code_transcripts: CodeTranscriptCache,
+
+    pub(super) text_views: TranscriptTextCache,
 
     /// The reply being let onto the screen a character at a time.
     typing: ReplyTyping,
@@ -155,6 +160,7 @@ impl TranscriptView {
             disclosures: Disclosures::new(folds_turns(collapse_mode)),
             collapse_mode,
             code_transcripts: CodeTranscriptCache::default(),
+            text_views: TranscriptTextCache::default(),
             typing: ReplyTyping::new(),
             cwd,
             kind,
@@ -177,21 +183,21 @@ impl TranscriptView {
 
         if version.0 != self.observed_version.0 {
             self.reset_presentation();
-        } else if let Some((index, previous_bytes)) = change.reply {
-            if let SessionItem::AgentMessage {
+        } else if let Some((index, previous_bytes)) = change.reply
+            && let SessionItem::AgentMessage {
                 text: Some(text), ..
             } = &conversation.content.entries()[index].item
-                && let Some(previous) =
-                    self.typing
-                        .begin(index, text, previous_bytes, Instant::now())
-            {
-                self.row_cache.invalidate(previous);
-            }
-
-            self.code_transcripts.invalidate(index);
+            && let Some(previous) = self
+                .typing
+                .begin(index, text, previous_bytes, Instant::now())
+        {
+            self.row_cache.invalidate(previous);
         }
 
-        self.code_transcripts.invalidate_from(change.first);
+        self.code_transcripts.invalidate(&change);
+
+        self.text_views
+            .sync_entry_count(conversation.content.entries().len());
 
         self.row_cache.invalidate(change.first);
 
@@ -260,6 +266,7 @@ impl TranscriptView {
 
         if moved {
             self.disclosures.clear();
+            self.text_views.clear();
 
             self.image_previews.borrow_mut().clear();
         }
@@ -286,6 +293,7 @@ impl TranscriptView {
         self.disclosures.clear();
 
         self.code_transcripts.clear();
+        self.text_views.clear();
 
         self.typing.finish();
     }
@@ -526,22 +534,16 @@ impl TranscriptView {
                 let menu =
                     prompt_row_menu(cx.entity().downgrade(), index, caps.session_fork, target);
 
-                user_prompt_row(
-                    index,
-                    text,
-                    &self.disclosures,
-                    self.entry_thumbnails(index),
-                    entry.metadata.at,
-                    menu,
-                    cx,
-                )
+                let images = self.entry_thumbnails(index);
+
+                user_prompt_row(self, index, text, images, entry.metadata.at, menu, cx)
             }
             SessionItem::AgentMessage {
                 id,
                 text: Some(text),
                 questions: Some(questions),
             } => {
-                let reply = self.render_agent_row(index, text.clone(), cx);
+                let reply = self.render_agent_row(index, text, cx);
 
                 question_message(
                     index,
@@ -554,7 +556,7 @@ impl TranscriptView {
             }
             SessionItem::AgentMessage {
                 text: Some(text), ..
-            } => self.render_agent_row(index, self.shown_reply(index, text).to_string(), cx),
+            } => self.render_agent_row(index, self.shown_reply(index, text), cx),
             SessionItem::Error { text } => error_row(index, text.clone(), cx),
             SessionItem::TaskList { tasks, .. } => {
                 task_list_row::render_task_list_row(index, tasks, cx)
@@ -562,15 +564,7 @@ impl TranscriptView {
             SessionItem::Compaction { detail, .. } => {
                 let detail = detail.clone();
 
-                compaction_row::render_compaction_row(
-                    self.kind,
-                    self.cwd.as_deref(),
-                    &self.disclosures,
-                    index,
-                    detail,
-                    window,
-                    cx,
-                )
+                compaction_row::render_compaction_row(self, index, detail, window, cx)
             }
             SessionItem::SideBoundary {
                 instructions,
@@ -581,6 +575,7 @@ impl TranscriptView {
 
                 side_boundary_row::render_side_boundary_row(
                     &self.disclosures,
+                    &mut self.text_views,
                     index,
                     instructions,
                     message,
@@ -596,9 +591,9 @@ impl TranscriptView {
     /// An assistant reply at entry `index`, credited to its author on a
     /// conversation that mixes several agents.
     pub(crate) fn render_agent_row(
-        &self,
+        &mut self,
         index: usize,
-        text: String,
+        text: &str,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let conversation = self.conversation.borrow();
@@ -610,7 +605,7 @@ impl TranscriptView {
 
         agent_reply_row(
             index,
-            text,
+            self.text_views.view(index, TextPart::Reply, text, cx),
             cwd,
             attribution.map(|author| author.name.clone()),
             entry.metadata.at,
@@ -696,7 +691,7 @@ impl TranscriptView {
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .child(
-                        markdown_view(("wl-md", index), detail.to_owned(), cwd)
+                        markdown_view(self.text_views.view(index, TextPart::Work, detail, cx), cwd)
                             .style(transcript_text_style(cx))
                             .selectable(true),
                     ),
@@ -870,6 +865,7 @@ impl TranscriptView {
         // of a large output resident behind a row showing none of it.
         if let Some(index) = self.disclosures.take_down(key, &parts) {
             self.code_transcripts.drop_row(index);
+            self.text_views.drop_row(index);
         }
     }
 

@@ -6,13 +6,20 @@ pub(super) use crate::agent_tab::transcript::code::prepared::should_virtualize_t
 pub(super) use crate::agent_tab::transcript::code::prepared::transcript_segments;
 
 mod ansi;
+mod parser;
 mod prepared;
+mod render_cache;
+mod rows;
 mod source;
 
 #[cfg(test)]
+mod streaming_tests;
+#[cfg(test)]
 mod tests;
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -26,11 +33,16 @@ use gpui_component::scroll::Scrollbar;
 use gpui_component::spinner::Spinner;
 use gpui_component::text::{TextView, TextViewState};
 use nmt_agent::chat::Item;
+use nmt_agent::transcript::conversation::{ContentChange, EntryChange};
 
 use crate::agent_tab::settings::{AgentSettings, UI_RADIUS};
 use crate::agent_tab::transcript::TranscriptView;
+use crate::agent_tab::transcript::code::parser::CodeParser;
 use crate::agent_tab::transcript::code::prepared::PreparedCode;
+use crate::agent_tab::transcript::code::render_cache::CodeRenderCache;
 use crate::agent_tab::transcript::code::source::CodeSource;
+#[cfg(test)]
+use crate::agent_tab::transcript::code::streaming_tests::record_copied;
 use crate::agent_tab::transcript::render::TRANSCRIPT_LINE_HEIGHT;
 use crate::agent_tab::transcript::render::text_style::{
     transcript_highlight_theme, transcript_text_style,
@@ -55,7 +67,7 @@ pub(crate) struct CodeTranscriptCache {
 }
 
 struct CachedCode {
-    dirty: bool,
+    dirty: Option<EntryChange>,
     view: Entity<CodeView>,
     _observation: Subscription,
 }
@@ -68,14 +80,20 @@ impl CodeTranscriptCache {
         cx: &mut Context<TranscriptView>,
     ) -> Entity<CodeView> {
         if let Some(cached) = self.entries.get_mut(&index) {
-            if cached.dirty {
-                let source = CodeSource::from_item(item).expect("code transcript item");
-
-                cached
-                    .view
-                    .update(cx, |view, cx| view.set_source(source, cx));
-
-                cached.dirty = false;
+            if let Some(change) = cached.dirty.take() {
+                cached.view.update(cx, |view, cx| {
+                    if let EntryChange::Append { previous_bytes } = change
+                        && view.output_bytes == previous_bytes
+                        && let Some(output) = CodeSource::output(item).get(previous_bytes..)
+                    {
+                        view.append_output(output, cx);
+                    } else {
+                        view.set_source(
+                            CodeSource::from_item(item).expect("code transcript item"),
+                            cx,
+                        );
+                    }
+                });
             }
 
             return cached.view.clone();
@@ -99,7 +117,7 @@ impl CodeTranscriptCache {
         self.entries.insert(
             index,
             CachedCode {
-                dirty: false,
+                dirty: None,
                 view: view.clone(),
                 _observation: observation,
             },
@@ -108,16 +126,35 @@ impl CodeTranscriptCache {
         view
     }
 
-    pub(crate) fn invalidate(&mut self, index: usize) {
-        if let Some(cached) = self.entries.get_mut(&index) {
-            cached.dirty = true;
+    pub(crate) fn invalidate(&mut self, change: &ContentChange) {
+        if let Some(first) = change.reset_from {
+            self.invalidate_from(first);
+        }
+
+        for &(index, update) in &change.entries {
+            if let Some(cached) = self.entries.get_mut(&index) {
+                cached.dirty = Some(match (cached.dirty, update) {
+                    (None, update) => update,
+                    (
+                        Some(EntryChange::Append {
+                            previous_bytes: old,
+                        }),
+                        EntryChange::Append {
+                            previous_bytes: new,
+                        },
+                    ) => EntryChange::Append {
+                        previous_bytes: old.min(new),
+                    },
+                    _ => EntryChange::Replace,
+                });
+            }
         }
     }
 
-    pub(crate) fn invalidate_from(&mut self, first: usize) {
+    fn invalidate_from(&mut self, first: usize) {
         for (index, cached) in &mut self.entries {
             if *index >= first {
-                cached.dirty = true;
+                cached.dirty = Some(EntryChange::Replace);
             }
         }
     }
@@ -132,13 +169,22 @@ impl CodeTranscriptCache {
 }
 
 pub(crate) struct CodeView {
-    source: Arc<CodeSource>,
+    output_bytes: usize,
+    generation: u64,
     revision: u64,
+    pending: Option<CodeUpdate>,
+    parser: Option<CodeParser>,
     prepared: Option<Arc<PreparedCode>>,
     text_view: Entity<TextViewState>,
     scroll: ScrollHandle,
     virtual_scroll: UniformListScrollHandle,
     parse_task: Option<Task<()>>,
+    render_cache: Rc<RefCell<CodeRenderCache>>,
+}
+
+enum CodeUpdate {
+    Replace(CodeSource),
+    Append(String),
 }
 
 impl CodeView {
@@ -147,16 +193,30 @@ impl CodeView {
 
         // Short content has its final layout on the first frame. Larger
         // output starts with a fixed-height viewport while it is prepared.
-        let prepared = (size < 16 * 1024).then(|| Arc::new(PreparedCode::new(&source)));
+        let output_bytes = source.output.len();
+
+        let (parser, pending) = if size < 16 * 1024 {
+            (Some(CodeParser::new(source)), None)
+        } else {
+            (None, Some(CodeUpdate::Replace(source)))
+        };
+
+        let prepared = parser
+            .as_ref()
+            .map(|parser| Arc::new(parser.prepared.clone()));
 
         let mut view = Self {
-            source: Arc::new(source),
+            output_bytes,
+            generation: 0,
             revision: 0,
+            pending,
+            parser,
             prepared,
             text_view: cx.new(|cx| TextViewState::plain("", cx)),
             scroll: ScrollHandle::default(),
             virtual_scroll: UniformListScrollHandle::default(),
             parse_task: None,
+            render_cache: Rc::new(RefCell::new(CodeRenderCache::default())),
         };
 
         view.start_parse(cx);
@@ -165,12 +225,32 @@ impl CodeView {
     }
 
     fn set_source(&mut self, source: CodeSource, cx: &mut Context<Self>) {
-        if self.source.as_ref() == &source {
+        self.output_bytes = source.output.len();
+        self.generation += 1;
+        self.pending = Some(CodeUpdate::Replace(source));
+        self.revision += 1;
+
+        if self.parse_task.is_none() {
+            self.start_parse(cx);
+        }
+    }
+
+    fn append_output(&mut self, output: &str, cx: &mut Context<Self>) {
+        if output.is_empty() {
             return;
         }
 
-        self.source = Arc::new(source);
+        #[cfg(test)]
+        record_copied(output.len());
+
+        self.output_bytes += output.len();
         self.revision += 1;
+
+        match &mut self.pending {
+            Some(CodeUpdate::Replace(source)) => source.output.push_str(output),
+            Some(CodeUpdate::Append(pending)) => pending.push_str(output),
+            None => self.pending = Some(CodeUpdate::Append(output.into())),
+        }
 
         if self.parse_task.is_none() {
             self.start_parse(cx);
@@ -185,28 +265,43 @@ impl CodeView {
     }
 
     async fn parse_loop(view: WeakEntity<Self>, cx: &mut AsyncApp) {
+        let Ok(mut parser) = view.update(cx, |view, _| view.parser.take()) else {
+            return;
+        };
+
         loop {
             cx.background_executor()
                 .timer(Duration::from_millis(24))
                 .await;
 
-            let Ok((revision, source)) =
-                view.read_with(cx, |view, _| (view.revision, view.source.clone()))
-            else {
+            let Ok((generation, revision, pending)) = view.update(cx, |view, _| {
+                (view.generation, view.revision, view.pending.take())
+            }) else {
                 break;
             };
 
-            let parsing = source.clone();
-
-            let prepared = cx
+            let (updated, prepared) = cx
                 .background_spawn(async move {
-                    let mut prepared = PreparedCode::new(&parsing);
+                    match pending {
+                        Some(CodeUpdate::Replace(source)) => parser = Some(CodeParser::new(source)),
+                        Some(CodeUpdate::Append(output)) => parser
+                            .as_mut()
+                            .expect("append has a parser")
+                            .append(&output),
+                        None => {}
+                    }
 
-                    prepared.parse_syntax();
+                    let mut parser = parser.expect("source initializes a parser");
 
-                    prepared
+                    parser.prepared.parse_syntax();
+
+                    let prepared = Arc::new(parser.prepared.clone());
+
+                    (parser, prepared)
                 })
                 .await;
+
+            parser = Some(updated);
 
             let Ok(done) = view.update(cx, |view, cx| {
                 let done = view.revision == revision;
@@ -214,18 +309,14 @@ impl CodeView {
                 // A completed prefix remains useful during sustained output.
                 // Replacements must never display an older result, while
                 // append-only streams can show progress before they pause.
-                if done
-                    || (view.source.command == source.command
-                        && view.source.language == source.language
-                        && view.source.strip_gutter == source.strip_gutter
-                        && view.source.output.starts_with(&source.output))
-                {
-                    view.prepared = Some(Arc::new(prepared));
+                if view.generation == generation {
+                    view.prepared = Some(prepared);
 
                     cx.notify();
                 }
 
                 if done {
+                    view.parser = parser.take();
                     view.parse_task = None;
                 }
 
@@ -256,11 +347,16 @@ impl Render for CodeView {
         let foreground = cx.theme().foreground;
         let background = *cx.theme().tokens.muted;
 
+        self.render_cache
+            .borrow_mut()
+            .update(&prepared, &theme, foreground, background);
+
         if prepared.virtualized {
             let settings = cx.global::<AgentSettings>();
             let font_size = px(settings.transcript_font_size);
             let line_height = font_size * TRANSCRIPT_LINE_HEIGHT;
             let source = prepared.clone();
+            let cache = self.render_cache.clone();
 
             return div()
                 .id("code-output")
@@ -277,10 +373,8 @@ impl Render for CodeView {
                 .child(
                     uniform_list("code-lines", prepared.segments.len(), move |rows, _, _| {
                         rows.filter_map(|row| {
-                            let range = source.segments.get(row)?.clone();
-
-                            let styles =
-                                source.styles(range.clone(), &theme, foreground, background);
+                            let segment = source.segments.get(row)?;
+                            let styles = cache.borrow_mut().styles(row, segment.range.clone());
 
                             Some(
                                 div()
@@ -289,7 +383,7 @@ impl Render for CodeView {
                                     .line_height(line_height)
                                     .whitespace_nowrap()
                                     .child(
-                                        StyledText::new(source.text[range].to_string())
+                                        StyledText::new(segment.text.clone())
                                             .with_highlights(styles),
                                     ),
                             )
@@ -323,10 +417,13 @@ impl Render for CodeView {
                 .into_any_element();
         }
 
-        let styles = prepared.styles(0..prepared.text.len(), &theme, foreground, background);
+        let styles = self
+            .render_cache
+            .borrow_mut()
+            .styles(usize::MAX, 0..prepared.text.len());
 
         self.text_view.update(cx, |view, cx| {
-            view.set_highlighted_code(prepared.text.clone(), styles, cx)
+            view.set_highlighted_code(prepared.short_text.clone(), styles, cx)
         });
 
         div()

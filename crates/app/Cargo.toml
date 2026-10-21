@@ -61,6 +61,7 @@ vte.workspace = true
 uuid.workspace = true
 rust-i18n.workspace = true
 rand.workspace = true
+sum_tree.workspace = true
 
 [build-dependencies]
 nmt_version.workspace = true

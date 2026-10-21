@@ -5,6 +5,9 @@ use gpui::{
 };
 use vte::{Params, Parser, Perform};
 
+#[cfg(test)]
+use crate::agent_tab::transcript::code::streaming_tests::record_normalized;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum AnsiColor {
     Indexed(u8),
@@ -67,9 +70,16 @@ impl AnsiText {
     pub(super) fn parse(source: &str) -> Self {
         let mut output = Self::default();
 
-        Parser::new().advance(&mut output, source.as_bytes());
+        output.advance(&mut Parser::new(), source);
 
         output
+    }
+
+    pub(super) fn advance(&mut self, parser: &mut Parser, source: &str) {
+        #[cfg(test)]
+        record_normalized(source.len());
+
+        parser.advance(self, source.as_bytes());
     }
 
     fn push(&mut self, ch: char) {

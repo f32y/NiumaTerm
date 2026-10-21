@@ -24,6 +24,7 @@ mod render;
 mod reveal;
 mod row_structure;
 mod rows;
+mod text;
 mod typewriter;
 mod view;
 

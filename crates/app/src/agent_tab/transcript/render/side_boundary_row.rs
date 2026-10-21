@@ -18,6 +18,7 @@ use crate::agent_tab::transcript::render::bounded_scroll;
 use crate::agent_tab::transcript::render::menus::copy_entry_menu;
 use crate::agent_tab::transcript::render::text_style::markdown_view;
 use crate::agent_tab::transcript::reveal::{Disclosures, RevealKey, RevealedPart, revealed_block};
+use crate::agent_tab::transcript::text::{TextPart, TranscriptTextCache};
 
 /// The boundary a side conversation starts from. Drawn as a divider like a
 /// compaction boundary, because it is the same kind of break: what lies
@@ -26,6 +27,7 @@ use crate::agent_tab::transcript::reveal::{Disclosures, RevealKey, RevealedPart,
 /// which steer every answer and were never typed by the user.
 pub(crate) fn render_side_boundary_row(
     disclosures: &Disclosures,
+    text_views: &mut TranscriptTextCache,
     index: usize,
     instructions: String,
     message: String,
@@ -62,7 +64,15 @@ pub(crate) fn render_side_boundary_row(
         .gap_1()
         .modern_context_menu(copy_entry_menu(cx.entity().downgrade(), index))
         .child(agent_card().child(header).children(expanded.then(|| {
-            render_side_boundary_detail(disclosures, index, instructions, message, window, cx)
+            render_side_boundary_detail(
+                disclosures,
+                text_views,
+                index,
+                instructions,
+                message,
+                window,
+                cx,
+            )
         })))
         // The rule sits below the heading: it closes off the inherited
         // history the boundary marks, and the side conversation starts under
@@ -75,6 +85,7 @@ pub(crate) fn render_side_boundary_row(
 /// scroll surface, since together they run to a few kilobytes.
 fn render_side_boundary_detail(
     disclosures: &Disclosures,
+    text_views: &mut TranscriptTextCache,
     index: usize,
     instructions: String,
     message: String,
@@ -88,7 +99,7 @@ fn render_side_boundary_detail(
         .read(cx)
         .clone();
 
-    let section = |id: &'static str, heading: SharedString, text: String| {
+    let mut section = |part: TextPart, heading: SharedString, text: String| {
         v_flex()
             .w_full()
             .gap_1()
@@ -98,8 +109,21 @@ fn render_side_boundary_detail(
                     .text_color(cx.theme().muted_foreground.opacity(0.75))
                     .child(heading),
             )
-            .child(markdown_view((id, index), text, None).selectable(true))
+            .child(markdown_view(text_views.view(index, part, &text, cx), None).selectable(true))
     };
+
+    let sections = [
+        section(
+            TextPart::Instructions,
+            t!("agent-transcript-side-instructions").into_owned().into(),
+            instructions,
+        ),
+        section(
+            TextPart::Message,
+            t!("agent-transcript-side-message").into_owned().into(),
+            message,
+        ),
+    ];
 
     let block = v_flex()
         .w_full()
@@ -121,16 +145,7 @@ fn render_side_boundary_detail(
                 .rounded(UI_RADIUS)
                 .bg(cx.theme().tokens.muted)
                 .text_color(cx.theme().muted_foreground)
-                .child(section(
-                    "side-boundary-instructions",
-                    t!("agent-transcript-side-instructions").into_owned().into(),
-                    instructions,
-                ))
-                .child(section(
-                    "side-boundary-message",
-                    t!("agent-transcript-side-message").into_owned().into(),
-                    message,
-                )),
+                .children(sections),
         ));
 
     let part = RevealedPart::Block(RevealKey::Row(index));

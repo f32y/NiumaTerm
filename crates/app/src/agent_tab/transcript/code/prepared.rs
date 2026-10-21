@@ -4,43 +4,44 @@ use std::time::Duration;
 
 use gpui::{HighlightStyle, Hsla, SharedString};
 use gpui_component::highlighter::{HighlightTheme, LanguageRegistry, SyntaxHighlighter};
+use gpui_component::input::RopeExt as _;
 use ropey::Rope;
+use tree_sitter::{InputEdit, Point};
 
-use crate::agent_tab::transcript::code::ansi::{AnsiStyle, AnsiText};
-use crate::agent_tab::transcript::code::source::{CodeSource, command_syntax};
-use crate::agent_tab::transcript::strip_read_gutter;
+use crate::agent_tab::transcript::code::ansi::AnsiStyle;
+use crate::agent_tab::transcript::code::rows::CodeRows;
+use crate::agent_tab::transcript::code::source::command_syntax;
+#[cfg(test)]
+use crate::agent_tab::transcript::code::streaming_tests::{record_styles, record_syntax};
 
 const MAX_SYNTAX_BYTES: usize = 2 * 1024 * 1024;
 const PARSE_BUDGET: Duration = Duration::from_millis(25);
 
+#[derive(Clone)]
 struct SyntaxRegion {
     range: Range<usize>,
     language: String,
-    highlighter: Option<SyntaxHighlighter>,
+    highlighter: Option<Arc<SyntaxHighlighter>>,
 }
 
+#[derive(Clone)]
 pub(super) struct PreparedCode {
-    pub(super) text: SharedString,
-    pub(super) segments: Arc<Vec<Range<usize>>>,
+    pub(super) text: Rope,
+    pub(super) short_text: SharedString,
+    pub(super) segments: CodeRows,
     pub(super) widest_segment: usize,
     pub(super) virtualized: bool,
     syntax: Vec<SyntaxRegion>,
-    ansi: Vec<(Range<usize>, AnsiStyle)>,
+    output_start: Option<usize>,
+    command: bool,
 }
 
 impl PreparedCode {
-    pub(super) fn new(source: &CodeSource) -> Self {
-        let normalized = source
-            .strip_gutter
-            .then(|| strip_read_gutter(&source.output))
-            .flatten();
-
-        let output = AnsiText::parse(normalized.as_deref().unwrap_or(&source.output));
-
+    pub(super) fn new(command: Option<&str>) -> Self {
         let mut text = String::new();
         let mut syntax = Vec::new();
 
-        if let Some(command) = &source.command {
+        if let Some(command) = command {
             text.push_str("$ ");
 
             let (language, range) = command_syntax(command);
@@ -52,49 +53,89 @@ impl PreparedCode {
             });
 
             text.push_str(command);
-
-            if !output.text.is_empty() {
-                text.push_str("\n\n");
-            }
         }
 
-        let output_start = text.len();
-        let language = source.output_language(&output.text);
+        let mut result = Self {
+            text: Rope::from_str(&text),
+            short_text: text.into(),
+            segments: CodeRows::default(),
+            widest_segment: 0,
+            virtualized: false,
+            syntax,
+            output_start: None,
+            command: command.is_some(),
+        };
 
-        if !language.is_empty() && !output.text.is_empty() {
-            syntax.push(SyntaxRegion {
-                range: output_start..output_start + output.text.len(),
+        result.segments.append(&result.text, Vec::new());
+        result.refresh_layout();
+
+        result
+    }
+
+    pub(super) fn append_output(
+        &mut self,
+        text: &str,
+        spans: Vec<(Range<usize>, AnsiStyle)>,
+        language: &str,
+    ) {
+        if text.is_empty() {
+            return;
+        }
+
+        if self.output_start.is_none() {
+            if self.command {
+                self.text.insert(self.text.len(), "\n\n");
+            }
+
+            self.output_start = Some(self.text.len());
+        }
+
+        let start = self.text.len();
+
+        self.text.insert(start, text);
+
+        self.segments.append(
+            &self.text,
+            spans
+                .into_iter()
+                .map(|(range, style)| (start + range.start..start + range.end, style))
+                .collect(),
+        );
+
+        let output_start = self.output_start.expect("output was appended");
+        let index = usize::from(self.command);
+
+        if language.is_empty() {
+            self.syntax.truncate(index);
+        } else if let Some(region) = self.syntax.get_mut(index) {
+            region.range.end = self.text.len();
+
+            if region.language != language {
+                region.language = language.into();
+                region.highlighter = None;
+            }
+        } else {
+            self.syntax.push(SyntaxRegion {
+                range: output_start..self.text.len(),
                 language: language.into(),
                 highlighter: None,
             });
         }
 
-        text.push_str(&output.text);
+        self.refresh_layout();
+    }
 
-        let ansi = output
-            .spans
-            .into_iter()
-            .map(|(range, style)| (output_start + range.start..output_start + range.end, style))
-            .collect();
+    fn refresh_layout(&mut self) {
+        self.widest_segment = self.segments.widest();
 
-        let segments = transcript_segments(&text);
+        self.virtualized = self.text.len() >= VIRTUAL_TRANSCRIPT_MIN_BYTES
+            || self.segments.len() > VIRTUAL_TRANSCRIPT_MIN_ROWS;
 
-        let widest_segment = segments
-            .iter()
-            .enumerate()
-            .max_by_key(|(_, range)| range.len())
-            .map_or(0, |(index, _)| index);
-
-        let virtualized = should_virtualize_transcript(&text);
-
-        Self {
-            text: text.into(),
-            segments: Arc::new(segments),
-            widest_segment,
-            virtualized,
-            syntax,
-            ansi,
-        }
+        self.short_text = if self.virtualized {
+            SharedString::default()
+        } else {
+            self.text.to_string().into()
+        };
     }
 
     /// Parsing is performed by the background worker. A large or pathological
@@ -107,15 +148,39 @@ impl PreparedCode {
                     .language(&region.language)
                     .is_none()
             {
+                region.highlighter = None;
+
                 continue;
             }
 
-            let mut highlighter = SyntaxHighlighter::new(&region.language);
+            let highlighter = region
+                .highlighter
+                .get_or_insert_with(|| Arc::new(SyntaxHighlighter::new(&region.language)));
 
-            let text = Rope::from_str(&self.text[region.range.clone()]);
+            let old_end = highlighter.text().len();
 
-            if highlighter.update(None, &text, Some(PARSE_BUDGET)) {
-                region.highlighter = Some(highlighter);
+            if old_end == region.range.len() {
+                continue;
+            }
+
+            let old_position = highlighter.text().offset_to_point(old_end);
+            let text = Rope::from(self.text.slice(region.range.clone()));
+            let new_position = text.offset_to_point(text.len());
+
+            let edit = InputEdit {
+                start_byte: old_end,
+                old_end_byte: old_end,
+                new_end_byte: text.len(),
+                start_position: Point::new(old_position.row, old_position.column),
+                old_end_position: Point::new(old_position.row, old_position.column),
+                new_end_position: Point::new(new_position.row, new_position.column),
+            };
+
+            #[cfg(test)]
+            record_syntax(text.len() - old_end);
+
+            if !Arc::make_mut(highlighter).update(Some(edit), &text, Some(PARSE_BUDGET)) {
+                region.highlighter = None;
             }
         }
     }
@@ -129,6 +194,9 @@ impl PreparedCode {
         foreground: Hsla,
         background: Hsla,
     ) -> Vec<(Range<usize>, HighlightStyle)> {
+        #[cfg(test)]
+        record_styles();
+
         let mut syntax = Vec::new();
 
         for region in &self.syntax {
@@ -160,13 +228,10 @@ impl PreparedCode {
             );
         }
 
-        let first = self
-            .ansi
-            .partition_point(|(span, _)| span.end <= range.start);
-
-        let ansi: Vec<_> = self.ansi[first..]
-            .iter()
-            .take_while(|(span, _)| span.start < range.end)
+        let ansi: Vec<_> = self
+            .segments
+            .ansi(&range)
+            .into_iter()
             .map(|(span, style)| {
                 (
                     span.start.max(range.start) - range.start
@@ -251,6 +316,7 @@ const VIRTUAL_TRANSCRIPT_MIN_BYTES: usize = 16 * 1024;
 const VIRTUAL_TRANSCRIPT_MIN_ROWS: usize = 128;
 pub(crate) const VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES: usize = 4 * 1024;
 
+#[cfg(test)]
 pub(crate) fn should_virtualize_transcript(text: &str) -> bool {
     text.len() >= VIRTUAL_TRANSCRIPT_MIN_BYTES
         || text.lines().take(VIRTUAL_TRANSCRIPT_MIN_ROWS + 1).count() > VIRTUAL_TRANSCRIPT_MIN_ROWS

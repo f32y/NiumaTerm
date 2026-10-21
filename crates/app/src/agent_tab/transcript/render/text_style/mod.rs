@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use gpui::prelude::*;
-use gpui::{App, ClipboardItem, ElementId, Font, SharedString, StyleRefinement, px};
+use gpui::{App, ClipboardItem, Font, StyleRefinement, px};
 use gpui_component::highlighter::HighlightTheme;
 use gpui_component::modern_menu::ModernMenu;
 use gpui_component::text::TextViewStyle;
@@ -92,13 +92,8 @@ pub(crate) fn transcript_text_style(cx: &App) -> TextViewStyle {
     style
 }
 
-pub(crate) fn markdown_view(
-    id: impl Into<ElementId>,
-    markdown: impl Into<SharedString>,
-    cwd: Option<String>,
-) -> text::TextView {
-    text::TextView::markdown(id, markdown)
-        .link_icon(file_link_icon)
+pub(crate) fn markdown_view(view: text::TextView, cwd: Option<String>) -> text::TextView {
+    view.link_icon(file_link_icon)
         .on_link_click(move |target, event, window, cx| {
             if event.is_right_click() {
                 let target = target.to_string();

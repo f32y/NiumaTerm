@@ -312,6 +312,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
+ "sum_tree",
  "tempfile",
  "tokio",
  "toml 1.1.6+spec-1.1.0",

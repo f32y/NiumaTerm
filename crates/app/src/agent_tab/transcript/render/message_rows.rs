@@ -12,6 +12,7 @@ use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::shimmer::ShimmerText;
 use gpui_component::spinner::Spinner;
+use gpui_component::text::TextView;
 use gpui_component::{ActiveTheme as _, IconName, Sizable as _, h_flex, v_flex};
 use nmt_agent::chat::Question;
 use rust_i18n::t;
@@ -130,7 +131,7 @@ pub(crate) fn working_row(
 /// `at` is when it arrived.
 pub(crate) fn agent_reply_row(
     index: usize,
-    text: String,
+    text: TextView,
     cwd: Option<String>,
     author: Option<SharedString>,
     at: Option<i64>,
@@ -161,7 +162,7 @@ pub(crate) fn agent_reply_row(
                     )
                 })
                 .child(
-                    markdown_view(("agent-md", index), text, cwd)
+                    markdown_view(text, cwd)
                         .style(transcript_text_style(cx))
                         .selectable(true),
                 ),

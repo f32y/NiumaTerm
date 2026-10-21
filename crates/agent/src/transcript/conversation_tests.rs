@@ -2,7 +2,88 @@ use std::sync::Arc;
 
 use crate::chat::{Item, ReplayTurn};
 use crate::transcript::TextField;
-use crate::transcript::conversation::{ConversationImage, ConversationState};
+use crate::transcript::conversation::{ConversationImage, ConversationState, EntryChange};
+
+#[test]
+fn accumulated_output_changes_preserve_append_offsets_and_replacement_order() {
+    let mut conversation = ConversationState::default();
+
+    for id in ["first", "second"] {
+        conversation.push(
+            1,
+            Item::CommandExecution {
+                id: id.into(),
+                command: "echo".into(),
+                purpose: None,
+                aggregated_output: Some("old".into()),
+                status: None,
+                exit_code: None,
+            },
+            Vec::new(),
+        );
+    }
+
+    let version = conversation.version();
+
+    conversation.append_delta("first", " one", TextField::CommandOutput);
+    conversation.append_delta("second", " two", TextField::CommandOutput);
+    conversation.append_delta("first", " three", TextField::CommandOutput);
+
+    let change = conversation.changes_since(version).unwrap();
+
+    assert_eq!(change.reset_from, None);
+    assert_eq!(
+        change.entries.as_slice(),
+        &[
+            (0, EntryChange::Append { previous_bytes: 3 }),
+            (1, EntryChange::Append { previous_bytes: 3 })
+        ]
+    );
+
+    let completed = Item::CommandExecution {
+        id: "first".into(),
+        command: "echo".into(),
+        purpose: None,
+        aggregated_output: Some("new".into()),
+        status: None,
+        exit_code: None,
+    };
+
+    conversation.merge_completed(&completed);
+    conversation.append_delta("first", " tail", TextField::CommandOutput);
+
+    let change = conversation.changes_since(version).unwrap();
+
+    assert_eq!(change.entries[0], (0, EntryChange::Replace));
+
+    let version = conversation.version();
+
+    conversation.merge_completed(&Item::CommandExecution {
+        id: "first".into(),
+        command: "echo".into(),
+        purpose: None,
+        aggregated_output: None,
+        status: Some("completed".into()),
+        exit_code: Some(0),
+    });
+
+    assert!(
+        conversation
+            .changes_since(version)
+            .unwrap()
+            .entries
+            .is_empty()
+    );
+
+    for _ in 0..70 {
+        conversation.append_delta("second", "x", TextField::CommandOutput);
+    }
+
+    assert_eq!(
+        conversation.changes_since(version).unwrap().reset_from,
+        Some(0)
+    );
+}
 
 #[test]
 fn indexed_updates_preserve_duplicate_kinds_and_missing_accounting() {
