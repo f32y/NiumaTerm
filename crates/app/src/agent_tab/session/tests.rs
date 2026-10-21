@@ -1468,7 +1468,7 @@ mod failed_start_tests {
     };
     use nmt_agent::AgentWorkspace;
     use nmt_agent::chat::{
-        Event, SendOutcome, SessionSummary, SlashCommandOutcome, ThreadSettings,
+        Event, SendOutcome, SessionScope, SessionSummary, SlashCommandOutcome, ThreadSettings,
     };
     use nmt_agent::input_history::AgentInputHistory as InputHistoryService;
     use nmt_agent::session::lifecycle::{StartOutcome, Status};
@@ -1602,6 +1602,155 @@ mod failed_start_tests {
 
         let _ = fs::remove_file(history.with_extension("json.lock"));
         let _ = fs::remove_file(history);
+    }
+
+    #[gpui::test]
+    fn resume_reloads_empty_history_without_reopening_the_tab(cx: &mut TestAppContext) {
+        let (pane, window) = open_pane(cx);
+
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, _| {
+                let epoch = pane.session.borrow_mut().runtime_mut().begin_start();
+
+                assert!(matches!(
+                    pane.session.borrow_mut().runtime_mut().install(
+                        epoch,
+                        Ok(Backend::Test(TestBackend::new(
+                            [],
+                            SlashCommandOutcome::NotReady,
+                            Vec::new(),
+                        )))
+                    ),
+                    StartOutcome::Installed
+                ));
+            });
+        });
+
+        deliver_session_event(&pane, Event::Ready(ThreadSettings::default()), &cx);
+        deliver_session_event(&pane, Event::History(Vec::new()), &cx);
+
+        for rows_available in [false, true] {
+            cx.update(|window, cx| {
+                pane.update(cx, |pane, cx| {
+                    pane.input
+                        .update(cx, |input, cx| input.set_value("/resume", window, cx));
+
+                    pane.send_user_message_now(window, cx);
+
+                    assert_eq!(pane.history_ui.mode, RecentSessionsMode::AwaitingRows);
+
+                    assert!(pane.open_recent_sessions(cx));
+
+                    let mut session = pane.session.borrow_mut();
+
+                    let Some(Backend::Test(backend)) = session.runtime_mut().backend_mut() else {
+                        panic!("expected test backend");
+                    };
+
+                    assert_eq!(backend.history_requests, [SessionScope::CurrentDirectory]);
+
+                    backend.history_requests.clear();
+                });
+            });
+
+            let rows = if rows_available {
+                vec![SessionSummary {
+                    id: "listed".into(),
+                    title: "listed".into(),
+                    branch: None,
+                    cwd: None,
+                    last_active: SystemTime::UNIX_EPOCH,
+                    snippet: None,
+                    origin: None,
+                }]
+            } else {
+                Vec::new()
+            };
+
+            deliver_session_event(&pane, Event::History(rows), &cx);
+
+            cx.update(|_, cx| {
+                pane.update(cx, |pane, _| {
+                    if rows_available {
+                        assert_eq!(pane.history_ui.mode, RecentSessionsMode::Open);
+                        assert!(pane.palette.feedback.is_none());
+                        assert!(pane.history_ui.is_visible(false, true));
+                    } else {
+                        assert_eq!(pane.history_ui.mode, RecentSessionsMode::Hidden);
+
+                        let expected =
+                            SharedString::from(rust_i18n::t!("agent-composer-no-recent-sessions"));
+
+                        assert_eq!(
+                            pane.palette
+                                .feedback
+                                .as_ref()
+                                .map(|feedback| &feedback.message),
+                            Some(&expected)
+                        );
+                    }
+                });
+            });
+        }
+    }
+
+    #[gpui::test]
+    fn resume_during_startup_waits_for_history(cx: &mut TestAppContext) {
+        let (pane, window) = open_pane(cx);
+
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+
+        cx.update(|window, cx| {
+            pane.update(cx, |pane, cx| {
+                assert_eq!(pane.session.borrow().runtime().status(), Status::Starting);
+                assert!(pane.session.borrow().runtime().backend().is_none());
+                assert!(!pane.history_ui.data.list_in_flight());
+
+                pane.input
+                    .update(cx, |input, cx| input.set_value("/resume", window, cx));
+
+                pane.send_user_message_now(window, cx);
+
+                assert_eq!(pane.history_ui.mode, RecentSessionsMode::AwaitingRows);
+
+                let expected =
+                    SharedString::from(rust_i18n::t!("agent-composer-listing-recent-sessions"));
+
+                assert_eq!(
+                    pane.palette
+                        .feedback
+                        .as_ref()
+                        .map(|feedback| &feedback.message),
+                    Some(&expected)
+                );
+            });
+        });
+
+        deliver_session_event(&pane, Event::Ready(ThreadSettings::default()), &cx);
+
+        deliver_session_event(
+            &pane,
+            Event::History(vec![SessionSummary {
+                id: "listed".into(),
+                title: "listed".into(),
+                branch: None,
+                cwd: None,
+                last_active: SystemTime::UNIX_EPOCH,
+                snippet: None,
+                origin: None,
+            }]),
+            &cx,
+        );
+
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, _| {
+                assert_eq!(pane.history_ui.mode, RecentSessionsMode::Open);
+                assert!(pane.palette.feedback.is_none());
+                assert!(pane.history_ui.is_visible(false, true));
+            });
+        });
     }
 
     #[gpui::test]
@@ -1843,6 +1992,8 @@ mod failed_start_tests {
         let (pane, window) = open_pane(cx);
 
         let mut cx = VisualTestContext::from_window(window.into(), cx);
+
+        deliver_session_event(&pane, Event::Ready(ThreadSettings::default()), &cx);
 
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {

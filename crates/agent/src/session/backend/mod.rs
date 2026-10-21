@@ -593,7 +593,7 @@ impl Backend {
             Backend::DeepSeek(session) => session.history_in_flight(),
             Backend::Claude(_) => false,
             #[cfg(any(test, feature = "test-support"))]
-            Backend::Test(_) => false,
+            Backend::Test(session) => !session.history_requests.is_empty(),
         }
     }
 
@@ -607,7 +607,7 @@ impl Backend {
             Backend::Codex(session) => session.request_history(scope),
             Backend::Claude(_) | Backend::DeepSeek(_) => {}
             #[cfg(any(test, feature = "test-support"))]
-            Backend::Test(_) => {}
+            Backend::Test(session) => session.history_requests.push(scope),
         }
     }
 

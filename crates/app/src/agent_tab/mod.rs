@@ -1173,10 +1173,19 @@ impl AgentPane {
             return true;
         }
 
-        // A harness answers with its list later in the same handshake, so the
-        // snapshot can hold no rows while the list is still on its way. Asking
-        // now would report a folder whose sessions are about to arrive, the
-        // report that a second `/resume` used to be needed to correct.
+        // An earlier empty or failed listing may no longer describe the
+        // available sessions. Refresh it on request, but keep an active
+        // startup or listing so repeated commands cannot replace its result.
+        if !self.history_listing_in_flight() {
+            self.session
+                .borrow_mut()
+                .request_history(self.history_ui.data.scope);
+
+            self.load_filesystem_history(cx);
+
+            self.load_other_agent_history(cx);
+        }
+
         if self.history_listing_in_flight() {
             self.history_ui.await_listing();
 
@@ -3219,6 +3228,8 @@ impl AgentPane {
 
     fn history_listing_in_flight(&self) -> bool {
         self.history_ui.data.list_in_flight()
+            || (self.session.borrow().runtime().status() == Status::Starting
+                && !self.launch_deferred())
             || self
                 .session
                 .borrow()

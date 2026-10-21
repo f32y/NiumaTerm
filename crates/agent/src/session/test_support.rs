@@ -3,8 +3,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::chat::{
-    ForkAnchor, QuestionAnswer, QuestionRequest, QuestionResponse, SendOutcome, SlashCommandInfo,
-    SlashCommandOutcome,
+    ForkAnchor, QuestionAnswer, QuestionRequest, QuestionResponse, SendOutcome, SessionScope,
+    SlashCommandInfo, SlashCommandOutcome,
 };
 use crate::session::team_capabilities::RecoveredTeamTurn;
 use crate::session::{AgentKind, RecoveryIdentity, RenameOutcome, ResumeOutcome, SettingsOutcome};
@@ -34,6 +34,7 @@ pub struct TestBackend {
     pub team_recovered_turns: Vec<RecoveredTeamTurn>,
     pub approval_selection: SettingsOutcome,
     pub approval_selections: Vec<String>,
+    pub history_requests: Vec<SessionScope>,
 
     /// The description of every prompt that asked to name the conversation.
     pub title_requests: Vec<String>,
@@ -74,6 +75,7 @@ impl TestBackend {
             team_recovered_turns: Vec::new(),
             approval_selection: SettingsOutcome::RidesNextSubmission,
             approval_selections: Vec::new(),
+            history_requests: Vec::new(),
             title_requests: Vec::new(),
             send_outcomes: send_outcomes.into_iter().collect(),
             slash_outcome,
