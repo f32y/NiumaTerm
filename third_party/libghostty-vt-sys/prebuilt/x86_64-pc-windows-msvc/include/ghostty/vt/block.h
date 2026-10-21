@@ -405,6 +405,8 @@ typedef struct {
   bool unwrap;
   /** Trim trailing blanks from each line. */
   bool trim;
+  /** Emit VT sequences (styles, hyperlinks) instead of plain text. */
+  bool vt;
 } GhosttyBlockFormatOptions;
 
 /**
