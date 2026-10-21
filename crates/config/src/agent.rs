@@ -58,6 +58,10 @@ pub struct AgentConfig {
     /// Offer Orchestration tabs, which run a declared graph of agent steps.
     #[serde(default, rename = "enable-agent-orchestration")]
     pub enable_agent_orchestration: bool,
+
+    /// Show reasoning as expanded messages between tool-call groups.
+    #[serde(default, rename = "show-thinking-in-stream")]
+    pub show_thinking_in_stream: bool,
 }
 
 impl Default for AgentConfig {
@@ -74,6 +78,7 @@ impl Default for AgentConfig {
             answer_questions_one_at_a_time: false,
             unified_agent_tab: true,
             enable_agent_orchestration: false,
+            show_thinking_in_stream: true,
         }
     }
 }

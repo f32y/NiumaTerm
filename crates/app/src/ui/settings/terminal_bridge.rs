@@ -80,6 +80,7 @@ fn agent_snapshot(cx: &App) -> AgentSettings {
         terminal_background: rgb(theme_default_background().into()).into(),
         answer_questions_one_at_a_time: settings.config().agent.answer_questions_one_at_a_time,
         unified_agent_tab: settings.config().agent.unified_agent_tab,
+        show_thinking_in_stream: settings.config().agent.show_thinking_in_stream,
     }
 }
 

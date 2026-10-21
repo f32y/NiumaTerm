@@ -77,6 +77,9 @@ pub struct AgentSettings {
     /// Offer the launch profile as a composer control, so one kind of agent
     /// tab can become any configured agent before its conversation starts.
     pub unified_agent_tab: bool,
+
+    /// Keep reasoning visible as messages between tool-call groups.
+    pub show_thinking_in_stream: bool,
 }
 
 impl Global for AgentSettings {}
@@ -126,6 +129,7 @@ impl Default for AgentSettings {
             terminal_background: Hsla::black(),
             answer_questions_one_at_a_time: false,
             unified_agent_tab: true,
+            show_thinking_in_stream: false,
         }
     }
 }

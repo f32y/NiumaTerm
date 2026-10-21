@@ -8,7 +8,8 @@ use nmt_config::agent::CollapseRows;
 
 use crate::agent_tab::profile::AgentKind;
 use crate::agent_tab::settings::AgentSettings;
-use crate::agent_tab::transcript::TranscriptView;
+use crate::agent_tab::transcript::reveal::RevealKey;
+use crate::agent_tab::transcript::{RowSpec, TranscriptView};
 
 struct TranscriptRoot {
     transcript: Entity<TranscriptView>,
@@ -202,4 +203,123 @@ fn appending_to_a_visible_reply_preserves_the_reading_position(cx: &mut TestAppC
     }
 
     assert!(cx.debug_bounds("transcript-agent-0").unwrap().size.height > original.size.height);
+}
+
+#[gpui::test]
+fn thinking_setting_updates_existing_rows_and_keeps_the_full_message_open(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+
+        cx.set_global(AgentSettings {
+            reduce_motion: true,
+            collapse_tool_calls: CollapseRows::ToolCalls,
+            ..AgentSettings::default()
+        });
+    });
+
+    let (root, cx) = cx.add_window_view(|_, cx| {
+        cx.observe_global::<AgentSettings>(|_, cx| cx.notify())
+            .detach();
+
+        TranscriptRoot {
+            transcript: cx.new(|_| {
+                let mut view = TranscriptView::new(AgentKind::Codex, None);
+
+                for index in 0..5 {
+                    let item = if index == 2 {
+                        Item::Reasoning {
+                            id: "reasoning".into(),
+                            summary: Some("Reviewing the result.".into()),
+                        }
+                    } else {
+                        Item::Other {
+                            id: format!("tool-{index}"),
+                            kind: "tool".into(),
+                            title: "Example tool".into(),
+                            output: Some("done".into()),
+                            status: Some("completed".into()),
+                        }
+                    };
+
+                    view.push_stamped(1, item);
+                }
+
+                view
+            }),
+        }
+    });
+
+    let cx: &mut VisualTestContext = cx;
+    let transcript = root.read_with(cx, |root, _| root.transcript.clone());
+
+    cx.run_until_parked();
+
+    draw(cx);
+
+    assert!(cx.debug_bounds("thinking-body-2").is_none());
+
+    transcript.read_with(cx, |view, _| {
+        assert_eq!(view.rows.len(), 1);
+        assert!(matches!(
+            view.rows[0].spec,
+            RowSpec::RunToggle { tool_count: 5, .. }
+        ));
+    });
+
+    cx.update_global::<AgentSettings, _>(|settings, _| settings.show_thinking_in_stream = true);
+    cx.run_until_parked();
+
+    draw(cx);
+
+    transcript.read_with(cx, |view, _| {
+        assert_eq!(view.rows.len(), 3);
+        assert!(matches!(view.rows[1].spec, RowSpec::Entry { index: 2, .. }));
+    });
+
+    let body = cx.debug_bounds("thinking-body-2").unwrap();
+    let header = cx.debug_bounds("thinking-head-2").unwrap();
+
+    assert!(body.size.height > px(0.));
+
+    cx.simulate_click(header.center(), Default::default());
+    cx.run_until_parked();
+
+    draw(cx);
+
+    assert_eq!(cx.debug_bounds("thinking-body-2").unwrap(), body);
+
+    transcript.read_with(cx, |view, _| {
+        assert!(!view.disclosures.is_disclosing(RevealKey::Row(2)));
+    });
+
+    transcript.update(cx, |view, cx| {
+        view.append_delta(
+            "reasoning",
+            &"\n\nMore reasoning that remains visible in the message stream.".repeat(30),
+            TextField::ReasoningSummary,
+        );
+
+        cx.notify();
+    });
+
+    cx.run_until_parked();
+
+    draw(cx);
+
+    assert!(cx.debug_bounds("thinking-body-2").unwrap().size.height > px(256.));
+
+    cx.update_global::<AgentSettings, _>(|settings, _| settings.show_thinking_in_stream = false);
+    cx.run_until_parked();
+
+    draw(cx);
+
+    assert!(cx.debug_bounds("thinking-body-2").is_none());
+
+    transcript.read_with(cx, |view, _| {
+        assert_eq!(view.rows.len(), 1);
+        assert!(matches!(
+            view.rows[0].spec,
+            RowSpec::RunToggle { tool_count: 5, .. }
+        ));
+    });
 }

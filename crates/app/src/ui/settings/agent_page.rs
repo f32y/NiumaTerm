@@ -217,6 +217,18 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
                 ),
             )
             .description(t!("settings-agent-enable-orchestration-description").into_owned()),
+        )
+        .item(
+            SettingItem::new(
+                t!("settings-agent-show-thinking-in-stream"),
+                settings_switch(
+                    |config| config.agent.show_thinking_in_stream,
+                    |settings, value| {
+                        settings.edit_agent(|section| section.show_thinking_in_stream = value);
+                    },
+                ),
+            )
+            .description(t!("settings-agent-show-thinking-in-stream-description").into_owned()),
         );
 
     let mut cli_updates = SettingGroup::new()

@@ -75,6 +75,7 @@ token-speed-mode = "session"
 answer-questions-one-at-a-time = false
 unified-agent-tab = true
 enable-agent-orchestration = false
+show-thinking-in-stream = true
 
 [system]
 restore-last-session-when-opening = true

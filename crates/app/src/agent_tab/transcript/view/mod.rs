@@ -40,7 +40,7 @@ use crate::agent_tab::transcript::render::message_rows::{
 };
 use crate::agent_tab::transcript::render::text_style::{markdown_view, transcript_text_style};
 use crate::agent_tab::transcript::render::user_row::user_prompt_row;
-use crate::agent_tab::transcript::render::work_card::{work_card, work_step};
+use crate::agent_tab::transcript::render::work_card::{thinking_message, work_card, work_step};
 use crate::agent_tab::transcript::render::{
     TRANSCRIPT_LINE_HEIGHT, TRANSCRIPT_RUN_RULE, TRANSCRIPT_TEXT_INSET, bounded_scroll,
     compaction_row, gap_px, render_interrupted_row, render_run_toggle, render_turn_fold,
@@ -90,6 +90,8 @@ pub struct TranscriptView {
     /// Collapse setting the rows above were built under, so a change to it can
     /// retire the per-turn and per-run departures from the mode it replaces.
     collapse_mode: CollapseRows,
+
+    show_thinking_in_stream: bool,
 
     /// Which parts of the transcript are open, how far through their motion
     /// they are, and how tall each one lays out to.
@@ -159,6 +161,7 @@ impl TranscriptView {
             picker: PickerReservation::default(),
             disclosures: Disclosures::new(folds_turns(collapse_mode)),
             collapse_mode,
+            show_thinking_in_stream: false,
             code_transcripts: CodeTranscriptCache::default(),
             text_views: TranscriptTextCache::default(),
             typing: ReplyTyping::new(),
@@ -583,6 +586,26 @@ impl TranscriptView {
                     cx,
                 )
             }
+            SessionItem::Reasoning {
+                summary: Some(summary),
+                ..
+            } if self.show_thinking_in_stream => {
+                let text = self.text_views.view(index, TextPart::Work, summary, cx);
+
+                let body = div()
+                    .id(("thinking-body", index))
+                    .debug_selector(move || format!("thinking-body-{index}"))
+                    .w_full()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(
+                        markdown_view(text, self.cwd.clone())
+                            .style(transcript_text_style(cx))
+                            .selectable(true),
+                    );
+
+                thinking_message(index, body.into_any_element(), cx)
+            }
             item if is_work_row(item) => self.render_work_row(index, window, cx),
             _ => div().into_any_element(),
         }
@@ -761,6 +784,7 @@ impl TranscriptView {
                 conversation: &conversation,
                 disclosures: &self.disclosures,
                 typing: &self.typing,
+                show_thinking_in_stream: self.show_thinking_in_stream,
             }
             .turn_specs(turn, start, end, collapse, &mut specs);
 
@@ -939,6 +963,7 @@ impl TranscriptView {
             conversation,
             disclosures: &self.disclosures,
             typing: &self.typing,
+            show_thinking_in_stream: self.show_thinking_in_stream,
         }
     }
 
@@ -1193,6 +1218,7 @@ impl Render for TranscriptView {
 
         let settings = cx.global::<AgentSettings>();
         let collapse_tool_calls = settings.collapse_tool_calls;
+        let show_thinking_in_stream = settings.show_thinking_in_stream;
         let smooth_wheel = settings.smooth_wheel;
 
         let font = (
@@ -1223,6 +1249,12 @@ impl Render for TranscriptView {
         }
 
         self.transcript_list.set_smooth_wheel_enabled(smooth_wheel);
+
+        if self.show_thinking_in_stream != show_thinking_in_stream {
+            self.show_thinking_in_stream = show_thinking_in_stream;
+
+            self.row_cache.invalidate(0);
+        }
 
         // Transcript rows, one folded/expanded section per turn (entries are
         // tagged with a monotonic turn id, so turns are contiguous slices).

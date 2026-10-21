@@ -27,6 +27,7 @@ pub(crate) struct RowSource<'a> {
     pub(crate) conversation: &'a ConversationState,
     pub(crate) disclosures: &'a Disclosures,
     pub(crate) typing: &'a ReplyTyping,
+    pub(crate) show_thinking_in_stream: bool,
 }
 
 /// The rows the list currently holds, read against the source they were built
@@ -219,6 +220,11 @@ impl RowSource<'_> {
 
         let items = self.conversation.content.entries();
 
+        let grouped_work = |item: &SessionItem| {
+            is_work_row(item)
+                && !(self.show_thinking_in_stream && matches!(item, SessionItem::Reasoning { .. }))
+        };
+
         while i < end {
             let item = &items[i].item;
 
@@ -228,7 +234,7 @@ impl RowSource<'_> {
                 continue;
             }
 
-            if !is_work_row(item) {
+            if !grouped_work(item) {
                 rows.push(self.entry_spec(i));
 
                 i += 1;
@@ -242,7 +248,7 @@ impl RowSource<'_> {
             let mut visible: Vec<usize> = Vec::new();
             let mut j = i;
 
-            while j < end && !skip(j) && (hidden(&items[j].item) || is_work_row(&items[j].item)) {
+            while j < end && !skip(j) && (hidden(&items[j].item) || grouped_work(&items[j].item)) {
                 if !hidden(&items[j].item) {
                     visible.push(j);
                 }
@@ -294,6 +300,7 @@ impl RowSource<'_> {
             SessionItem::AgentMessage {
                 questions: Some(_), ..
             } => true,
+            SessionItem::Reasoning { .. } => self.show_thinking_in_stream,
             // The plan as the turn left it stays with the reply that closed
             // the work; the earlier states it passed through are work.
             SessionItem::TaskList { .. } => !items[index + 1..]

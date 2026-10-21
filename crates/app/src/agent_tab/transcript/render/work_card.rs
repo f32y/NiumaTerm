@@ -3,7 +3,7 @@
 use std::time::Instant;
 
 use gpui::prelude::*;
-use gpui::{AnyElement, Context, div, px};
+use gpui::{AnyElement, App, Context, Div, div, px};
 use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::{ActiveTheme as _, IconName};
 use nmt_agent::chat::Item as SessionItem;
@@ -14,6 +14,7 @@ use crate::agent_tab::transcript::disclosure_row::{
     AGENT_DISCLOSURE_DETAIL_INSET, AgentCardTone, AgentDisclosureRow, agent_card,
 };
 use crate::agent_tab::transcript::render::menus::copy_entry_menu;
+use crate::agent_tab::transcript::render::{TRANSCRIPT_RUN_RULE, TRANSCRIPT_TEXT_INSET};
 use crate::agent_tab::transcript::reveal::{Disclosures, RevealKey, RevealedPart, revealed_block};
 use crate::agent_tab::transcript::{
     TranscriptView, command_execution_heading, command_failure_reason,
@@ -227,18 +228,7 @@ pub(crate) fn work_card(
                     .child(reason)
             }))
             .children(body.map(|body| {
-                let block = div()
-                    // Expanded content takes the card's own inset on both
-                    // sides. The rule above it already says the detail belongs
-                    // to the header, so indenting it as well would spend a
-                    // third of a narrow card on saying it twice, and command
-                    // output is exactly the content that needs the width.
-                    .w_full()
-                    .border_t_1()
-                    .border_color(cx.theme().border.opacity(0.6))
-                    .px(px(AGENT_CARD_PADDING_X))
-                    .py(px(AGENT_CARD_BODY_PADDING_Y))
-                    .child(body);
+                let block = work_detail(body, cx);
 
                 revealed_block(
                     block,
@@ -257,4 +247,49 @@ pub(crate) fn work_card(
         .child(header)
         .children(card_body)
         .into_any_element()
+}
+
+/// Reasoning uses the expanded work style without a disclosure or height limit.
+pub(crate) fn thinking_message(
+    index: usize,
+    body: AnyElement,
+    cx: &mut Context<TranscriptView>,
+) -> AnyElement {
+    let header = AgentDisclosureRow::new(("thinking-head", index), t!("agent-transcript-thinking"))
+        .type_icon(IconName::Bot)
+        .heads_body(true)
+        .render(cx)
+        .debug_selector(move || format!("thinking-head-{index}"));
+
+    let card = agent_card()
+        .id(("entry", index))
+        .modern_context_menu(copy_entry_menu(cx.entity().downgrade(), index))
+        .child(header)
+        .child(
+            work_detail(body, cx)
+                .bg(AgentCardTone::Neutral.colors(cx).background)
+                .rounded_b(px(AGENT_CARD_RADIUS)),
+        );
+
+    div()
+        .w_full()
+        .pl(px(TRANSCRIPT_TEXT_INSET))
+        .child(
+            div()
+                .w_full()
+                .border_l(px(TRANSCRIPT_RUN_RULE))
+                .border_color(cx.theme().border)
+                .child(card),
+        )
+        .into_any_element()
+}
+
+fn work_detail(body: AnyElement, cx: &App) -> Div {
+    div()
+        .w_full()
+        .border_t_1()
+        .border_color(cx.theme().border.opacity(0.6))
+        .px(px(AGENT_CARD_PADDING_X))
+        .py(px(AGENT_CARD_BODY_PADDING_Y))
+        .child(body)
 }

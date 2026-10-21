@@ -116,6 +116,7 @@ fn sample_agent() -> AgentConfig {
         answer_questions_one_at_a_time: true,
         unified_agent_tab: false,
         enable_agent_orchestration: true,
+        show_thinking_in_stream: true,
     }
 }
 
