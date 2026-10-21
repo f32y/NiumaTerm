@@ -17,6 +17,7 @@ pub(super) use crate::dsh::session::loads::{
 
 mod actions;
 mod controls;
+mod jobs;
 mod lane;
 mod loads;
 mod switch;
@@ -45,6 +46,7 @@ use crate::dsh::models::ModelDirectory;
 use crate::dsh::projections::ProjectionTracker;
 use crate::dsh::session::actions::{prompt_payload, run_slash, schedule_close_actions};
 use crate::dsh::session::controls::{COMPLETED_FRAME, Controls, Operation, question_id};
+use crate::dsh::session::jobs::{JOB_TRANSCRIPT_FRAME, job_transcript_events, load_job_transcript};
 use crate::dsh::session::lane::CommandLane;
 use crate::dsh::session::loads::{
     ModelProfile, check_running, failed_read_events, load_agent_presets, load_commands,
@@ -624,6 +626,9 @@ impl Session {
             }
             Some(SUBAGENTS_FRAME) => return self.on_subagents(payload),
             Some(JOBS_FRAME) => return self.on_jobs(payload),
+            Some(JOB_TRANSCRIPT_FRAME) => {
+                return job_transcript_events(payload, &self.session_id, &self.job_rows);
+            }
             Some(SUBAGENT_TRANSCRIPT_FRAME) => return self.on_subagent_transcript(payload),
             Some(WORKFLOW_TRANSCRIPT_FRAME) => {
                 return workflow_transcript_events(payload, &self.session_id);
@@ -1371,19 +1376,18 @@ impl Session {
     /// selects a transport by the child's kind, and only the catalog reports
     /// which kind a child is.
     ///
-    /// A background job has no conversation, and the harness keeps its output
-    /// behind the agent's own job tools, so its detail view is answered at once
-    /// as unreadable instead of waiting on a read that never starts.
+    /// A background job's recorded output is read from the parent log because
+    /// invoking the job tool would consume output intended for the agent.
     pub fn load_background_task_transcript(&mut self, child: &str) -> Vec<Event> {
         if self.job_rows.iter().any(|row| row.key.id == child) {
-            return vec![Event::BackgroundTaskTranscript {
-                key: BackgroundTaskKey::deepseek(child),
-                update: BackgroundTaskTranscriptUpdate::state(
-                    BackgroundTaskLoadState::Unavailable {
-                        message: "DeepSeek Harness shares job output only with the agent that started the job.".to_string(),
-                    },
-                ),
-            }];
+            load_job_transcript(
+                self.client.clone(),
+                self.session_id.clone(),
+                child.to_string(),
+                Arc::clone(&self.deliver),
+            );
+
+            return Vec::new();
         }
 
         let Some(continuable) = self.subagent_modes.get(child).copied() else {

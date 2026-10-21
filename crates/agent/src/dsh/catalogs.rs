@@ -144,8 +144,8 @@ fn task_summary(
 ///
 /// A delegated subagent job is skipped: the child it runs is already a row
 /// from the child catalog, and a second row would show the same work twice.
-/// The harness reports each job's lifecycle but offers other clients no way to
-/// stop one or read its output, so no row offers a Stop control.
+/// The harness reports each job's lifecycle but provides no client operation
+/// to stop one, so no row offers a Stop control.
 pub(crate) fn job_rows(
     value: &Value,
     parent_session_id: &str,
@@ -175,7 +175,7 @@ pub(crate) fn job_rows(
                 key: BackgroundTaskKey::deepseek(id),
                 parent_session: parent_session.clone(),
                 refs: BackgroundTaskRefs::DeepSeek { continuable: false },
-                kind: if kind == Some("bash") {
+                kind: if matches!(kind, Some("bash" | "pwsh")) {
                     BackgroundTaskKind::Shell
                 } else {
                     BackgroundTaskKind::Agent
