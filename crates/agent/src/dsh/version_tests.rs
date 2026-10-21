@@ -100,7 +100,7 @@ fn parse_version(output: &str) -> Option<Version> {
 
 #[test]
 fn only_the_pinned_releases_are_reported_as_supported() {
-    for pinned in ["0.1.5-rc.1", "0.2.0-rc.2"] {
+    for pinned in ["0.1.5-rc.1", "0.2.0-rc.2", "0.2.1-rc.2"] {
         assert_eq!(
             classify(&Version::parse(pinned).unwrap()),
             VersionSupport::Supported,
@@ -121,6 +121,9 @@ fn only_the_pinned_releases_are_reported_as_supported() {
         "0.2.0-rc.1",
         "0.2.0",
         "0.2.1-alpha.1",
+        "0.2.1-rc.1",
+        "0.2.1-rc.3",
+        "0.2.1",
         "1.0.0",
     ] {
         assert!(

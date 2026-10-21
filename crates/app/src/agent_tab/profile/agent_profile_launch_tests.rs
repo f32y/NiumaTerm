@@ -252,6 +252,7 @@ fn a_deepseek_profile_without_the_switch_exports_no_endpoint() {
 #[test]
 fn deepseek_package_launchers_pin_the_selected_release() {
     for (version, package) in [
+        (DshVersion::V0_2_1, "@deepseek-ai/dsh@0.2.1-rc.2"),
         (DshVersion::V0_2_0, "@deepseek-ai/dsh@0.2.0-rc.2"),
         (DshVersion::V0_1_5, "@deepseek-ai/dsh@0.1.5-rc.1"),
     ] {

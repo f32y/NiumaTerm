@@ -80,14 +80,16 @@ pub enum AgentProfileLauncher {
 pub enum DshVersion {
     #[serde(rename = "0.1.5-rc.1")]
     V0_1_5,
-    #[default]
     #[serde(rename = "0.2.0-rc.2")]
     V0_2_0,
+    #[default]
+    #[serde(rename = "0.2.1-rc.2")]
+    V0_2_1,
 }
 
 impl DshVersion {
     /// Newest first, the order the settings editor offers them in.
-    pub const ALL: [Self; 2] = [Self::V0_2_0, Self::V0_1_5];
+    pub const ALL: [Self; 3] = [Self::V0_2_1, Self::V0_2_0, Self::V0_1_5];
 }
 
 /// One environment variable applied to the agent process on launch.
@@ -419,6 +421,7 @@ impl From<DshVersion> for &'static str {
         match value {
             DshVersion::V0_1_5 => "0.1.5-rc.1",
             DshVersion::V0_2_0 => "0.2.0-rc.2",
+            DshVersion::V0_2_1 => "0.2.1-rc.2",
         }
     }
 }

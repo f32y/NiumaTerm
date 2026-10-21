@@ -484,29 +484,48 @@ launcher = "npx"
 
     assert_eq!(
         config.agent_profiles.list[0].dsh_version,
-        profile::DshVersion::V0_2_0
+        profile::DshVersion::V0_2_1
     );
+}
 
-    let mut older = config.agent_profiles.list.clone();
+#[test]
+fn deepseek_profiles_preserve_each_saved_release() {
+    for (release, version) in [
+        ("0.2.1-rc.2", profile::DshVersion::V0_2_1),
+        ("0.2.0-rc.2", profile::DshVersion::V0_2_0),
+        ("0.1.5-rc.1", profile::DshVersion::V0_1_5),
+    ] {
+        let source = format!(
+            r#"
+[[agent-profiles.list]]
+name = "DeepSeek Harness"
+kind = "deepseek"
+launcher = "npx"
+dsh-version = "{release}"
+"#
+        );
 
-    older[0].dsh_version = profile::DshVersion::V0_1_5;
+        let config: Config = parse_toml(&source).unwrap();
 
-    let mut doc = DocumentMut::new();
+        assert_eq!(config.agent_profiles.list[0].dsh_version, version);
 
-    profile::patch_agent_table(
-        ensure_explicit_table(&mut doc, "agent-profiles"),
-        &older,
-        "DeepSeek Harness",
-    )
-    .unwrap();
+        let mut doc = DocumentMut::new();
 
-    let saved = doc.to_string();
+        profile::patch_agent_table(
+            ensure_explicit_table(&mut doc, "agent-profiles"),
+            &config.agent_profiles.list,
+            "DeepSeek Harness",
+        )
+        .unwrap();
 
-    assert!(saved.contains("dsh-version = \"0.1.5-rc.1\""));
+        let saved = doc.to_string();
 
-    let restored: Config = parse_toml(&saved).unwrap();
+        assert!(saved.contains(&format!("dsh-version = \"{release}\"")));
 
-    assert_eq!(restored.agent_profiles.list, older);
+        let restored: Config = parse_toml(&saved).unwrap();
+
+        assert_eq!(restored.agent_profiles.list, config.agent_profiles.list);
+    }
 }
 
 const LEGACY_PROFILE_TOML: &str = r#"
