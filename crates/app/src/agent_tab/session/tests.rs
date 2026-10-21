@@ -1148,6 +1148,10 @@ mod session_replacement_tests {
 
     #[gpui::test]
     fn a_reset_holds_its_old_session_until_the_replacement_is_installed(cx: &mut TestAppContext) {
+        // DeepSeek history queries complete on the shared Tokio runtime and
+        // can wake the UI scheduler from a worker thread.
+        cx.executor().allow_parking();
+
         let profile = AgentProfile {
             name: "Session Replacement Test".into(),
             kind: AgentKind::DeepSeek,
