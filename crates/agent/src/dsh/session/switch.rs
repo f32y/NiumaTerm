@@ -1,9 +1,8 @@
-//! Moving a tab onto another conversation without holding up its thread.
+//! Asynchronous conversation changes.
 //!
-//! Opening a conversation is a call plus a stream handshake, together up to
-//! tens of seconds against a busy host. Both run as one command here, and the
-//! opened streams wait in a slot until the session takes them over while
-//! processing the frame that announces them.
+//! A branch request and stream setup can take tens of seconds against a busy
+//! host. They run as one command that stores the opened streams until the
+//! session processes the completion frame.
 
 #[cfg(test)]
 #[path = "switch_tests.rs"]
@@ -17,7 +16,7 @@ use serde_json::{Value, json};
 use crate::dsh::api::ApiClient;
 use crate::dsh::events::Downlinks;
 use crate::dsh::host::Host;
-use crate::dsh::session::{OpenedConversation, open_conversation, settled};
+use crate::dsh::session::{OpenedConversation, settled};
 
 /// An opened conversation on its way to the session.
 pub(super) struct Switch {
@@ -72,7 +71,7 @@ pub(super) async fn switch_conversation(switching: Switching, target: Target) {
     // until it is out, or the session would drop them as another tab's.
     let held = Arc::new(Mutex::new(Some(Vec::new())));
 
-    let gate: Arc<dyn Fn(Value) + Send + Sync> = {
+    let deliver_held: Arc<dyn Fn(Value) + Send + Sync> = {
         let held = Arc::clone(&held);
         let deliver = Arc::clone(&deliver);
 
@@ -112,10 +111,24 @@ pub(super) async fn switch_conversation(switching: Switching, target: Target) {
             }
         };
 
-        let opened = open_conversation(&client, cwd.as_deref(), Some(&thread_id), None).await?;
-
+        // Creating with an existing id can return a new, blank conversation.
+        // Following the saved log preserves its id and selected preset;
+        // the host resumes its agent when a later command needs it.
         let (downlinks, snapshot) =
-            Downlinks::open(client.clone(), host, opened.session_id.clone(), gate).await?;
+            Downlinks::open(client.clone(), host, thread_id.clone(), deliver_held).await?;
+
+        if let Some(cwd) = cwd.as_deref()
+            && snapshot["header"]["cwd"].as_str() != Some(cwd)
+        {
+            return Err("the conversation belongs to another working directory".to_string());
+        }
+
+        let opened = OpenedConversation {
+            session_id: thread_id,
+            agent_preset: snapshot["projections"]["values"]["agentPreset"]
+                .as_str()
+                .map(str::to_string),
+        };
 
         Ok::<_, String>(Switch {
             opened,

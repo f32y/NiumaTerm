@@ -220,11 +220,6 @@ pub(super) struct OpenedConversation {
     pub(super) agent_preset: Option<String>,
 }
 
-/// Open a conversation on the host, or reattach to an existing one.
-///
-/// The same call serves both: naming an existing id returns that session
-/// unchanged when the directory matches, and refuses when it does not, so
-/// reattaching is safe to attempt without a separate probe.
 /// What NiumaTerm asks the harness to open a conversation with.
 ///
 /// The header holds exactly one working directory, which the harness resolves
@@ -233,23 +228,11 @@ pub(super) struct OpenedConversation {
 /// instead of approximated: no common ancestor is substituted, and no
 /// broader permission preset is selected on the user's behalf. The Agent Tab
 /// discloses what that leaves out.
-///
-/// A preset is only named for a new conversation: reattaching to one composed
-/// from another preset is refused, and the composition it already has is the
-/// one its history was produced under.
-pub(crate) fn session_create_payload(
-    cwd: Option<&str>,
-    session_id: Option<&str>,
-    agent_preset: Option<&str>,
-) -> Value {
+fn session_create_payload(cwd: Option<&str>, agent_preset: Option<&str>) -> Value {
     let mut payload = json!({});
 
     if let Some(cwd) = cwd {
         payload["cwd"] = json!(cwd);
-    }
-
-    if let Some(session_id) = session_id {
-        payload["sessionId"] = json!(session_id);
     }
 
     if let Some(agent_preset) = agent_preset {
@@ -283,17 +266,13 @@ pub(crate) fn question_answer(id: &str, answer: &QuestionAnswer) -> Value {
     answered
 }
 
-async fn open_conversation(
+async fn create_conversation(
     client: &ApiClient,
     cwd: Option<&str>,
-    session_id: Option<&str>,
     agent_preset: Option<&str>,
 ) -> Result<OpenedConversation, String> {
     let created = client
-        .request(
-            "session/create",
-            session_create_payload(cwd, session_id, agent_preset),
-        )
+        .request("session/create", session_create_payload(cwd, agent_preset))
         .await
         .map_err(|error| error.message().to_string())?;
 
@@ -321,11 +300,11 @@ pub(super) async fn open_new_conversation(
     agent_preset: Option<&str>,
 ) -> Result<(OpenedConversation, Option<String>), String> {
     match (
-        open_conversation(client, cwd, None, agent_preset).await,
+        create_conversation(client, cwd, agent_preset).await,
         agent_preset,
     ) {
         (Err(error), Some(preset)) => {
-            let opened = open_conversation(client, cwd, None, None).await?;
+            let opened = create_conversation(client, cwd, None).await?;
 
             let refusal = format!(
                 "The agent preset \"{preset}\" could not be used, so this conversation \

@@ -5,7 +5,7 @@ use std::thread;
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use tokio_tungstenite::tungstenite::{Message, accept};
+use tokio_tungstenite::tungstenite::{Message, WebSocket, accept};
 
 use crate::dsh::api::ApiClient;
 use crate::dsh::session::switch::{SwitchSlot, Switching, Target, switch_conversation};
@@ -50,6 +50,48 @@ fn item(stream: &str, value: Value) -> Value {
     json!({ "type": "item", "streamId": stream, "value": value })
 }
 
+fn accept_streams(listener: &TcpListener) -> WebSocket<TcpStream> {
+    let (stream, _) = listener.accept().unwrap();
+
+    stream
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+
+    let mut socket = accept(stream).unwrap();
+
+    for _ in 0..3 {
+        let message = socket.read().unwrap();
+        let request: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
+
+        if request["streamId"] == "follow" {
+            assert_eq!(
+                request["payload"]["args"]["request"]["address"]["sessionId"],
+                "session-2"
+            );
+        }
+    }
+
+    socket
+}
+
+fn send_snapshot(socket: &mut WebSocket<TcpStream>, snapshot: Value) {
+    for frame in [
+        item(
+            "events",
+            json!({ "type": "ready", "clientId": "generation" }),
+        ),
+        item(
+            "control",
+            json!({ "type": "baseline", "value": { "queues": {} } }),
+        ),
+        item("follow", snapshot),
+    ] {
+        socket
+            .send(Message::Text(frame.to_string().into()))
+            .unwrap();
+    }
+}
+
 fn switching(client: ApiClient, slot: &SwitchSlot) -> (Switching, mpsc::Receiver<Value>) {
     let (frames_tx, frames) = mpsc::channel();
 
@@ -67,9 +109,6 @@ fn switching(client: ApiClient, slot: &SwitchSlot) -> (Switching, mpsc::Receiver
     (switching, frames)
 }
 
-/// The opened streams report before the session has been told to accept their
-/// conversation, and it drops frames for a conversation it is not on. What
-/// they said has to reach it behind the announcement, in the order it was said.
 #[test]
 fn the_announcement_precedes_everything_the_new_streams_reported() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -82,42 +121,16 @@ fn the_announcement_precedes_everything_the_new_streams_reported() {
         .unwrap();
 
     let server = thread::spawn(move || {
-        let (stream, _) = listener.accept().unwrap();
+        let mut socket = accept_streams(&listener);
 
-        let method = answer_call(
-            stream,
-            r#"{"result":{"ok":true,"value":{"sessionId":"session-2"}}}"#,
+        send_snapshot(
+            &mut socket,
+            json!({
+                "type": "snapshot", "records": [],
+                "header": { "cwd": "/project", "agentPreset": "standard" },
+                "projections": { "values": { "agentPreset": "minimal" } },
+            }),
         );
-
-        assert_eq!(method, "session/create");
-
-        let (stream, _) = listener.accept().unwrap();
-
-        stream
-            .set_read_timeout(Some(Duration::from_secs(3)))
-            .unwrap();
-
-        let mut socket = accept(stream).unwrap();
-
-        for _ in 0..3 {
-            socket.read().unwrap();
-        }
-
-        for frame in [
-            item(
-                "events",
-                json!({ "type": "ready", "clientId": "generation" }),
-            ),
-            item(
-                "control",
-                json!({ "type": "baseline", "value": { "queues": {} } }),
-            ),
-            item("follow", json!({ "type": "snapshot", "records": [] })),
-        ] {
-            socket
-                .send(Message::Text(frame.to_string().into()))
-                .unwrap();
-        }
 
         // Held open until the client lets go, so the reader stays connected
         // for as long as the test looks at what it delivered.
@@ -125,7 +138,10 @@ fn the_announcement_precedes_everything_the_new_streams_reported() {
     });
 
     let slot = SwitchSlot::default();
-    let (switching, frames) = switching(client, &slot);
+
+    let (mut switching, frames) = switching(client, &slot);
+
+    switching.cwd = Some("/project".into());
 
     nmt_platform::runtime().block_on(switch_conversation(
         switching,
@@ -152,6 +168,7 @@ fn the_announcement_precedes_everything_the_new_streams_reported() {
         .expect("the opened streams were handed over");
 
     assert_eq!(switch.opened.session_id, "session-2");
+    assert_eq!(switch.opened.agent_preset.as_deref(), Some("minimal"));
 
     drop(switch);
 
@@ -170,12 +187,18 @@ fn a_refused_change_is_reported_against_the_conversation_the_tab_is_on() {
         .unwrap();
 
     let server = thread::spawn(move || {
-        let (stream, _) = listener.accept().unwrap();
+        let mut socket = accept_streams(&listener);
 
-        answer_call(
-            stream,
-            r#"{"result":{"ok":false,"error":{"code":"session/cwd-mismatch","message":"rooted elsewhere"}}}"#,
-        );
+        socket
+            .send(Message::Text(
+                json!({
+                    "type": "error", "streamId": "follow",
+                    "error": { "code": "session/not-found", "message": "session missing" },
+                })
+                .to_string()
+                .into(),
+            ))
+            .unwrap();
     });
 
     let slot = SwitchSlot::default();
@@ -194,7 +217,107 @@ fn a_refused_change_is_reported_against_the_conversation_the_tab_is_on() {
     assert_eq!(delivered[0]["payload"]["sessionId"], "session-1");
     assert_eq!(
         delivered[0]["payload"]["command"],
-        json!({ "kind": "switchFailed", "error": "rooted elsewhere" })
+        json!({ "kind": "switchFailed", "error": "follow: session missing" })
     );
     assert!(slot.lock().is_none());
+}
+
+#[test]
+fn a_conversation_from_another_directory_is_refused_before_replay() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+
+    let client = nmt_platform::runtime()
+        .block_on(ApiClient::new(format!(
+            "http://{}",
+            listener.local_addr().unwrap()
+        )))
+        .unwrap();
+
+    let server = thread::spawn(move || {
+        let mut socket = accept_streams(&listener);
+
+        send_snapshot(
+            &mut socket,
+            json!({
+                "type": "snapshot", "records": [],
+                "header": { "cwd": "/another-project" },
+            }),
+        );
+
+        let _ = socket.read();
+    });
+
+    let slot = SwitchSlot::default();
+
+    let (mut switching, frames) = switching(client, &slot);
+
+    switching.cwd = Some("/project".into());
+
+    nmt_platform::runtime().block_on(switch_conversation(
+        switching,
+        Target::Existing("session-2".into()),
+    ));
+
+    server.join().unwrap();
+
+    let delivered: Vec<Value> = frames.try_iter().collect();
+
+    assert_eq!(delivered.len(), 1);
+    assert_eq!(delivered[0]["payload"]["sessionId"], "session-1");
+    assert_eq!(delivered[0]["payload"]["command"]["kind"], "switchFailed");
+    assert!(slot.lock().is_none());
+}
+
+#[test]
+fn a_branch_opens_the_forked_session_without_creating_another() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+
+    let client = nmt_platform::runtime()
+        .block_on(ApiClient::new(format!(
+            "http://{}",
+            listener.local_addr().unwrap()
+        )))
+        .unwrap();
+
+    let server = thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+
+        assert_eq!(
+            answer_call(
+                stream,
+                r#"{"result":{"ok":true,"value":{"sessionId":"session-2"}}}"#,
+            ),
+            "session/fork"
+        );
+
+        let mut socket = accept_streams(&listener);
+
+        send_snapshot(&mut socket, json!({ "type": "snapshot", "records": [] }));
+
+        let _ = socket.read();
+    });
+
+    let slot = SwitchSlot::default();
+    let (switching, frames) = switching(client, &slot);
+
+    nmt_platform::runtime().block_on(switch_conversation(
+        switching,
+        Target::BranchOf {
+            session_id: "session-1".into(),
+            at_seq: Some(42),
+        },
+    ));
+
+    assert_eq!(
+        frames.recv().unwrap()["payload"]["command"]["kind"],
+        "switched"
+    );
+
+    let switch = slot.lock().take().expect("the forked session should open");
+
+    assert_eq!(switch.opened.session_id, "session-2");
+
+    drop(switch);
+
+    server.join().unwrap();
 }

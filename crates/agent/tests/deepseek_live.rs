@@ -428,6 +428,23 @@ fn a_turn_streams_and_survives_being_stopped() {
         });
 
     assert!(restored, "partial output was lost on resume: {replayed:?}");
+    assert_eq!(session.session_id(), Some(id.as_str()));
+
+    session
+        .fork(None)
+        .expect("the stopped turn should be copied");
+
+    let (branched, copied) =
+        collect_until(&mut session, &frames, Duration::from_secs(15), |event| {
+            matches!(event, Event::Replay(turns) if turns.iter().flat_map(|turn| &turn.items)
+            .map(|entry| item_text(&entry.item)).collect::<String>().contains(before_stop.trim()))
+        });
+
+    assert!(
+        copied,
+        "partial output was lost in the branch: {branched:?}"
+    );
+    assert_ne!(session.session_id(), Some(id.as_str()));
 
     // The tab keeps working after a stop. The instruction is emphatic because
     // the abandoned counting task is still in context, and a model that
