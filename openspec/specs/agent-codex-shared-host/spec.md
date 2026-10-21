@@ -2,47 +2,47 @@
 
 ## Purpose
 
-Define how NiumaTerm shares one Codex app-server across Agent Tabs while preserving independent conversations, profile-specific gateways, safe credentials, and recoverable lifecycle behavior.
+Define how NiumaTerm shares Codex app-server processes between matching launches while keeping different endpoints and credentials independent.
 
 ## Requirements
 
-### Requirement: Codex tabs share one live app-server
-The system SHALL lazily start one initialized Codex app-server for compatible Codex Agent Tabs, SHALL let every attached tab create or resume its own thread on that host, and SHALL NOT start a second Codex app-server while the first remains live.
+### Requirement: Matching Codex launches share one live app-server
+The system SHALL lazily start one initialized Codex app-server per distinct launch configuration. Tabs with matching launches SHALL reuse that process, and different launches SHALL be allowed to run concurrently.
 
-#### Scenario: First Codex tab starts the host
-- **WHEN** the first Codex Agent Tab opens and no Codex host is live
-- **THEN** the system starts one app-server, completes initialization once, and creates or resumes that tab's thread on it
+#### Scenario: First tab for a launch starts its host
+- **WHEN** a Codex Agent Tab opens without a running host for its launch
+- **THEN** the system starts and initializes an app-server for that launch and creates or resumes the tab's thread
 
-#### Scenario: Simultaneous first tabs open
-- **WHEN** two Codex Agent Tabs open before host startup completes
-- **THEN** both openings join the same startup attempt and at most one app-server process is created
+#### Scenario: Simultaneous tabs use the same launch
+- **WHEN** two Codex Agent Tabs request the same launch before startup completes
+- **THEN** both openings join the same startup attempt and receive its result
 
-#### Scenario: Later Codex tab reuses the host
-- **WHEN** another compatible Codex Agent Tab opens while the host is live
-- **THEN** the system creates or resumes another thread on the existing host without repeating app-server initialization
+#### Scenario: Different launches start together
+- **WHEN** two Codex Agent Tabs request different launches
+- **THEN** each launch can start without waiting for the other's initialization
 
-#### Scenario: Last Codex tab closes
-- **WHEN** the final session releases the shared host
-- **THEN** the system closes the host input, waits for the owned process tree to exit within a bounded interval, and retains no strong application-lifetime reference to the stopped host
+#### Scenario: Last tab for a host closes
+- **WHEN** the final session releases a host
+- **THEN** the system stops that process within a bounded interval without stopping other hosts
 
-### Requirement: Host compatibility is explicit
-The system SHALL derive app-server compatibility from executable identity, executable arguments, and process-level environment other than generated provider credentials. Profile model, reasoning effort, gateway URL, provider identity, workspace directories, and generated provider credential names SHALL NOT split compatible tabs into separate hosts.
+### Requirement: Host identity includes the endpoint and credentials
+The system SHALL identify a launch by its executable, arguments, custom endpoint, and effective configured environment including credentials. Model, reasoning effort, and workspace directories SHALL NOT create separate hosts. Environment values stored in the host registry SHALL be represented by hashes.
 
-#### Scenario: Profiles use different gateways
-- **WHEN** two Codex profiles use the same host launch settings but different models, gateway URLs, or API keys
-- **THEN** both profiles use the same app-server and carry their differences in their own thread configuration
+#### Scenario: Profiles use different endpoints
+- **WHEN** two profiles differ only in their custom endpoint URL
+- **THEN** they use separate app-server processes
 
-#### Scenario: Profiles require different executables
-- **WHEN** a Codex tab requests an executable or process-level environment incompatible with the live host
-- **THEN** the system rejects that tab start with an actionable incompatibility message, keeps existing tabs attached, and starts no second app-server
+#### Scenario: A credential changes
+- **WHEN** a profile changes its API key while its earlier tabs remain open
+- **THEN** a new tab starts a separate host with the updated key and earlier tabs retain their existing host
 
-#### Scenario: Incompatible profile opens after host release
-- **WHEN** the prior host has stopped because no session retains it and a profile with different host settings opens
-- **THEN** the system may start the one new host from that profile's settings
+#### Scenario: Process settings differ
+- **WHEN** a profile uses another executable, arguments, or configured environment
+- **THEN** it starts a separate host without requiring existing tabs to close
 
-#### Scenario: Profile settings change during a host generation
-- **WHEN** a saved Codex profile change requires a credential or process environment absent from the live host
-- **THEN** the system reports that a host restart is required and does not use stale credentials, another profile's credentials, or a second host
+#### Scenario: Thread settings differ
+- **WHEN** two tabs have matching launches but different models, reasoning effort, or workspaces
+- **THEN** they share a host and apply their own thread settings
 
 ### Requirement: JSON-RPC ownership is isolated per session
 The shared host SHALL allocate client request IDs across the whole process and SHALL route each response, error, and server request only to the session that owns it. Each session SHALL retain its own handshake state after host initialization, current turn, approvals, queued commands, compaction state, history cursor, and settings.
@@ -102,7 +102,7 @@ For every new or resumed custom-endpoint Codex thread, the system SHALL send tha
 
 #### Scenario: Two custom profiles start together
 - **WHEN** two tabs use custom Codex profiles with different gateway URLs
-- **THEN** each thread sends model requests to its own configured gateway through the shared app-server
+- **THEN** each thread sends model requests to its own configured endpoint through a separate app-server
 
 #### Scenario: Custom thread resumes after host replacement
 - **WHEN** a custom-provider thread is resumed on a new host generation
@@ -120,12 +120,12 @@ For every new or resumed custom-endpoint Codex thread, the system SHALL send tha
 The system SHALL derive a stable, distinct environment name for every custom Codex provider, SHALL place each decrypted API key only in that generated host environment entry, and SHALL reference only the environment name from thread configuration. Raw API keys SHALL NOT enter JSON-RPC payloads, normal logs, diagnostics, host identity text, or user-facing errors.
 
 #### Scenario: Two custom profiles use different keys
-- **WHEN** the shared host is started with two compatible custom Codex profiles
-- **THEN** its environment contains separate generated credential names and each thread provider references its own name
+- **WHEN** two custom profiles start hosts
+- **THEN** each host receives only its selected launch environment, without merging credentials from other profiles
 
-#### Scenario: Profiles have the same display name after normalization
-- **WHEN** provider identity derivation could otherwise produce the same environment name
-- **THEN** startup rejects the collision visibly rather than allowing one key to replace another
+#### Scenario: Credential names match but values differ
+- **WHEN** two launches use the same credential environment name with different values
+- **THEN** separate hosts preserve each value without a collision error
 
 #### Scenario: Host startup fails
 - **WHEN** process diagnostics include environment-related output
@@ -157,8 +157,8 @@ When a Codex session closes or is replaced, the system SHALL interrupt only its 
 - **WHEN** `/new`, profile restart, or history restore replaces a tab's Codex session
 - **THEN** the replacement obtains its host reference before the outgoing session releases its reference, avoiding an unnecessary host stop between them
 
-### Requirement: Host failure affects all attached sessions honestly
-The system SHALL detect unexpected shared-host exit, mark every attached Codex session unavailable, preserve each known root thread ID and visible transcript, and provide recovery that creates at most one replacement host.
+### Requirement: Host failure affects only its attached sessions
+The system SHALL detect unexpected shared-host exit, mark every attached Codex session unavailable, preserve each known root thread ID and visible transcript, and provide recovery that creates at most one replacement host per launch. Sessions on other hosts SHALL remain available.
 
 #### Scenario: Shared host exits unexpectedly
 - **WHEN** app-server exits while several Codex tabs are attached
