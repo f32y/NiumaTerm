@@ -9,10 +9,14 @@ use std::{fs, thread};
 use gpui::{AppContext as _, Image, ImageFormat, Render, TestAppContext, VisualTestContext};
 use gpui_component::Root;
 use image_rs::{DynamicImage, ImageFormat as EncodedImageFormat, RgbaImage};
-use nmt_agent::chat::{Event, Item, SendOutcome, SlashCommandOutcome, ThreadSettings};
+use nmt_agent::chat::{
+    Event, Item, ReplayItem, ReplayTurn, SendOutcome, SlashCommandOutcome, ThreadSettings,
+};
 use nmt_agent::session::Backend;
 use nmt_agent::session::test_support::TestBackend;
-use nmt_agent::{AgentEventKind, AgentWorkspace};
+use nmt_agent::{
+    AgentActivityPolicy, AgentEventKind, AgentMonitor, AgentRuntimeStatus, AgentWorkspace,
+};
 use nmt_config::profile::AgentProfile;
 
 use crate::agent_tab::composer::attachments::scratch_dir;
@@ -20,6 +24,105 @@ use crate::agent_tab::execution::{AgentSession, SessionRegistry};
 use crate::agent_tab::settings::AgentSettings;
 use crate::agent_tab::transcript::TranscriptView;
 use crate::agent_tab::{AgentKind, AgentPane, AgentPaneEvent, RecoveryReadiness};
+
+#[gpui::test]
+fn completed_deepseek_replay_clears_tab_activity(cx: &mut TestAppContext) {
+    let owner = cx.update(|cx| {
+        gpui_component::init(cx);
+
+        cx.set_global(AgentSettings::default());
+
+        AgentSession::create(
+            AgentProfile {
+                kind: AgentKind::DeepSeek,
+                ..AgentProfile::default()
+            },
+            AgentWorkspace::default(),
+            None,
+            cx,
+        )
+    });
+
+    let host = owner.session().clone();
+    let route = host.read_with(cx, |session, _| session.agent_route().clone());
+    let monitor = Rc::new(RefCell::new(AgentMonitor::new("reconnect-test")));
+
+    monitor.borrow_mut().register_route(
+        route.clone(),
+        AgentActivityPolicy::ExplicitLifecycle,
+        Instant::now(),
+    );
+
+    let observed = monitor.clone();
+
+    let _subscription = cx.update(|cx| {
+        cx.subscribe(&host, move |_, event: &AgentPaneEvent, _| {
+            if let AgentPaneEvent::Lifecycle(event) = event {
+                observed.borrow_mut().apply(event.clone(), Instant::now());
+            }
+        })
+    });
+
+    let epoch = host.update(cx, |session, cx| {
+        let backend = TestBackend::new([], SlashCommandOutcome::NotReady, vec![])
+            .with_recovery(AgentKind::DeepSeek, "reconnected-thread");
+
+        let epoch = session.controller.borrow_mut().starting(None);
+
+        assert_eq!(
+            session.install(Ok(Backend::Test(backend)), epoch, "test", cx),
+            Some(true)
+        );
+
+        session.on_event(epoch, Event::Ready(ThreadSettings::default()), cx);
+
+        epoch
+    });
+
+    for reconnect in [true, false] {
+        host.update(cx, |session, cx| {
+            session.on_event(epoch, Event::TurnStarted, cx);
+
+            if reconnect {
+                // A reconnect can restore the completed turn before reporting
+                // that it ended while the connection was closed.
+                session.on_event(
+                    epoch,
+                    Event::Replay(vec![ReplayTurn {
+                        items: vec![ReplayItem {
+                            item: Item::AgentMessage {
+                                id: "replayed-reply".into(),
+                                text: Some("Completed during reconnect".into()),
+                                questions: None,
+                            },
+                            at: None,
+                        }],
+                        ..ReplayTurn::default()
+                    }]),
+                    cx,
+                );
+            }
+
+            session.on_event(epoch, Event::TurnCompleted { error: None }, cx);
+            session.on_event(epoch, Event::TurnCompleted { error: None }, cx);
+        });
+
+        cx.run_until_parked();
+
+        let mut monitor = monitor.borrow_mut();
+
+        monitor.process_due(Instant::now() + Duration::from_secs(10));
+
+        assert_eq!(monitor.project([&route]).status, AgentRuntimeStatus::Idle);
+
+        if reconnect {
+            assert_eq!(
+                monitor.notification(&route).unwrap().body,
+                "Completed during reconnect"
+            );
+        }
+    }
+}
 
 #[gpui::test]
 async fn detached_session_retains_output_and_interaction_until_owner_close(

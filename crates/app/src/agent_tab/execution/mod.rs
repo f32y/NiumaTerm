@@ -123,6 +123,11 @@ pub struct AgentSession {
     pub(super) route: AgentRoute,
     pub(super) kind: AgentKind,
     id: SessionId,
+
+    /// History replay allocates transcript turn numbers without starting new
+    /// work. Later activity must identify the turn announced at its start.
+    lifecycle_turn: u64,
+
     pub(super) last_completed: Option<(u64, u64)>,
     closed: Rc<Cell<bool>>,
     binding_generation: Rc<Cell<u64>>,
@@ -466,6 +471,7 @@ impl AgentSession {
             route: agent_process().allocate_route(),
             kind,
             id: SessionId(Uuid::new_v4()),
+            lifecycle_turn: 0,
             last_completed: None,
             workflow_refresh: PollingRefresh::default(),
             child_refresh: PollingRefresh::default(),
@@ -1095,7 +1101,7 @@ impl AgentSession {
             }
             SessionEffect::TurnCompleted { error, .. } => {
                 let state = self.controller.borrow();
-                let key = (state.runtime().epoch(), state.turn());
+                let key = (state.runtime().epoch(), self.lifecycle_turn);
 
                 if self.last_completed == Some(key) {
                     return;
@@ -1108,7 +1114,7 @@ impl AgentSession {
                             .conversation()
                             .borrow()
                             .content
-                            .latest_agent_message(key.1)
+                            .latest_agent_message(state.turn())
                             .map(str::to_owned)
                     })
                     .unwrap_or_else(|| {
@@ -1203,7 +1209,7 @@ impl AgentSession {
     }
 
     pub(crate) fn emit_lifecycle(
-        &self,
+        &mut self,
         kind: AgentEventKind,
         title: &str,
         body: &str,
@@ -1212,12 +1218,16 @@ impl AgentSession {
         let state = self.controller.borrow();
         let agent: &str = self.kind.into();
 
+        if kind == AgentEventKind::PromptSubmitted {
+            self.lifecycle_turn = state.turn();
+        }
+
         cx.emit(AgentPaneEvent::Lifecycle(AgentEvent {
             route: self.route.clone(),
             agent: agent.into(),
             session_id: self.id.0.to_string(),
             turn_id: (kind != AgentEventKind::SessionStarted)
-                .then(|| format!("turn-{}", state.turn())),
+                .then(|| format!("turn-{}", self.lifecycle_turn)),
             kind,
             title: normalize_title(title),
             body: normalize_body(body),
