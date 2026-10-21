@@ -33,7 +33,7 @@ const INJECTION_PARSE_TIMEOUT: Duration = Duration::from_millis(20);
 #[allow(unused)]
 pub struct SyntaxHighlighter {
     language: SharedString,
-    query: Option<Query>,
+    query: Option<Arc<Query>>,
     /// The full injections query. This is used to build injection layers during parsing.
     injections_query: Option<Arc<Query>>,
 
@@ -59,8 +59,40 @@ pub struct SyntaxHighlighter {
     injection_layers: Vec<InjectionLayer>,
 }
 
+impl Clone for SyntaxHighlighter {
+    fn clone(&self) -> Self {
+        // Readers retain a completed tree while another worker edits its copy.
+        // Queries and text share storage; each parser owns its mutable state.
+        let mut parser = Parser::new();
+        if let Some(language) = self.parser.language() {
+            parser
+                .set_language(&language)
+                .expect("existing parser language");
+        }
+        Self {
+            language: self.language.clone(),
+            query: self.query.clone(),
+            injections_query: self.injections_query.clone(),
+            locals_pattern_index: self.locals_pattern_index,
+            highlights_pattern_index: self.highlights_pattern_index,
+            non_local_variable_patterns: self.non_local_variable_patterns.clone(),
+            injection_content_capture_index: self.injection_content_capture_index,
+            injection_language_capture_index: self.injection_language_capture_index,
+            local_scope_capture_index: self.local_scope_capture_index,
+            local_def_capture_index: self.local_def_capture_index,
+            local_def_value_capture_index: self.local_def_value_capture_index,
+            local_ref_capture_index: self.local_ref_capture_index,
+            text: self.text.clone(),
+            parser,
+            tree: self.tree.clone(),
+            injection_layers: self.injection_layers.clone(),
+        }
+    }
+}
+
 /// A parsed injection layer.
 /// Stores the parsed tree and the ranges it covers.
+#[derive(Clone)]
 pub(crate) struct InjectionLayer {
     pub(crate) language_name: SharedString,
     highlight_query: Arc<Query>,
@@ -470,7 +502,7 @@ impl SyntaxHighlighter {
 
         Ok(Self {
             language: config.name.clone(),
-            query: Some(query),
+            query: Some(Arc::new(query)),
             injections_query,
 
             locals_pattern_index,

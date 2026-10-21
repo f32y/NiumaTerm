@@ -4,6 +4,8 @@ use gpui::{
     SharedString, StyleRefinement, Styled, Window,
 };
 
+#[cfg(feature = "tree-sitter")]
+use crate::text::highlight_cache::CodeBlockHighlighters;
 use crate::text::{
     MarkdownExtensions, MarkdownNode, MarkdownParseContext, MarkdownPlugin, SelectionFormat,
     TableData, TextViewState, TextViewStyle,
@@ -215,9 +217,10 @@ impl Element for TextView {
                 &style.highlight_theme,
                 &crate::highlighter::HighlightTheme::default_light(),
             ) {
-                inner = inner.code_block_highlighter(super::component_code_block_highlighter(
-                    style.highlight_theme.clone(),
-                ));
+                inner = inner.code_block_highlighter_shared(
+                    cx.default_global::<CodeBlockHighlighters>()
+                        .get(style.highlight_theme.clone()),
+                );
             }
             inner = inner.style(resolve_component_style(
                 crate::ActiveTheme::theme(cx),
@@ -486,3 +489,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(all(test, feature = "tree-sitter"))]
+#[path = "highlight_cache_tests.rs"]
+mod highlight_cache_tests;

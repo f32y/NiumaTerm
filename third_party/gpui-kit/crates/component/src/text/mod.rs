@@ -1,16 +1,18 @@
 //! Compatibility facade for rich text now owned by `gpui-base`.
 
 mod compat;
+#[cfg(feature = "tree-sitter")]
+mod highlight_cache;
 mod style;
 
-pub use compat::{
+pub use crate::text::compat::{
     Text, TextView, TextViewLayoutState, TextViewPlugin, TextViewPrepaintState, html, markdown,
 };
+pub use crate::text::style::TextViewStyle;
 pub use gpui_base::text::{
     MarkdownBlockParserFn, MarkdownBlockRenderFn, MarkdownExtensions, MarkdownNode,
     MarkdownParseContext, MarkdownPlugin, SelectionFormat, TableData, TextViewState, markdown_ast,
 };
-pub use style::TextViewStyle;
 
 #[cfg(feature = "tree-sitter")]
 use std::{cell::RefCell, collections::HashMap};
@@ -26,6 +28,11 @@ use crate::highlighter::{LanguageRegistry, SyntaxHighlighter};
 
 #[cfg(test)]
 mod window_selection;
+
+#[cfg(all(test, feature = "tree-sitter"))]
+thread_local! {
+    pub(super) static CODE_BLOCK_HIGHLIGHT_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 /// Derives the Base rich-text style installed by the component theme adapter.
 pub(crate) fn base_text_view_style(theme: &crate::Theme) -> gpui_base::TextViewStyle {
@@ -97,6 +104,9 @@ pub(crate) fn component_code_block_highlighter(
 + Sync
 + 'static {
     move |block| {
+        #[cfg(test)]
+        CODE_BLOCK_HIGHLIGHT_CALLS.with(|calls| calls.set(calls.get() + 1));
+
         thread_local! {
             static HIGHLIGHTERS: RefCell<HashMap<gpui::SharedString, SyntaxHighlighter>> =
                 RefCell::new(HashMap::new());

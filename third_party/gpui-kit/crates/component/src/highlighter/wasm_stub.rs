@@ -8,6 +8,7 @@ use std::ops::Range;
 use std::time::Duration;
 
 // Syntax highlighter stub
+#[derive(Clone)]
 pub struct SyntaxHighlighter;
 
 impl SyntaxHighlighter {

@@ -465,6 +465,7 @@ fn ast_to_node(source: &str, value: mdast::Node, cx: &mut NodeContext) -> BlockN
             BlockNode::Table(table)
         }
         Node::FootnoteDefinition(def) => {
+            cx.has_reference_definitions = true;
             let mut paragraph = Paragraph::default();
             let prefix = format!("[{}]: ", def.identifier);
             paragraph.push(InlineNode::new(&prefix).marks(vec![(
@@ -482,6 +483,7 @@ fn ast_to_node(source: &str, value: mdast::Node, cx: &mut NodeContext) -> BlockN
             BlockNode::Paragraph(paragraph)
         }
         Node::Definition(def) => {
+            cx.has_reference_definitions = true;
             cx.add_ref(
                 def.identifier.clone().into(),
                 LinkMark {

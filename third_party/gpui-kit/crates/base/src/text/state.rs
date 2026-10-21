@@ -1,16 +1,14 @@
 use futures::Stream as _;
 use std::{
-    ops::RangeInclusive,
+    ops::{Range, RangeInclusive},
     pin::Pin,
     sync::{Arc, Mutex},
     task::Poll,
 };
 
-mod highlighted;
-
 use gpui::{
-    App, AppContext as _, Bounds, Context, FocusHandle, IntoElement, KeyBinding, ListState,
-    ParentElement as _, Pixels, Point, Render, SharedString, Styled as _, Task, Window,
+    App, AppContext as _, Bounds, Context, FocusHandle, HighlightStyle, IntoElement, KeyBinding,
+    ListState, ParentElement as _, Pixels, Point, Render, SharedString, Styled as _, Task, Window,
     prelude::FluentBuilder as _, px,
 };
 
@@ -23,7 +21,7 @@ use crate::{
         MarkdownExtensions, TableActionsFn, TextViewStyle,
         document::ParsedDocument,
         format,
-        node::{self, NodeContext},
+        node::{self, BlockNode, CodeBlock, NodeContext, Span},
         selection_adapter::TextViewSelectionAdapter,
     },
     v_flex,
@@ -124,6 +122,8 @@ pub struct TextViewState {
     format: TextViewFormat,
     text: String,
     revision: usize,
+    replacement_revision: usize,
+    parsed_revision: usize,
     pub(super) selection_revision: usize,
     compatible_layout_update: bool,
     parsed_error: Option<SharedString>,
@@ -159,31 +159,9 @@ impl TextViewState {
             async move |weak_self, cx| {
                 while let Ok(parsed_update) = rx_result.recv().await {
                     _ = weak_self.update(cx, |state, cx| {
-                        if parsed_update.revision != state.revision {
-                            return;
+                        if state.apply_parsed_update(parsed_update, cx) {
+                            cx.notify();
                         }
-                        if parsed_update.baseline_ack {
-                            debug_assert!(parsed_update.full_parse);
-                            return;
-                        }
-
-                        match parsed_update.result {
-                            Ok(content) => {
-                                state.parsed_content = content;
-                                state.parsed_error = None;
-                                state.compatible_layout_update = parsed_update.selection_compatible;
-                            }
-                            Err(err) => {
-                                state.parsed_error = Some(err);
-                            }
-                        }
-                        // Don't interrupt an active drag-selection; the stored
-                        // positions remain valid for append-only updates and will
-                        // self-correct on the next mouse-move event.
-                        if !parsed_update.selection_compatible && !state.is_selecting {
-                            state.reset_selection_and_adapter(cx);
-                        }
-                        cx.notify();
                     });
                 }
             }
@@ -223,6 +201,8 @@ impl TextViewState {
             parsed_error: None,
             text: text.to_string(),
             revision: 0,
+            replacement_revision: 0,
+            parsed_revision: 0,
             selection_revision: 0,
             compatible_layout_update: false,
             tx,
@@ -293,6 +273,17 @@ impl TextViewState {
             return;
         }
 
+        // Markdown appends only need to parse the unfinished final block.
+        // An empty source still uses the initial parse so small documents
+        // have their complete height before the first layout.
+        if self.format == TextViewFormat::Markdown
+            && !self.text.is_empty()
+            && let Some(delta) = text.strip_prefix(self.text.as_str())
+        {
+            self.push_str(delta, cx);
+            return;
+        }
+
         self.text.clear();
         self.text.push_str(text);
         self.parsed_error = None;
@@ -306,6 +297,58 @@ impl TextViewState {
         }
         self.text.push_str(new_text);
         self.increment_update(new_text, true, cx);
+    }
+
+    /// Display literal code with externally computed byte-range styles.
+    /// Updating only its colors keeps the existing text selection intact.
+    pub fn set_highlighted_code(
+        &mut self,
+        text: SharedString,
+        highlights: Vec<(Range<usize>, HighlightStyle)>,
+        cx: &mut Context<Self>,
+    ) {
+        let highlights = highlights
+            .into_iter()
+            .filter(|(range, _)| {
+                range.start < range.end
+                    && range.end <= text.len()
+                    && text.is_char_boundary(range.start)
+                    && text.is_char_boundary(range.end)
+            })
+            .collect();
+        if self.text == text.as_str()
+            && let [BlockNode::CodeBlock(code)] = self.parsed_content.document.blocks.as_slice()
+        {
+            if code.set_highlights(highlights) {
+                cx.notify();
+            }
+            return;
+        }
+
+        self.reset_selection_and_adapter(cx);
+        // A pending markup parse must not replace externally styled code.
+        self.revision += 1;
+        self.replacement_revision = self.revision;
+        self.parsed_revision = self.revision;
+        self.text = text.to_string();
+        self.parsed_error = None;
+        let code = CodeBlock::new(
+            text.clone(),
+            None,
+            Some(Span {
+                start: 0,
+                end: text.len(),
+            }),
+        );
+        code.set_highlights(highlights);
+        self.parsed_content = ParsedContent {
+            document: ParsedDocument {
+                source: text,
+                blocks: vec![BlockNode::CodeBlock(code)].into(),
+            },
+            ..Default::default()
+        };
+        cx.notify();
     }
 
     pub(crate) fn set_markdown_extensions(
@@ -381,6 +424,7 @@ impl TextViewState {
     fn increment_update(&mut self, text: &str, append: bool, cx: &mut Context<Self>) {
         self.revision += 1;
         if !append {
+            self.replacement_revision = self.revision;
             self.selection_revision = self.selection_revision.wrapping_add(1);
         }
         let parse_synchronously = !append && text.len() <= MAX_SYNC_FULL_REPLACE_BYTES;
@@ -414,6 +458,7 @@ impl TextViewState {
                     self.parsed_error = Some(err);
                 }
             }
+            self.parsed_revision = self.revision;
             // Keep the background parser's accumulated document in sync so a
             // later append extends this baseline instead of parsing the delta
             // as a standalone document.
@@ -423,6 +468,35 @@ impl TextViewState {
         }
 
         _ = self.tx.try_send(update_options);
+    }
+
+    fn apply_parsed_update(&mut self, update: ParsedUpdate, cx: &mut Context<Self>) -> bool {
+        // A completed prefix remains readable while newer appended text is
+        // being parsed. Replacements and parser changes invalidate every
+        // result from the earlier source, including equal-length edits.
+        if update.revision < self.replacement_revision || update.revision <= self.parsed_revision {
+            return false;
+        }
+        if update.baseline_ack {
+            debug_assert!(update.full_parse);
+            return false;
+        }
+        match update.result {
+            Ok(content) => {
+                self.parsed_content = content;
+                self.parsed_error = None;
+                self.compatible_layout_update = update.selection_compatible;
+            }
+            Err(err) if update.revision == self.revision => {
+                self.parsed_error = Some(err);
+            }
+            Err(_) => return false,
+        }
+        self.parsed_revision = update.revision;
+        if !update.selection_compatible && !self.is_selecting {
+            self.reset_selection_and_adapter(cx);
+        }
+        true
     }
 
     /// Save bounds and unselect if bounds changed.
@@ -725,13 +799,17 @@ impl Future for UpdateFuture {
                         merge_pending_options(&mut options, self.rx.as_ref().get_ref());
 
                     let res = parse_content(self.format, self.content.clone(), &options);
+                    let selection_compatible = options.mode == ParseMode::Compatible
+                        && res
+                            .as_ref()
+                            .is_ok_and(|content| !content.node_cx.has_reference_definitions);
                     if let Ok(content) = &res {
                         self.content = content.clone();
                     }
                     _ = self.tx_result.try_send(ParsedUpdate {
                         revision: options.revision,
                         full_parse: !options.append,
-                        selection_compatible: options.mode == ParseMode::Compatible,
+                        selection_compatible,
                         baseline_ack: options.mode == ParseMode::BaselineAck,
                         result: res,
                     });
@@ -811,14 +889,17 @@ fn parse_content(
         markdown_extensions: options.markdown_extensions.clone(),
         ..NodeContext::default()
     };
+    // Reference definitions affect blocks outside the appended suffix.
+    // Parse the complete Markdown source when reference definitions are present.
+    let append = options.append
+        && !(format == TextViewFormat::Markdown && content.node_cx.has_reference_definitions);
 
     // Re-parse the last block together with the appended text, so a block the
     // new text continues (an unclosed list, a fenced code block) is not split
     // in two. A block without a span cannot be located in `source` — the HTML
     // parser never records spans — so it is left in place and only the
     // appended text is parsed, positioned at the end of the current source.
-    let last_span = options
-        .append
+    let last_span = append
         .then(|| {
             content
                 .document
@@ -835,8 +916,10 @@ fn parse_content(
         source.push_str(&content.document.source[span.start..]);
         source.push_str(&options.pending_text);
     } else {
-        if options.append {
+        if append {
             node_cx.offset = content.document.source.len();
+        } else if options.append {
+            source.push_str(&content.document.source);
         }
         source.push_str(&options.pending_text);
     }
@@ -847,7 +930,16 @@ fn parse_content(
         TextViewFormat::Plain => format::plain::parse(&source, &mut node_cx),
     }?;
 
-    if options.append {
+    if append && node_cx.has_reference_definitions {
+        let full_update = UpdateOptions {
+            append: false,
+            pending_text: format!("{}{}", content.document.source, options.pending_text),
+            ..options.clone()
+        };
+        return parse_content(format, ParsedContent::default(), &full_update);
+    }
+
+    if append {
         content.document.source =
             format!("{}{}", content.document.source, options.pending_text).into();
         Arc::make_mut(&mut content.document.blocks)
@@ -855,6 +947,7 @@ fn parse_content(
     } else {
         content.document = new_document;
     }
+    content.node_cx = node_cx;
 
     Ok(content)
 }
@@ -1199,3 +1292,7 @@ mod tests {
 #[cfg(test)]
 #[path = "state/tests.rs"]
 mod nmt_tests;
+
+#[cfg(test)]
+#[path = "state/streaming_tests.rs"]
+mod streaming_tests;
