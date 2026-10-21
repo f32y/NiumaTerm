@@ -199,7 +199,6 @@ impl Backend {
     pub async fn spawn(
         kind: AgentKind,
         launch: &LaunchConfig,
-        host_catalog: &[LaunchConfig],
         workspace: &AgentWorkspace,
         recovery: Option<RecoveryIdentity>,
         deliver: impl Fn(Value) + Send + Sync + 'static,
@@ -216,7 +215,6 @@ impl Backend {
                 Some(thread_id) => {
                     app_server::Session::spawn_resuming(
                         launch,
-                        host_catalog,
                         workspace,
                         thread_id,
                         true,
@@ -226,7 +224,7 @@ impl Backend {
                     .await
                 }
                 None => {
-                    app_server::Session::spawn(launch, host_catalog, workspace, deliver, |line| {
+                    app_server::Session::spawn(launch, workspace, deliver, |line| {
                         trace!("codex app-server: {line}")
                     })
                     .await
@@ -946,22 +944,18 @@ impl Backend {
     pub async fn spawn_side(
         kind: AgentKind,
         launch: &LaunchConfig,
-        host_catalog: &[LaunchConfig],
         workspace: &AgentWorkspace,
         side: app_server::SideStart,
         deliver: impl Fn(Value) + Send + Sync + 'static,
     ) -> Result<Self, String> {
         match kind {
-            AgentKind::Codex => app_server::Session::spawn_side(
-                launch,
-                host_catalog,
-                workspace,
-                side,
-                deliver,
-                |line| trace!("codex app-server: {line}"),
-            )
-            .await
-            .map(Self::Codex),
+            AgentKind::Codex => {
+                app_server::Session::spawn_side(launch, workspace, side, deliver, |line| {
+                    trace!("codex app-server: {line}")
+                })
+                .await
+                .map(Self::Codex)
+            }
             AgentKind::Claude | AgentKind::DeepSeek => Err(format!(
                 "{} cannot open a side chat thread.",
                 kind.display()
@@ -972,7 +966,6 @@ impl Backend {
     pub async fn spawn_team(
         kind: AgentKind,
         launch: &LaunchConfig,
-        host_catalog: &[LaunchConfig],
         workspace: &AgentWorkspace,
         recovery: Option<RecoveryIdentity>,
         policy: TeamLaunch,
@@ -988,7 +981,6 @@ impl Backend {
         match kind {
             AgentKind::Codex => app_server::Session::spawn_team(
                 launch,
-                host_catalog,
                 workspace,
                 recovery.map(|identity| identity.id),
                 policy,
@@ -1001,7 +993,7 @@ impl Backend {
                 "DeepSeek cannot resume this saved Team conversation. Keep its history and create a new member yourself.".into(),
             ),
             AgentKind::Claude | AgentKind::DeepSeek => {
-                Self::spawn(kind, launch, host_catalog, workspace, recovery, deliver).await
+                Self::spawn(kind, launch, workspace, recovery, deliver).await
             }
         }
     }

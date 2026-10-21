@@ -4,7 +4,7 @@ mod router;
 mod tests;
 
 use std::cmp::Reverse;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Weak};
@@ -32,37 +32,55 @@ pub(super) type RegistrationId = u64;
 
 type Delivery = Arc<dyn Fn(Value) + Send + Sync>;
 
-static SHARED_HOST: Mutex<SharedHost> = Mutex::new(SharedHost::Idle(Weak::new()));
+static SHARED_HOSTS: Mutex<Vec<(HostKey, HostSlot)>> = Mutex::new(Vec::new());
 
-/// The host every Codex tab shares, held weakly so it stops with its last
-/// tab. While a start runs, its future is what is shared: tabs opened together
-/// wait for that one start and receive its outcome, failure included, so a
-/// failing launch is paid for once. A start whose initiator was cancelled
-/// stays here and is resumed by the next tab that asks.
+type HostSlot = Arc<Mutex<SharedHost>>;
+
+/// Tabs with the same launch settings share a weak host reference so it stops
+/// with its last tab. Concurrent acquisitions of the same launch await one
+/// startup result, including failures. If the initiator is cancelled, the next
+/// acquisition of that launch resumes the pending startup.
 enum SharedHost {
     Idle(Weak<CodexHost>),
     Starting(Shared<BoxFuture<'static, Result<Arc<CodexHost>, String>>>),
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 struct HostKey {
     executable: String,
     arguments: Vec<String>,
-    environment: Vec<(String, String)>,
-}
-
-struct HostBootstrap {
-    key: HostKey,
-    launch: LaunchConfig,
-    credential_hashes: HashMap<String, [u8; 32]>,
-    credential_values: Vec<String>,
+    endpoint: Option<String>,
+    // Hash values so registry entries do not retain copies of API keys.
+    environment: Vec<(String, [u8; 32])>,
 }
 
 pub(super) struct CodexHost {
-    key: HostKey,
-    credential_hashes: HashMap<String, [u8; 32]>,
     router: Arc<Router>,
     process: Mutex<JsonLineProcess>,
+}
+
+fn host_slot(launch: &LaunchConfig) -> HostSlot {
+    let key = HostKey::from_launch(launch);
+
+    let mut hosts = SHARED_HOSTS.lock();
+
+    hosts.retain(|(_, slot)| {
+        Arc::strong_count(slot) > 1
+            || match &*slot.lock() {
+                SharedHost::Idle(host) => host.strong_count() > 0,
+                SharedHost::Starting(_) => true,
+            }
+    });
+
+    if let Some((_, slot)) = hosts.iter().find(|(candidate, _)| *candidate == key) {
+        return Arc::clone(slot);
+    }
+
+    let slot = Arc::new(Mutex::new(SharedHost::Idle(Weak::new())));
+
+    hosts.push((key, Arc::clone(&slot)));
+
+    slot
 }
 
 impl CodexHost {
@@ -72,27 +90,24 @@ impl CodexHost {
 
     pub(super) async fn acquire(
         launch: &LaunchConfig,
-        catalog: &[LaunchConfig],
         on_stderr: impl Fn(String) + Send + 'static,
     ) -> Result<Arc<Self>, String> {
-        let mut bootstrap = Some(HostBootstrap::from_launches(launch, catalog)?);
+        let slot = host_slot(launch);
 
         let start = {
-            let mut shared = SHARED_HOST.lock();
+            let mut shared = slot.lock();
 
             if let SharedHost::Idle(host) = &*shared
                 && let Some(host) = host.upgrade()
                 && host.router.alive.load(Ordering::Acquire)
             {
-                host.ensure_compatible(launch, bootstrap.as_ref().expect("bootstrap"))?;
-
                 return Ok(host);
             }
 
             match &*shared {
                 SharedHost::Starting(start) => start.clone(),
                 SharedHost::Idle(_) => {
-                    let start = Self::start(bootstrap.take().expect("bootstrap"), on_stderr)
+                    let start = Self::start(launch.clone(), on_stderr)
                         .map_ok(Arc::new)
                         .boxed()
                         .shared();
@@ -107,7 +122,7 @@ impl CodexHost {
         let started = start.clone().await;
 
         {
-            let mut shared = SHARED_HOST.lock();
+            let mut shared = slot.lock();
 
             // A later start may already have replaced this one.
             if let SharedHost::Starting(current) = &*shared
@@ -121,24 +136,23 @@ impl CodexHost {
             }
         }
 
-        let host = started?;
-
-        // The initiator built the host from its own launch; a waiter has to
-        // check that the shared host matches the launch it asked for.
-        if let Some(bootstrap) = &bootstrap {
-            host.ensure_compatible(launch, bootstrap)?;
-        }
-
-        Ok(host)
+        started
     }
 
     async fn start(
-        bootstrap: HostBootstrap,
+        launch: LaunchConfig,
         on_stderr: impl Fn(String) + Send + 'static,
     ) -> Result<Self, String> {
-        let credential_values = bootstrap.credential_values.clone();
+        let credential_values: Vec<String> = launch
+            .provider
+            .as_ref()
+            .and_then(|provider| provider.api_key_env.as_deref())
+            .and_then(|name| effective_env(&launch, name))
+            .into_iter()
+            .collect();
+
         let stderr_credentials = credential_values.clone();
-        let launcher = AgentCli::from_launch(&bootstrap.launch, "codex");
+        let launcher = AgentCli::from_launch(&launch, "codex");
         let executable = launcher.executable().to_string();
         // Goal scheduling must be available to the tab's native goal controls.
         // This enables it only in the child process, without changing user files.
@@ -164,8 +178,6 @@ impl CodexHost {
         )?;
 
         let host = Self {
-            key: bootstrap.key,
-            credential_hashes: bootstrap.credential_hashes,
             router,
             process: Mutex::new(process),
         };
@@ -195,37 +207,6 @@ impl CodexHost {
             .map_err(|error| error.to_string())?;
 
         Ok(host)
-    }
-
-    fn ensure_compatible(
-        &self,
-        requested: &LaunchConfig,
-        bootstrap: &HostBootstrap,
-    ) -> Result<(), String> {
-        if self.key != bootstrap.key {
-            return Err(
-                "This Codex profile uses app-server launch settings that differ from the live shared host; close existing Codex tabs before retrying"
-                    .to_string(),
-            );
-        }
-
-        if let Some(name) = requested
-            .provider
-            .as_ref()
-            .and_then(|provider| provider.api_key_env.as_deref())
-        {
-            let normalized = normalize_env_name(name);
-            let expected = bootstrap.credential_hashes.get(&normalized);
-
-            if self.credential_hashes.get(&normalized) != expected {
-                return Err(
-                    "This Codex profile requires credentials that are not present in the live shared host; close existing Codex tabs before retrying"
-                        .to_string(),
-                );
-            }
-        }
-
-        Ok(())
     }
 
     pub(super) fn register(
@@ -308,101 +289,15 @@ impl Drop for CodexHost {
     }
 }
 
-impl HostBootstrap {
-    fn from_launches(selected: &LaunchConfig, catalog: &[LaunchConfig]) -> Result<Self, String> {
-        let mut launches = Vec::with_capacity(catalog.len() + 1);
-
-        launches.push(selected);
-
-        launches.extend(catalog.iter());
-
-        let credential_names: HashSet<String> = launches
-            .iter()
-            .filter_map(|launch| {
-                launch
-                    .provider
-                    .as_ref()
-                    .and_then(|provider| provider.api_key_env.as_deref())
-            })
-            .map(normalize_env_name)
-            .collect();
-
-        let key = HostKey::from_launch(selected, &credential_names);
-
-        let mut credentials = BTreeMap::<String, (String, String)>::new();
-        let mut providers = BTreeMap::<String, (String, String)>::new();
-
-        for launch in launches {
-            if HostKey::from_launch(launch, &credential_names) != key {
-                continue;
-            }
-
-            let Some(provider) = launch.provider.as_ref() else {
-                continue;
-            };
-
-            let Some(name) = provider.api_key_env.as_deref() else {
-                continue;
-            };
-
-            let Some(value) = effective_env(launch, name) else {
-                continue;
-            };
-
-            let normalized = normalize_env_name(name);
-            let provider_identity = (provider.id.clone(), provider.base_url.clone());
-
-            if let Some(existing) = providers.get(&normalized)
-                && existing != &provider_identity
-            {
-                return Err(format!(
-                    "Codex provider credential name {name} is used by conflicting provider definitions"
-                ));
-            }
-
-            providers.insert(normalized.clone(), provider_identity);
-
-            if let Some((_, existing)) = credentials.get(&normalized)
-                && existing != &value
-            {
-                return Err(format!(
-                    "Codex provider credential name {name} resolves to more than one profile value"
-                ));
-            }
-
-            credentials.insert(normalized, (name.to_string(), value));
-        }
-
-        let mut launch = selected.clone();
-
-        launch.env = effective_process_env(selected, &credential_names)
-            .into_values()
-            .collect();
-
-        launch.env.extend(credentials.values().cloned());
-
-        let credential_values = credentials
-            .values()
-            .map(|(_, value)| value.clone())
-            .collect();
-
-        let credential_hashes = credentials
-            .into_iter()
-            .map(|(name, (_, value))| (name, hash_secret(&value)))
-            .collect();
-
-        Ok(Self {
-            key,
-            launch,
-            credential_hashes,
-            credential_values,
-        })
-    }
-}
-
 impl HostKey {
-    fn from_launch(launch: &LaunchConfig, credential_names: &HashSet<String>) -> Self {
+    fn from_launch(launch: &LaunchConfig) -> Self {
         let launcher = AgentCli::from_launch(launch, "codex");
+
+        let environment: BTreeMap<_, _> = launch
+            .env
+            .iter()
+            .map(|(name, value)| (normalize_env_name(name), hash_secret(value)))
+            .collect();
 
         Self {
             executable: launcher
@@ -410,29 +305,13 @@ impl HostKey {
                 .to_string_lossy()
                 .to_lowercase(),
             arguments: launch.executable_args.clone(),
-            environment: effective_process_env(launch, credential_names)
-                .into_iter()
-                .map(|(normalized, (_, value))| (normalized, value))
-                .collect(),
+            endpoint: launch
+                .provider
+                .as_ref()
+                .map(|provider| provider.base_url.clone()),
+            environment: environment.into_iter().collect(),
         }
     }
-}
-
-fn effective_process_env(
-    launch: &LaunchConfig,
-    credential_names: &HashSet<String>,
-) -> BTreeMap<String, (String, String)> {
-    let mut environment = BTreeMap::new();
-
-    for (name, value) in &launch.env {
-        let normalized = normalize_env_name(name);
-
-        if !credential_names.contains(&normalized) {
-            environment.insert(normalized, (name.clone(), value.clone()));
-        }
-    }
-
-    environment
 }
 
 fn effective_env(launch: &LaunchConfig, target: &str) -> Option<String> {

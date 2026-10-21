@@ -70,7 +70,6 @@ fn cli_session_starts_sends_images_and_rejects_cross_provider_recovery_without_a
         .block_on(Backend::spawn(
             AgentKind::Claude,
             &launch,
-            &[],
             &AgentWorkspace::default(),
             Some(RecoveryIdentity::new(AgentKind::Codex, "unrelated-thread")),
             move |message| {

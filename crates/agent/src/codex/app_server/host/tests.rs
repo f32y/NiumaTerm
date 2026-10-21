@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{Receiver, channel};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
@@ -9,7 +10,7 @@ use tokio::sync::oneshot;
 use crate::LaunchConfig;
 use crate::codex::ProviderConfig;
 use crate::codex::app_server::host::{
-    HOST_INIT_RPC_ID, HostBootstrap, HostKey, Router, initialize_request, redact,
+    CodexHost, HOST_INIT_RPC_ID, Router, host_slot, initialize_request, redact,
 };
 use crate::subprocess::requests::RequestClass;
 use crate::subprocess::{InputTicket, OUTPUT_FAILURE_METHOD};
@@ -814,49 +815,53 @@ fn custom_launch(
 }
 
 #[test]
-fn gateway_credentials_do_not_change_host_identity() {
+fn equivalent_launches_reuse_a_slot_after_environment_normalization() {
     let first = custom_launch("codex", "provider-a", "NMT_CODEX_A", "secret-a");
-    let second = custom_launch("codex", "provider-b", "NMT_CODEX_B", "secret-b");
 
-    let bootstrap = HostBootstrap::from_launches(&first, &[first.clone(), second.clone()])
-        .expect("compatible providers should merge");
+    let mut second = first.clone();
 
-    let credential_names = ["NMT_CODEX_A".to_string(), "NMT_CODEX_B".to_string()]
-        .into_iter()
-        .collect();
+    second
+        .env
+        .insert(0, ("NMT_CODEX_A".into(), "old-secret".into()));
 
-    assert!(bootstrap.key == HostKey::from_launch(&second, &credential_names));
-    assert_eq!(bootstrap.credential_hashes.len(), 2);
+    second.model = Some("another-model".into());
+    second.effort = Some("high".into());
+
+    let slot = host_slot(&first);
+
+    assert!(Arc::ptr_eq(&slot, &host_slot(&second)));
 }
 
 #[test]
-fn conflicting_credential_values_are_rejected() {
-    let first = custom_launch("codex", "provider-a", "NMT_CODEX_SHARED", "secret-a");
-    let second = custom_launch("codex", "provider-b", "NMT_CODEX_SHARED", "secret-b");
+fn a_busy_launch_slot_does_not_block_other_launches() {
+    let launch = LaunchConfig {
+        executable: "nmt-test-busy-codex-host".into(),
+        ..LaunchConfig::default()
+    };
 
-    let error = HostBootstrap::from_launches(&first, &[first.clone(), second])
-        .err()
-        .expect("credential collision should fail");
+    let slot = host_slot(&launch);
+    let busy = slot.lock();
+    let (sender, receiver) = channel();
 
-    assert!(error.contains("NMT_CODEX_SHARED"));
-    assert!(!error.contains("secret-a"));
-    assert!(!error.contains("secret-b"));
-}
+    let worker = thread::spawn(move || {
+        let other = LaunchConfig {
+            executable: "nmt-test-missing-codex-host".into(),
+            ..LaunchConfig::default()
+        };
 
-#[test]
-fn conflicting_provider_definitions_are_rejected() {
-    let first = custom_launch("codex", "provider-a", "NMT_CODEX_SHARED", "same-secret");
+        let result = nmt_platform::runtime().block_on(CodexHost::acquire(&other, |_| {}));
 
-    let mut second = custom_launch("codex", "provider-b", "NMT_CODEX_SHARED", "same-secret");
+        sender.send(result.is_err()).unwrap();
+    });
 
-    second.provider.as_mut().unwrap().base_url = "https://other.example/v1".into();
+    let result = receiver.recv_timeout(Duration::from_secs(3));
 
-    let error = HostBootstrap::from_launches(&first, &[first.clone(), second])
-        .err()
-        .expect("provider collision should fail");
+    drop(busy);
 
-    assert!(error.contains("NMT_CODEX_SHARED"));
-    assert!(!error.contains("same-secret"));
+    worker.join().unwrap();
+
+    assert!(result.unwrap());
+    assert!(Arc::ptr_eq(&slot, &host_slot(&launch)));
 }
 
 #[test]

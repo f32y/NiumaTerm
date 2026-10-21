@@ -68,7 +68,6 @@ mod team {
             .block_on(Backend::spawn_team(
                 AgentKind::Claude,
                 &launch,
-                &[],
                 &AgentWorkspace::default(),
                 None,
                 policy,

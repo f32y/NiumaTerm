@@ -253,14 +253,12 @@ impl Session {
     /// reader task, so callers hop threads before invoking [`Session::process`].
     pub async fn spawn(
         launch: &LaunchConfig,
-        host_catalog: &[LaunchConfig],
         workspace: &AgentWorkspace,
         deliver: impl Fn(Value) + Send + Sync + 'static,
         on_stderr: impl Fn(String) + Send + 'static,
     ) -> Result<Self, String> {
         Self::spawn_inner(
             launch,
-            host_catalog,
             workspace,
             ConversationStart::default(),
             deliver,
@@ -274,7 +272,6 @@ impl Session {
     /// retains the visible transcript in place.
     pub async fn spawn_resuming(
         launch: &LaunchConfig,
-        host_catalog: &[LaunchConfig],
         workspace: &AgentWorkspace,
         thread_id: String,
         suppress_replay: bool,
@@ -283,7 +280,6 @@ impl Session {
     ) -> Result<Self, String> {
         Self::spawn_inner(
             launch,
-            host_catalog,
             workspace,
             ConversationStart {
                 resume: Some(thread_id),
@@ -303,7 +299,6 @@ impl Session {
     /// model context up to the moment the server takes the snapshot.
     pub async fn spawn_side(
         launch: &LaunchConfig,
-        host_catalog: &[LaunchConfig],
         workspace: &AgentWorkspace,
         side: SideStart,
         deliver: impl Fn(Value) + Send + Sync + 'static,
@@ -311,7 +306,6 @@ impl Session {
     ) -> Result<Self, String> {
         Self::spawn_inner(
             launch,
-            host_catalog,
             workspace,
             ConversationStart {
                 side: Some(side),
@@ -325,14 +319,13 @@ impl Session {
 
     async fn spawn_inner(
         launch: &LaunchConfig,
-        host_catalog: &[LaunchConfig],
         workspace: &AgentWorkspace,
         start: ConversationStart,
         deliver: impl Fn(Value) + Send + Sync + 'static,
         on_stderr: impl Fn(String) + Send + 'static,
     ) -> Result<Self, String> {
         let thread_profile: ThreadProfile = launch.into();
-        let host = CodexHost::acquire(launch, host_catalog, on_stderr).await?;
+        let host = CodexHost::acquire(launch, on_stderr).await?;
         let deliver: SessionDelivery = Arc::new(deliver);
         let root_delivery = Arc::clone(&deliver);
         let registration_id = host.register(move |message| root_delivery(message));
@@ -1577,7 +1570,6 @@ impl Session {
 
     pub async fn spawn_team(
         launch: &LaunchConfig,
-        host_catalog: &[LaunchConfig],
         workspace: &AgentWorkspace,
         resume: Option<String>,
         policy: TeamLaunch,
@@ -1586,7 +1578,6 @@ impl Session {
     ) -> Result<Self, String> {
         Self::spawn_inner(
             launch,
-            host_catalog,
             workspace,
             ConversationStart {
                 resume,

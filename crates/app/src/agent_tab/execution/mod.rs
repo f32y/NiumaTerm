@@ -1678,17 +1678,6 @@ impl AgentSession {
 
         let workspace = self.active_workspace.clone();
 
-        let catalog = if kind == AgentKind::Codex {
-            cx.global::<AgentSettings>()
-                .profiles
-                .iter()
-                .filter(|profile| profile.kind == AgentKind::Codex)
-                .map(agent_launch)
-                .collect()
-        } else {
-            Vec::new()
-        };
-
         let (sender, receiver) = channel();
         let batches = receiver.ready_chunks(MAX_MESSAGES_PER_BATCH);
 
@@ -1710,14 +1699,9 @@ impl AgentSession {
         let spawned = cx.spawn(async move |_, _| {
             on_runtime(async move {
                 if let Some(side) = side_launch {
-                    return Backend::spawn_side(
-                        kind,
-                        &launch,
-                        &catalog,
-                        &workspace,
-                        side,
-                        move |message| sender.send(message),
-                    )
+                    return Backend::spawn_side(kind, &launch, &workspace, side, move |message| {
+                        sender.send(message)
+                    })
                     .await;
                 }
 
@@ -1725,7 +1709,6 @@ impl AgentSession {
                     return Backend::spawn_team(
                         kind,
                         &launch,
-                        &catalog,
                         &workspace,
                         recovery,
                         policy,
@@ -1734,14 +1717,9 @@ impl AgentSession {
                     .await;
                 }
 
-                Backend::spawn(
-                    kind,
-                    &launch,
-                    &catalog,
-                    &workspace,
-                    recovery,
-                    move |message| sender.send(message),
-                )
+                Backend::spawn(kind, &launch, &workspace, recovery, move |message| {
+                    sender.send(message)
+                })
                 .await
             })
             .await

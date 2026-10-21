@@ -62,7 +62,6 @@ fn a_steer_rejected_after_completion_automatically_starts_the_next_turn() {
         let mut session = nmt_platform::runtime()
             .block_on(Session::spawn(
                 &launch,
-                &[],
                 &AgentWorkspace::default(),
                 move |message| {
                     let _ = tx.send(message);

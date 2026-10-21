@@ -533,15 +533,23 @@ fn one_claude_update_restores_multiple_sessions_in_place() {
 }
 
 #[test]
-fn one_codex_update_restores_multiple_threads_without_starting_new_ones() {
+fn one_codex_update_restores_threads_across_independent_hosts() {
     let _guard = CODEX_TEST_LOCK.lock();
     let fixture = FakeAgentFixture::new();
-    let ids = ["thr_retained_1", "thr_retained_2"];
-    let launches = ids.map(|id| fixture.launch(ProviderKind::Codex, id));
+    let ids = ["thr_retained_1", "thr_retained_2", "thr_retained_3"];
+
+    let mut launches = ids.map(|id| fixture.launch(ProviderKind::Codex, id));
+
+    launches[2].provider = Some(ProviderConfig {
+        id: "other-provider".into(),
+        name: "Other Provider".into(),
+        base_url: "https://other.example/v1".into(),
+        api_key_env: None,
+    });
 
     assert_eq!(
         installation_key(ProviderKind::Codex, &launches[0]),
-        installation_key(ProviderKind::Codex, &launches[1])
+        installation_key(ProviderKind::Codex, &launches[2])
     );
 
     let mut sessions = Vec::new();
@@ -552,7 +560,6 @@ fn one_codex_update_restores_multiple_threads_without_starting_new_ones() {
         let mut session = nmt_platform::runtime()
             .block_on(app_server::Session::spawn(
                 launch,
-                &launches,
                 &AgentWorkspace::default(),
                 move |value| {
                     let _ = sender.send(value);
@@ -572,7 +579,7 @@ fn one_codex_update_restores_multiple_threads_without_starting_new_ones() {
             .iter()
             .filter(|method| method.as_str() == "initialize")
             .count(),
-        1
+        2
     );
     assert_eq!(
         fixture
@@ -580,7 +587,7 @@ fn one_codex_update_restores_multiple_threads_without_starting_new_ones() {
             .iter()
             .filter(|method| method.as_str() == "thread/start")
             .count(),
-        2
+        3
     );
 
     let maintenance: Arc<dyn ProviderMaintenance> = Arc::new(CodexMaintenance);
@@ -610,7 +617,6 @@ fn one_codex_update_restores_multiple_threads_without_starting_new_ones() {
         let mut resumed = nmt_platform::runtime()
             .block_on(app_server::Session::spawn_resuming(
                 launch,
-                &launches,
                 &AgentWorkspace::default(),
                 id.clone(),
                 true,
@@ -632,7 +638,7 @@ fn one_codex_update_restores_multiple_threads_without_starting_new_ones() {
             .iter()
             .filter(|method| method.as_str() == "initialize")
             .count(),
-        2
+        4
     );
     assert_eq!(
         fixture
@@ -640,7 +646,7 @@ fn one_codex_update_restores_multiple_threads_without_starting_new_ones() {
             .iter()
             .filter(|method| method.as_str() == "thread/resume")
             .count(),
-        2
+        3
     );
 
     for resumed in &mut resumed_sessions {
@@ -686,7 +692,6 @@ fn failed_and_unchanged_codex_updates_still_restore_all_threads() {
             let mut session = nmt_platform::runtime()
                 .block_on(app_server::Session::spawn(
                     launch,
-                    &launches,
                     &AgentWorkspace::default(),
                     move |value| {
                         let _ = sender.send(value);
@@ -729,7 +734,6 @@ fn failed_and_unchanged_codex_updates_still_restore_all_threads() {
             let mut resumed = nmt_platform::runtime()
                 .block_on(app_server::Session::spawn_resuming(
                     launch,
-                    &launches,
                     &AgentWorkspace::default(),
                     id.clone(),
                     true,
@@ -777,7 +781,7 @@ fn failed_and_unchanged_codex_updates_still_restore_all_threads() {
 }
 
 #[test]
-fn one_codex_host_starts_threads_for_two_custom_gateways() {
+fn separate_codex_hosts_start_threads_for_two_custom_endpoints() {
     let _guard = CODEX_TEST_LOCK.lock();
     let fixture = FakeAgentFixture::new();
 
@@ -822,7 +826,6 @@ fn one_codex_host_starts_threads_for_two_custom_gateways() {
         let mut session = nmt_platform::runtime()
             .block_on(app_server::Session::spawn(
                 launch,
-                &launches,
                 workspace,
                 move |value| {
                     let _ = sender.send(value);
@@ -833,7 +836,7 @@ fn one_codex_host_starts_threads_for_two_custom_gateways() {
 
         let _ = wait_for_codex_ready(&mut session, &receiver);
 
-        sessions.push(session);
+        sessions.push((session, receiver));
     }
 
     let requests: Vec<Value> = lines(&fixture.request_log)
@@ -877,16 +880,16 @@ fn one_codex_host_starts_threads_for_two_custom_gateways() {
                 .split_whitespace()
                 .any(|argument| argument == "app-server"))
             .count(),
-        1
+        2
     );
 
     nmt_platform::runtime()
-        .block_on(sessions[0].shutdown(Duration::from_secs(5), false))
+        .block_on(sessions[0].0.shutdown(Duration::from_secs(5), false))
         .unwrap();
 
     wait_for_rpc_count(&fixture, "thread/unsubscribe", 1);
 
-    assert_eq!(sessions[1].thread_id(), Some("model-b"));
+    assert_eq!(sessions[1].0.thread_id(), Some("model-b"));
     assert_eq!(
         lines(&fixture.session_log)
             .iter()
@@ -894,11 +897,16 @@ fn one_codex_host_starts_threads_for_two_custom_gateways() {
                 .split_whitespace()
                 .any(|argument| argument == "app-server"))
             .count(),
-        1
+        2
     );
 
+    let (remaining, receiver) = &mut sessions[1];
+
+    assert!(remaining.resume_thread("model-b-resumed"));
+    assert_eq!(wait_for_codex_ready(remaining, receiver), "model-b-resumed");
+
     nmt_platform::runtime()
-        .block_on(sessions[1].shutdown(Duration::from_secs(5), false))
+        .block_on(sessions[1].0.shutdown(Duration::from_secs(5), false))
         .unwrap();
 }
 
@@ -928,7 +936,6 @@ fn simultaneous_codex_sessions_join_one_host_start() {
             let session = nmt_platform::runtime()
                 .block_on(app_server::Session::spawn(
                     &launches[index],
-                    launches.as_ref(),
                     &AgentWorkspace::default(),
                     move |value| {
                         let _ = sender.send(value);
@@ -1008,7 +1015,6 @@ fn simultaneous_codex_sessions_share_one_startup_failure() {
             nmt_platform::runtime()
                 .block_on(app_server::Session::spawn(
                     &launches[index],
-                    launches.as_ref(),
                     &AgentWorkspace::default(),
                     |_| {},
                     |_| {},
@@ -1042,64 +1048,104 @@ fn simultaneous_codex_sessions_share_one_startup_failure() {
 }
 
 #[test]
-fn one_codex_host_rejects_incompatible_live_launch_settings() {
+fn codex_launch_changes_start_independent_hosts_while_old_tabs_remain_open() {
     let _guard = CODEX_TEST_LOCK.lock();
     let fixture = FakeAgentFixture::new();
-    let first = fixture.launch(ProviderKind::Codex, "thread-compatible");
 
-    let mut incompatible = fixture.launch(ProviderKind::Codex, "thread-incompatible");
+    let mut original = fixture.launch(ProviderKind::Codex, "original");
 
-    incompatible
+    original.provider = Some(ProviderConfig {
+        id: "provider".into(),
+        name: "Provider".into(),
+        base_url: "https://first.example/v1".into(),
+        api_key_env: Some("NMT_CODEX_KEY".into()),
+    });
+
+    original
         .env
-        .push(("NMT_INCOMPATIBLE_SETTING".into(), "enabled".into()));
+        .push(("NMT_CODEX_KEY".into(), "first-secret".into()));
 
-    let launches = [first.clone(), incompatible.clone()];
+    let mut endpoint = original.clone();
 
-    let (sender, receiver) = mpsc::channel();
+    endpoint.provider.as_mut().unwrap().base_url = "https://second.example/v1".into();
 
-    let mut session = nmt_platform::runtime()
-        .block_on(app_server::Session::spawn(
-            &first,
-            &launches,
-            &AgentWorkspace::default(),
-            move |value| {
-                let _ = sender.send(value);
-            },
-            |_| {},
-        ))
-        .expect("first session should start");
+    let mut credential = original.clone();
 
-    assert_eq!(
-        wait_for_codex_ready(&mut session, &receiver),
-        "thread-compatible"
-    );
+    credential
+        .env
+        .push(("NMT_CODEX_KEY".into(), "second-secret".into()));
 
-    let error = nmt_platform::runtime()
-        .block_on(app_server::Session::spawn(
-            &incompatible,
-            &launches,
-            &AgentWorkspace::default(),
-            |_| {},
-            |_| {},
-        ))
-        .err()
-        .expect("incompatible launch should fail");
+    let mut environment = original.clone();
 
-    assert!(error.contains("differ from the live shared host"));
-    assert_eq!(session.thread_id(), Some("thread-compatible"));
-    assert_eq!(
-        lines(&fixture.session_log)
-            .iter()
-            .filter(|line| line
-                .split_whitespace()
-                .any(|argument| argument == "app-server"))
-            .count(),
-        1
-    );
+    environment
+        .env
+        .push(("NMT_OTHER_SETTING".into(), "enabled".into()));
 
-    nmt_platform::runtime()
-        .block_on(session.shutdown(Duration::from_secs(5), false))
-        .unwrap();
+    let mut arguments = original.clone();
+
+    arguments.executable_args.push("--extra-option".into());
+
+    let mut executable = original.clone();
+
+    let other_executable = fixture.root.join("other agent.cmd");
+
+    fs::copy(&fixture.executable, &other_executable).unwrap();
+
+    executable.executable = display(&other_executable);
+
+    let launches = [
+        original,
+        endpoint,
+        credential,
+        environment,
+        arguments,
+        executable,
+    ];
+
+    let mut sessions = Vec::new();
+
+    for (index, launch) in launches.iter().enumerate() {
+        for copy in 0..2 {
+            let mut launch = launch.clone();
+
+            let thread_id = format!("configuration-{index}-thread-{copy}");
+
+            launch.model = Some(thread_id.clone());
+
+            let (sender, receiver) = mpsc::channel();
+
+            let mut session = nmt_platform::runtime()
+                .block_on(app_server::Session::spawn(
+                    &launch,
+                    &AgentWorkspace::default(),
+                    move |value| {
+                        let _ = sender.send(value);
+                    },
+                    |_| {},
+                ))
+                .expect("each launch should start while earlier tabs remain open");
+
+            assert_eq!(wait_for_codex_ready(&mut session, &receiver), thread_id);
+
+            sessions.push(session);
+        }
+
+        assert_eq!(
+            fixture
+                .rpc_methods()
+                .iter()
+                .filter(|method| method.as_str() == "initialize")
+                .count(),
+            index + 1,
+            "two tabs with the same launch should initialize one host"
+        );
+    }
+
+    for session in &mut sessions {
+        nmt_platform::runtime()
+            .block_on(session.shutdown(Duration::from_secs(5), false))
+            .unwrap();
+    }
 }
 
 #[test]
@@ -1124,7 +1170,6 @@ fn two_codex_threads_recover_on_one_replacement_host() {
         let mut session = nmt_platform::runtime()
             .block_on(app_server::Session::spawn(
                 launch,
-                &launches,
                 &AgentWorkspace::default(),
                 move |value| {
                     let _ = sender.send(value);
@@ -1164,7 +1209,6 @@ fn two_codex_threads_recover_on_one_replacement_host() {
         let mut session = nmt_platform::runtime()
             .block_on(app_server::Session::spawn_resuming(
                 launch,
-                &recovery_launches,
                 &AgentWorkspace::default(),
                 id.to_string(),
                 true,
@@ -1236,7 +1280,6 @@ fn one_failed_codex_resume_does_not_block_another_session() {
     let mut failed = nmt_platform::runtime()
         .block_on(app_server::Session::spawn_resuming(
             &launches[0],
-            &launches,
             &AgentWorkspace::default(),
             "thread-fails".into(),
             true,
@@ -1254,7 +1297,6 @@ fn one_failed_codex_resume_does_not_block_another_session() {
     let mut ready = nmt_platform::runtime()
         .block_on(app_server::Session::spawn_resuming(
             &launches[1],
-            &launches,
             &AgentWorkspace::default(),
             "thread-succeeds".into(),
             true,
