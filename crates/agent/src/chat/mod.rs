@@ -329,6 +329,19 @@ pub struct MessageImage {
     pub media_type: String,
 }
 
+/// Where a prompt the backend accepted but has not started will be read.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PromptPlacement {
+    /// The harness holds it for the turn that starts once the running one ends.
+    #[default]
+    Queued,
+    /// The harness reads it inside the running turn, before that turn's next
+    /// step. A correction sent while the agent works is the reason this exists:
+    /// the work it corrects has not finished yet.
+    Steering,
+}
+
 /// One prompt the backend accepted but has not started working on, in the
 /// order it will be claimed.
 ///
@@ -340,13 +353,23 @@ pub struct MessageImage {
 pub struct QueuedPrompt {
     pub id: Option<String>,
     pub text: String,
+
+    /// Which turn reads it. A row that only says "waiting" cannot tell a
+    /// correction the model is about to read from one it will read after the
+    /// work that correction was meant to change has already finished.
+    #[serde(default)]
+    pub placement: PromptPlacement,
 }
 
 impl QueuedPrompt {
     /// A prompt this side queued optimistically, before the backend has said
     /// anything about it.
-    pub fn local(text: String) -> Self {
-        Self { id: None, text }
+    pub fn local(text: String, placement: PromptPlacement) -> Self {
+        Self {
+            id: None,
+            text,
+            placement,
+        }
     }
 }
 

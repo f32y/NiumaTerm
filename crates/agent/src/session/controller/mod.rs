@@ -776,6 +776,23 @@ impl SessionController {
         removed
     }
 
+    /// Ask the harness to read a waiting prompt at the running turn's next step
+    /// instead of after it ends. The row keeps its place and takes the
+    /// placement the harness reports, because a promotion it refuses for a turn
+    /// that already ended leaves the prompt queued.
+    pub(crate) fn promote_queued_prompt(&mut self, item_id: &str) -> bool {
+        let promoted = self
+            .runtime
+            .backend_mut()
+            .is_some_and(|backend| backend.promote_queued_prompt(item_id));
+
+        if promoted {
+            self.delivery.promoted(item_id);
+        }
+
+        promoted
+    }
+
     pub fn workflows(&self) -> &WorkflowData {
         &self.workflows
     }

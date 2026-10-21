@@ -18,6 +18,7 @@ use nmt_agent::session::history::{
     CountPublication, HistorySource, SessionHistory, count_scoped_sessions, list_scoped_sessions,
     list_source,
 };
+use nmt_agent::{LaunchConfig, dsh};
 use rust_i18n::t;
 
 use crate::agent_tab::commands::move_palette_selection;
@@ -39,6 +40,10 @@ pub(crate) enum RecentSessionsMode {
     Hidden,
     Open,
     Loading,
+    /// `/resume` asked for the list before it held a row. A harness answers
+    /// with an event later in the same handshake, so the command waits here
+    /// instead of reporting a folder with no sessions.
+    AwaitingRows,
 }
 
 impl RecentSessionsMode {
@@ -58,7 +63,7 @@ impl RecentSessionsMode {
             && match self {
                 Self::Automatic => transcript_empty && composer_empty,
                 Self::Open => true,
-                Self::Hidden | Self::Loading => false,
+                Self::Hidden | Self::Loading | Self::AwaitingRows => false,
             }
     }
 
@@ -133,6 +138,19 @@ const HISTORY_ROW_HEIGHT: f32 = 32.0;
 const HISTORY_MAX_HEIGHT: f32 = HISTORY_ROW_HEIGHT * 10.0;
 
 impl SessionHistoryUi {
+    /// Put the list in `mode`. Every change of what the list shows goes
+    /// through here so a wait for rows cannot outlive the surface that was
+    /// waiting for them.
+    pub(crate) fn show(&mut self, mode: RecentSessionsMode) {
+        if !matches!(mode, RecentSessionsMode::AwaitingRows) {
+            self.data.resolve_awaiting_rows();
+        }
+
+        self.mode = mode;
+
+        self.selected = 0;
+    }
+
     /// Rows the list lays out: the reserved placeholders while a count result
     /// waits for its entries, the entries themselves once they arrive.
     pub(crate) fn rows(&self) -> usize {
@@ -148,13 +166,12 @@ impl SessionHistoryUi {
     /// leaving the list hidden, when there is nothing to list.
     pub(crate) fn open(&mut self) -> bool {
         if self.rows() == 0 {
-            self.mode = RecentSessionsMode::Hidden;
+            self.show(RecentSessionsMode::Hidden);
 
             return false;
         }
 
-        self.mode = RecentSessionsMode::Open;
-        self.selected = 0;
+        self.show(RecentSessionsMode::Open);
 
         // A list opened from a command was opened without the pointer, and a
         // strip that was on screen the last time the pointer crossed it has
@@ -175,6 +192,48 @@ impl SessionHistoryUi {
 
         self.pointer_inside = false;
         self.pointer = None;
+    }
+
+    /// Wait for a listing whose rows have not arrived. The command that asked
+    /// for the list fires its own request, so the wait ends on the event that
+    /// brings the rows instead of asking again here.
+    pub(crate) fn await_listing(&mut self) {
+        self.data.await_rows();
+
+        self.show(RecentSessionsMode::AwaitingRows);
+
+        self.pointer_inside = false;
+        self.pointer = None;
+    }
+
+    /// Take a listing that completed while the list was awaited, opening the
+    /// list when it brought rows. Returns whether the list is on screen.
+    pub(crate) fn resolve_awaiting_listing(&mut self, rows: usize) -> bool {
+        if !self.data.resolve_awaiting_rows() {
+            return false;
+        }
+
+        if rows == 0 {
+            self.show(RecentSessionsMode::Hidden);
+
+            return false;
+        }
+
+        self.show(RecentSessionsMode::Open);
+
+        true
+    }
+
+    /// Stop waiting for a listing when the wait itself expired. Returns
+    /// whether the wait was still outstanding.
+    pub(crate) fn abandon_awaiting_listing(&mut self) -> bool {
+        if !self.data.resolve_awaiting_rows() {
+            return false;
+        }
+
+        self.show(RecentSessionsMode::Hidden);
+
+        true
     }
 
     pub(crate) fn publish_filesystem_count(
@@ -260,7 +319,7 @@ impl SessionHistoryUi {
         cwd: Option<String>,
         cx: &mut Context<AgentPane>,
     ) {
-        let request = self.data.begin_other_agents();
+        let request = self.data.begin_other_agents(sources.len());
         let scope = self.data.scope;
 
         for source in sources {
@@ -268,20 +327,18 @@ impl SessionHistoryUi {
             let request = request.clone();
 
             cx.spawn(async move |this, cx| {
-                let Ok(rows) = listing.await else {
-                    return;
-                };
-
-                if rows.is_empty() {
-                    return;
-                }
+                let rows = listing.await.unwrap_or_default();
 
                 let _ = this.update(cx, |this, cx| {
-                    if this.history_ui.data.publish_other_agents(&request, rows) {
-                        this.history_ui.clamp_selection();
-
-                        cx.notify();
+                    if !this.history_ui.data.finish_other_agent(&request) {
+                        return;
                     }
+
+                    this.history_ui.data.publish_other_agents(&request, rows);
+                    this.history_ui.clamp_selection();
+                    this.finish_history_listing(cx);
+
+                    cx.notify();
                 });
             })
             .detach();
@@ -327,6 +384,40 @@ impl SessionHistoryUi {
             .detach();
     }
 
+    /// Query the shared host without creating a conversation. A blank tab
+    /// defers its backend launch until a prompt or a history selection.
+    pub(crate) fn load_deepseek_history(
+        &mut self,
+        launch: LaunchConfig,
+        cwd: Option<String>,
+        cx: &mut Context<AgentPane>,
+    ) {
+        let request = self.data.begin_filesystem_history(cwd.clone());
+
+        let listing = nmt_platform::runtime()
+            .spawn(async move { dsh::list_sessions(&launch, cwd.as_deref()).await });
+
+        cx.notify();
+
+        cx.spawn(async move |this, cx| {
+            let rows = listing.await.unwrap_or_default();
+
+            let _ = this.update(cx, |this, cx| {
+                let cwd = this.cwd(cx);
+
+                if this
+                    .history_ui
+                    .publish_filesystem_rows(&request, cwd.as_deref(), rows)
+                {
+                    this.finish_history_listing(cx);
+
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
     /// Answer a navigation key while the list is on screen. The composer has
     /// the keys while it holds text, and completion always belongs to the
     /// command palette.
@@ -360,7 +451,7 @@ impl SessionHistoryUi {
             }
             PaletteControl::Activate => ListControl::Resume(self.selected),
             PaletteControl::Dismiss => {
-                self.mode = RecentSessionsMode::Hidden;
+                self.show(RecentSessionsMode::Hidden);
 
                 ListControl::Changed
             }
@@ -552,7 +643,7 @@ impl SessionHistoryUi {
         .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
         .on_mouse_down_out(cx.listener(|this, _, _, cx| {
             if this.history_ui.mode.dismisses_on_outside_click() {
-                this.history_ui.mode = RecentSessionsMode::Hidden;
+                this.history_ui.show(RecentSessionsMode::Hidden);
 
                 cx.notify();
             }
@@ -727,6 +818,8 @@ async fn load_history_passes(
             {
                 CountPublication::Stale => false,
                 CountPublication::Empty => {
+                    this.finish_history_listing(cx);
+
                     cx.notify();
 
                     false
@@ -764,6 +857,8 @@ async fn load_history_passes(
             .history_ui
             .publish_filesystem_rows(&request, cwd.as_deref(), sessions)
         {
+            this.finish_history_listing(cx);
+
             cx.notify();
         }
     });

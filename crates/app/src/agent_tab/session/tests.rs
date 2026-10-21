@@ -579,15 +579,16 @@ mod queued_prompt_placement_tests {
     use gpui::{AppContext as _, Entity, TestAppContext, VisualTestContext, WindowHandle};
     use nmt_agent::AgentWorkspace;
     use nmt_agent::chat::{
-        Event as SessionEvent, Item as SessionItem, QueuedPrompt, SendOutcome, SlashCommandOutcome,
+        Event as SessionEvent, Item as SessionItem, PromptPlacement, QueuedPrompt, SendOutcome,
+        SlashCommandOutcome,
     };
     use nmt_agent::session::lifecycle::StartOutcome;
     use nmt_config::profile::{AgentKind, AgentProfile};
 
-    use crate::agent_tab::AgentPane;
     use crate::agent_tab::session::{Backend, Status, TestBackend};
     use crate::agent_tab::settings::AgentSettings;
     use crate::agent_tab::tests::deliver_session_event;
+    use crate::agent_tab::{AgentPane, input_history};
 
     fn open_pane(
         cx: &mut TestAppContext,
@@ -839,6 +840,7 @@ mod queued_prompt_placement_tests {
             SessionEvent::QueuedPrompts(vec![QueuedPrompt {
                 id: Some("afd4d197".into()),
                 text: text.clone(),
+                placement: PromptPlacement::Queued,
             }]),
             &cx,
         );
@@ -873,6 +875,159 @@ mod queued_prompt_placement_tests {
                 );
                 assert!(pane.session.borrow().queued_prompts().is_empty());
             })
+        });
+    }
+
+    #[gpui::test]
+    fn a_correction_control_appears_only_while_a_turn_runs_with_text_to_send(
+        cx: &mut TestAppContext,
+    ) {
+        let (pane, window) = open_pane(cx, AgentKind::Codex);
+
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, _| {
+                let epoch = pane.session.borrow_mut().runtime_mut().begin_start();
+
+                assert!(matches!(
+                    pane.session.borrow_mut().runtime_mut().install(
+                        epoch,
+                        Ok(Backend::Test(TestBackend::new(
+                            [],
+                            SlashCommandOutcome::NotReady,
+                            Vec::new(),
+                        )))
+                    ),
+                    StartOutcome::Installed
+                ));
+
+                pane.session.borrow_mut().runtime_mut().ready();
+            });
+        });
+
+        let draw = |cx: &mut VisualTestContext| {
+            cx.run_until_parked();
+
+            cx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+        };
+
+        // Idle with an empty composer: the trailing button is the only control.
+        draw(&mut cx);
+
+        assert!(cx.debug_bounds("agent-steer").is_none());
+
+        // Text written while idle is a message like any other, and the trailing
+        // button already sends it.
+        cx.update(|window, cx| {
+            pane.update(cx, |pane, cx| {
+                pane.input.update(cx, |input, cx| {
+                    input.set_value("stop at the parser", window, cx)
+                });
+            });
+        });
+
+        draw(&mut cx);
+
+        assert!(cx.debug_bounds("agent-steer").is_none());
+
+        // The same text while a turn runs is a correction, and the trailing
+        // button stops that turn instead of sending, so the correction needs a
+        // control of its own.
+        deliver_session_event(&pane, SessionEvent::TurnStarted, &cx);
+
+        draw(&mut cx);
+
+        assert!(cx.debug_bounds("agent-steer").is_some());
+
+        // It goes away again once there is nothing to correct.
+        cx.update(|window, cx| {
+            pane.update(cx, |pane, cx| {
+                pane.input
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+            });
+        });
+
+        draw(&mut cx);
+
+        assert!(cx.debug_bounds("agent-steer").is_none());
+    }
+
+    #[gpui::test]
+    fn clicking_the_correction_control_sends_the_message_into_the_running_turn(
+        cx: &mut TestAppContext,
+    ) {
+        let (pane, window) = open_pane(cx, AgentKind::Codex);
+
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+
+        // Sending records what the composer held. The application installs that
+        // store at startup, and a window opened by a test has to do the same.
+        cx.update(|_, app| input_history::initialize(true, app));
+
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, _| {
+                let epoch = pane.session.borrow_mut().runtime_mut().begin_start();
+
+                assert!(matches!(
+                    pane.session.borrow_mut().runtime_mut().install(
+                        epoch,
+                        Ok(Backend::Test(TestBackend::new(
+                            [SendOutcome::Steered],
+                            SlashCommandOutcome::NotReady,
+                            Vec::new(),
+                        )))
+                    ),
+                    StartOutcome::Installed
+                ));
+
+                pane.session.borrow_mut().runtime_mut().ready();
+            });
+        });
+
+        cx.update(|window, cx| {
+            pane.update(cx, |pane, cx| {
+                pane.input.update(cx, |input, cx| {
+                    input.set_value("stop at the parser", window, cx)
+                });
+            });
+        });
+
+        deliver_session_event(&pane, SessionEvent::TurnStarted, &cx);
+
+        cx.run_until_parked();
+
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+
+        let correction = cx
+            .debug_bounds("agent-steer")
+            .expect("the correction control is drawn while a turn runs");
+
+        cx.simulate_click(correction.center(), Default::default());
+
+        cx.run_until_parked();
+
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, cx| {
+                let waiting = pane.session.borrow().queued_prompts().clone();
+
+                assert_eq!(waiting.len(), 1, "the correction waits on the running turn");
+                assert_eq!(waiting[0].text, "stop at the parser");
+                assert_eq!(
+                    waiting[0].placement,
+                    PromptPlacement::Steering,
+                    "the model reads it at this turn's next step"
+                );
+                assert_eq!(
+                    pane.input.read(cx).text().len(),
+                    0,
+                    "the correction left the composer"
+                );
+            });
         });
     }
 }
@@ -1305,11 +1460,16 @@ mod command_catalog_cache_tests {
 /// launched for it is ready.
 mod failed_start_tests {
     use std::path::PathBuf;
+    use std::time::SystemTime;
     use std::{env, fs, process};
 
-    use gpui::{AppContext as _, Entity, TestAppContext, VisualTestContext, WindowHandle};
+    use gpui::{
+        AppContext as _, Entity, SharedString, TestAppContext, VisualTestContext, WindowHandle,
+    };
     use nmt_agent::AgentWorkspace;
-    use nmt_agent::chat::{Event, SendOutcome, SlashCommandOutcome, ThreadSettings};
+    use nmt_agent::chat::{
+        Event, SendOutcome, SessionSummary, SlashCommandOutcome, ThreadSettings,
+    };
     use nmt_agent::input_history::AgentInputHistory as InputHistoryService;
     use nmt_agent::session::lifecycle::{StartOutcome, Status};
     use nmt_config::profile::{AgentKind, AgentProfile};
@@ -1442,6 +1602,63 @@ mod failed_start_tests {
 
         let _ = fs::remove_file(history.with_extension("json.lock"));
         let _ = fs::remove_file(history);
+    }
+
+    #[gpui::test]
+    fn resume_before_the_session_list_arrives_opens_it_when_it_does(cx: &mut TestAppContext) {
+        let (pane, window) = open_pane(cx);
+
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+
+        cx.update(|window, cx| {
+            pane.update(cx, |pane, cx| {
+                pane.input
+                    .update(cx, |input, cx| input.set_value("/resume", window, cx));
+
+                pane.history_ui.data.begin_filesystem_history(None);
+
+                pane.send_user_message_now(window, cx);
+
+                // The handshake is delivering its list, so the command waits
+                // instead of reporting the folder empty.
+                assert_eq!(pane.history_ui.mode, RecentSessionsMode::AwaitingRows);
+
+                let expected =
+                    SharedString::from(rust_i18n::t!("agent-composer-listing-recent-sessions"));
+
+                assert_eq!(
+                    pane.palette
+                        .feedback
+                        .as_ref()
+                        .map(|feedback| &feedback.message),
+                    Some(&expected)
+                );
+            });
+        });
+
+        deliver_session_event(
+            &pane,
+            Event::History(vec![SessionSummary {
+                id: "listed".into(),
+                title: "listed".into(),
+                branch: None,
+                cwd: None,
+                last_active: SystemTime::UNIX_EPOCH,
+                snippet: None,
+                origin: None,
+            }]),
+            &cx,
+        );
+
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, _| {
+                // The list opens for the command that asked for it, and the
+                // notice about listing stands down.
+                assert_eq!(pane.history_ui.mode, RecentSessionsMode::Open);
+                assert!(pane.palette.feedback.is_none());
+                assert!(pane.history_ui.is_visible(false, true));
+            });
+        });
     }
 
     #[gpui::test]
@@ -1582,6 +1799,77 @@ mod failed_start_tests {
                     Some("pinned-model")
                 );
                 assert_eq!(session.controls.settings.effort.as_deref(), Some("high"));
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn disk_history_completes_resume_wait_without_a_protocol_event(cx: &mut TestAppContext) {
+        let (pane, window) = open_pane(cx);
+
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, cx| {
+                let request = pane.history_ui.data.begin_filesystem_history(None);
+
+                pane.history_ui.await_listing();
+                pane.history_ui.publish_filesystem_count(&request, None, 1);
+
+                pane.history_ui.publish_filesystem_rows(
+                    &request,
+                    None,
+                    vec![SessionSummary {
+                        id: "disk".into(),
+                        title: "disk".into(),
+                        branch: None,
+                        cwd: None,
+                        last_active: SystemTime::UNIX_EPOCH,
+                        snippet: None,
+                        origin: None,
+                    }],
+                );
+
+                pane.finish_history_listing(cx);
+
+                assert_eq!(pane.history_ui.mode, RecentSessionsMode::Open);
+                assert!(pane.palette.feedback.is_none());
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn resume_history_waits_for_remaining_sources_after_an_empty_result(cx: &mut TestAppContext) {
+        let (pane, window) = open_pane(cx);
+
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, cx| {
+                let request = pane.history_ui.data.begin_other_agents(2);
+
+                pane.history_ui.await_listing();
+                pane.history_ui.data.finish_other_agent(&request);
+                pane.on_history(Vec::new(), cx);
+
+                assert_eq!(pane.history_ui.mode, RecentSessionsMode::AwaitingRows);
+
+                pane.history_ui.data.finish_other_agent(&request);
+                pane.finish_history_listing(cx);
+
+                assert_eq!(pane.history_ui.mode, RecentSessionsMode::Hidden);
+
+                let expected =
+                    SharedString::from(rust_i18n::t!("agent-composer-no-recent-sessions"));
+
+                assert_eq!(
+                    pane.palette
+                        .feedback
+                        .as_ref()
+                        .map(|feedback| &feedback.message),
+                    Some(&expected)
+                );
+                assert!(!pane.history_ui.data.list_in_flight());
             });
         });
     }

@@ -193,6 +193,9 @@ pub(crate) enum SettledCommand {
     QueueRemovalRefused {
         error: String,
     },
+    QueuePromotionRefused {
+        error: String,
+    },
     RenameRefused {
         error: String,
     },

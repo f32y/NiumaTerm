@@ -6,7 +6,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::chat::{
-    Event, Question, QuestionInput, QuestionMode, QuestionOption, QuestionRequest,
+    Event, Question, QuestionAnswer, QuestionInput, QuestionMode, QuestionOption, QuestionRequest,
     QuestionResolution, QuestionResponse, ThreadSettings,
 };
 use crate::codex::app_server::Session;
@@ -324,7 +324,7 @@ pub(super) fn on_question_request(
 pub(super) fn respond_input(
     session: &mut Session,
     id: &str,
-    answers: Option<Vec<Vec<String>>>,
+    answers: Option<Vec<QuestionAnswer>>,
     settings: &ThreadSettings,
 ) -> Result<QuestionResponse, String> {
     let pending = session
@@ -349,7 +349,9 @@ pub(super) fn respond_input(
             || answers
                 .iter()
                 .zip(&pending.request.questions)
-                .any(|(answers, question)| {
+                .any(|(answer, question)| {
+                    let answers = answer.values();
+
                     answers.is_empty()
                         || answers.iter().any(|answer| answer.trim().is_empty())
                         || (!question.multi_select && answers.len() != 1)
@@ -391,7 +393,7 @@ pub(super) fn respond_input(
                 .iter()
                 .map(String::as_str)
                 .zip(answers.unwrap_or_default())
-                .map(|(id, answers)| (id, json!({"answers": answers})))
+                .map(|(id, answer)| (id, json!({ "answers": answer.values() })))
                 .collect();
 
             let message = json!({"jsonrpc": "2.0", "id": rpc_id, "result": {"answers": values}});
@@ -417,14 +419,14 @@ pub(super) fn respond_input(
 
             let mut text: String = "Answers to your questions:\n".into();
 
-            for (index, (question, answers)) in
+            for (index, (question, answer)) in
                 pending.request.questions.iter().zip(answers).enumerate()
             {
                 text.push_str(&format!(
                     "\n{}. {}\nAnswer: {}\n",
                     index + 1,
                     question.question,
-                    answers.join("; ")
+                    answer.values().join("; ")
                 ));
             }
 

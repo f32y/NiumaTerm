@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use serde_json::{Value, from_str, json};
 
 use crate::chat::{
-    Compaction, CompactionTrigger, Event, Item, Question, QuestionOption, TurnRetry,
+    Compaction, CompactionTrigger, Event, Item, Question, QuestionInput, QuestionOption, TurnRetry,
 };
 use crate::dsh::generation::GenerationTracker;
 use crate::json::diff_lines;
@@ -112,7 +112,11 @@ pub(crate) fn question_request(
         ids.push(id.to_string());
 
         questions.push(Question {
-            input: Default::default(),
+            // The harness answers a question with the options the user picked
+            // and, separately, the text they typed where the options did not
+            // cover it. A card that offers only the options would hide the half
+            // of the request the user is most likely to need.
+            input: QuestionInput::Text,
             header: item["header"].as_str().map(str::to_string),
             // `detail` is supporting text the harness keeps out of
             // the option labels; folding it into the question text is what puts

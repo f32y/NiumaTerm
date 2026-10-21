@@ -33,8 +33,8 @@ use crate::background_task::{BackgroundTaskKey, BackgroundTaskTranscriptUpdate};
 #[cfg(test)]
 use crate::chat::ContextUsageScope;
 use crate::chat::{
-    Event, MessageImage, QuestionMode, QuestionRequest, QuestionResolution, QuestionResponse,
-    SendOutcome, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome,
+    Event, MessageImage, QuestionAnswer, QuestionMode, QuestionRequest, QuestionResolution,
+    QuestionResponse, SendOutcome, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome,
     SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
 };
 use crate::claude_code::config_home;
@@ -990,13 +990,14 @@ impl Session {
     }
 
     /// Answer the pending `AskUserQuestion` request. `answers` holds the chosen
-    /// option labels per question, in question order; `None` declines. The CLI
-    /// re-runs the tool with the merged input and writes the tool result
-    /// itself, so nothing further is sent for this tool call.
+    /// option labels, and the text typed where they did not cover the answer,
+    /// per question in question order; `None` declines. The CLI re-runs the tool
+    /// with the merged input and writes the tool result itself, so nothing
+    /// further is sent for this tool call.
     pub fn respond_input(
         &mut self,
         id: &str,
-        answers: Option<Vec<Vec<String>>>,
+        answers: Option<Vec<QuestionAnswer>>,
     ) -> Result<QuestionResponse, String> {
         let pending = self
             .control
@@ -1013,7 +1014,7 @@ impl Session {
         }
 
         let response = match answers {
-            Some(answers) if answers.iter().any(|labels| !labels.is_empty()) => {
+            Some(answers) if answers.iter().any(|answer| !answer.values().is_empty()) => {
                 let updated_input =
                     merge_question_answers(pending.input.clone(), &pending.questions, answers);
 

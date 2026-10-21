@@ -3,7 +3,7 @@
 mod history_tests;
 
 use std::cmp::Reverse;
-use std::mem::take;
+use std::mem::{self, take};
 use std::path::PathBuf;
 
 use nmt_profile::AgentProfile;
@@ -44,11 +44,17 @@ pub struct SessionHistory {
     /// Rows the tab's own agent reported, in the order it reported them.
     own: Vec<SessionSummary>,
 
+    /// The user asked for the list while it held no rows. A list on its way
+    /// from the harness arrives as a later event, so an empty snapshot here is
+    /// not yet an answer.
+    awaiting_rows: bool,
+
     /// Rows listed from the records of every other configured agent, each
     /// holding the profile that continues it.
     other_agents: Vec<SessionSummary>,
 
     other_agents_request: Option<OtherAgentsRequest>,
+    other_agents_remaining: usize,
 
     /// Show only the tab's own agent's rows, even where other agents' rows
     /// were listed.
@@ -90,6 +96,31 @@ impl SessionHistory {
     pub fn invalidate_filesystem_history(&mut self) {
         self.filesystem_request = None;
         self.pending = None;
+    }
+
+    /// Whether a listing this pane started is still on its way back. A
+    /// filesystem read reserves its rows while the count runs, and a harness
+    /// that lists over the protocol answers with a later event.
+    pub fn list_in_flight(&self) -> bool {
+        self.filesystem_request.is_some()
+            || self.pending.is_some()
+            || self.other_agents_remaining > 0
+    }
+
+    /// Wait for rows without cancelling the requests already reading them.
+    pub fn await_rows(&mut self) {
+        self.awaiting_rows = true;
+    }
+
+    /// Whether the list is wanted and still has no rows to show.
+    pub fn is_awaiting_rows(&self) -> bool {
+        self.awaiting_rows
+    }
+
+    /// Clear the wait, reporting whether it was still outstanding. A listing
+    /// that completes after the wait ended is not this request's answer.
+    pub fn resolve_awaiting_rows(&mut self) -> bool {
+        mem::take(&mut self.awaiting_rows)
     }
 
     pub fn begin_filesystem_history(&mut self, cwd: Option<String>) -> FilesystemHistoryRequest {
@@ -212,12 +243,15 @@ impl SessionHistory {
         self.other_agents.clear();
 
         self.other_agents_request = None;
+        self.other_agents_remaining = 0;
         self.showing_search = false;
     }
 
     /// Start a listing of other agents' conversations under the current
     /// scope, retiring any listing still running and the rows it placed.
-    pub fn begin_other_agents(&mut self) -> OtherAgentsRequest {
+    pub fn begin_other_agents(&mut self, sources: usize) -> OtherAgentsRequest {
+        self.other_agents_remaining = sources;
+
         self.other_agents.clear();
 
         self.merge();
@@ -235,6 +269,18 @@ impl SessionHistory {
         self.other_agents_request = Some(request.clone());
 
         request
+    }
+
+    /// Complete one source, including an empty or failed read. Requests for
+    /// an earlier scope cannot complete a newer listing.
+    pub fn finish_other_agent(&mut self, request: &OtherAgentsRequest) -> bool {
+        if self.other_agents_request.as_ref() != Some(request) || self.scope != request.scope {
+            return false;
+        }
+
+        self.other_agents_remaining = self.other_agents_remaining.saturating_sub(1);
+
+        true
     }
 
     /// Add the rows one source of `request` listed, unless the list has moved

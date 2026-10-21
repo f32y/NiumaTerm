@@ -1,7 +1,7 @@
 use gpui::{AppContext as _, Entity, TestAppContext, VisualTestContext, point, px};
 use gpui_component::Root;
 use nmt_agent::AgentWorkspace;
-use nmt_agent::chat::{Event, Item, QueuedPrompt, SlashCommandOutcome};
+use nmt_agent::chat::{Event, Item, PromptPlacement, QueuedPrompt, SlashCommandOutcome};
 use nmt_agent::progress::{GoalStatus, Task, TaskList, TaskStatus};
 use nmt_agent::session::test_support::TestBackend;
 use nmt_agent::session::{AgentKind, Backend};
@@ -426,6 +426,7 @@ fn queued_prompts_sit_in_a_strip_above_the_composer(cx: &mut TestAppContext) {
         Event::QueuedPrompts(vec![QueuedPrompt {
             id: Some("queued-1".into()),
             text: "Then run the tests".into(),
+            placement: PromptPlacement::Queued,
         }]),
         cx,
     );

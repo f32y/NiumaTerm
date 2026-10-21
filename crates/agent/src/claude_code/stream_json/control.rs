@@ -9,8 +9,8 @@ use serde_json::{Value, json};
 use tracing::debug;
 
 use crate::chat::{
-    ContextComposition, ContextSegment, Event, Question, QuestionInput, QuestionOption,
-    QuestionResolution,
+    ContextComposition, ContextSegment, Event, Question, QuestionAnswer, QuestionInput,
+    QuestionOption, QuestionResolution,
 };
 use crate::subprocess::InputTicket;
 use crate::subprocess::requests::{DeadlineTimer, RequestClass};
@@ -366,11 +366,13 @@ pub(super) struct PendingQuestions {
 pub(super) fn merge_question_answers(
     mut input: Value,
     questions: &[Question],
-    answers: Vec<Vec<String>>,
+    answers: Vec<QuestionAnswer>,
 ) -> Value {
     let mut answered = serde_json::Map::new();
 
-    for (question, labels) in questions.iter().zip(answers) {
+    for (question, answer) in questions.iter().zip(answers) {
+        let labels = answer.values();
+
         if labels.is_empty() {
             continue;
         }

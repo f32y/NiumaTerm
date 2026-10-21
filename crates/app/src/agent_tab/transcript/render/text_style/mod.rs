@@ -103,6 +103,10 @@ pub(crate) fn markdown_view(
             if event.is_right_click() {
                 let target = target.to_string();
 
+                // Resolved while the menu opens, not when an item is chosen, so
+                // the entry is offered only for a file this machine can show.
+                let file = revealable_file(&target, cwd.as_deref().map(Path::new));
+
                 ModernMenu::new()
                     .item(t!("agent-transcript-copy"), move |window, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(target.clone()));
@@ -110,6 +114,15 @@ pub(crate) fn markdown_view(
                         show_text_copied(window, cx);
                     })
                     .icon(IconName::Copy)
+                    .when_some(file, |menu, file| {
+                        menu.item(
+                            t!("agent-transcript-open-containing-folder"),
+                            move |_, cx| {
+                                cx.reveal_path(&file);
+                            },
+                        )
+                        .icon(IconName::FolderOpen)
+                    })
                     .show_at(window.mouse_position(), window, cx);
             } else {
                 open_link(target, cwd.as_deref().map(Path::new), cx);
@@ -123,6 +136,23 @@ fn open_link(target: &str, cwd: Option<&Path>, cx: &mut App) {
     } else {
         cx.open_url(target);
     }
+}
+
+/// The file a link names, for a link that names a file on this machine.
+///
+/// The whole path is returned because `App::reveal_path` takes the file: the
+/// platform layer derives the folder from it and selects that file inside it.
+/// A URL and a path that is not there both resolve to `None`, so such a link
+/// offers no folder to open.
+fn revealable_file(target: &str, cwd: Option<&Path>) -> Option<PathBuf> {
+    let file = resolve_local_path(target, cwd).filter(|path| path.exists())?;
+
+    // A bare name with no folder in it has nothing to reveal it against.
+    let is_named_path = file
+        .parent()
+        .is_some_and(|parent| !parent.as_os_str().is_empty());
+
+    is_named_path.then_some(file)
 }
 
 fn resolve_local_path(target: &str, cwd: Option<&Path>) -> Option<PathBuf> {

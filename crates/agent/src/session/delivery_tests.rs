@@ -1,4 +1,4 @@
-use crate::chat::{QueuedPrompt, SendOutcome};
+use crate::chat::{PromptPlacement, QueuedPrompt, SendOutcome};
 use crate::session::AgentKind;
 use crate::session::delivery::{MessageDelivery, RecoverablePrompt};
 
@@ -20,7 +20,28 @@ fn pending(id: &str, text: &str) -> QueuedPrompt {
     QueuedPrompt {
         id: Some(id.into()),
         text: text.into(),
+        placement: PromptPlacement::Queued,
     }
+}
+
+#[test]
+fn promoting_a_waiting_prompt_moves_it_into_the_running_turn() {
+    let mut delivery = MessageDelivery::new(AgentKind::DeepSeek);
+
+    delivery.snapshot(vec![pending("msg-1", "and then run the tests")]);
+
+    assert_eq!(delivery.pending()[0].placement, PromptPlacement::Queued);
+
+    delivery.promoted("msg-1");
+
+    assert_eq!(delivery.pending()[0].placement, PromptPlacement::Steering);
+
+    // A promotion the provider never named changes nothing, and the row keeps
+    // the placement the provider last reported.
+    delivery.promoted("msg-2");
+
+    assert_eq!(delivery.pending().len(), 1);
+    assert_eq!(delivery.pending()[0].placement, PromptPlacement::Steering);
 }
 
 #[test]
@@ -40,6 +61,16 @@ fn running_turn_messages_wait_for_their_own_echo() {
         SendOutcome::Steered
     );
     assert!(!delivery.provider_started());
+
+    // A correction this side just sent waits as a prompt the running turn
+    // reads. That is the state the row above the composer reports, until the
+    // provider's own queue replaces it.
+    assert!(
+        delivery
+            .pending()
+            .iter()
+            .all(|prompt| prompt.placement == PromptPlacement::Steering)
+    );
 
     delivery.visible_output();
 

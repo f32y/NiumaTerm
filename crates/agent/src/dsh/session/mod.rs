@@ -32,7 +32,7 @@ use crate::background_task::{
     BackgroundTaskSummary, BackgroundTaskTranscriptUpdate,
 };
 use crate::chat::{
-    Event, ForkAnchor, Item, MessageImage, Question, QuestionMode,
+    Event, ForkAnchor, Item, MessageImage, Question, QuestionAnswer, QuestionMode,
     QuestionRequest as ChatQuestionRequest, QuestionResolution, QuestionResponse, QueuedPrompt,
     SendOutcome, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome,
     SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
@@ -85,6 +85,8 @@ pub struct Session {
     /// The turn state this side knows about, so a stop is only offered while a
     /// turn is running.
     running: bool,
+
+    history_pending: bool,
 
     /// The Harness's latest whole-inbox snapshot. Closing removes its entries
     /// before cancelling the current turn, and a refused change to the inbox
@@ -264,6 +266,23 @@ fn settled(session_id: &str, command: Value) -> Value {
     } })
 }
 
+/// One answered question in the shape the harness reads it.
+///
+/// The harness keeps the picked labels and the typed answer in separate fields
+/// on purpose: a typed answer replaces the choice of a single-select question
+/// and adds to a multi-select one. An absent typed answer is left out instead
+/// of sent empty, which is the shape the harness documents for an answer
+/// that only picked.
+pub(crate) fn question_answer(id: &str, answer: &QuestionAnswer) -> Value {
+    let mut answered = json!({ "id": id, "selected": answer.selected });
+
+    if let Some(custom) = &answer.custom {
+        answered["custom"] = json!(custom);
+    }
+
+    answered
+}
+
 async fn open_conversation(
     client: &ApiClient,
     cwd: Option<&str>,
@@ -320,6 +339,10 @@ pub(super) async fn open_new_conversation(
 }
 
 impl Session {
+    pub fn history_in_flight(&self) -> bool {
+        self.history_pending
+    }
+
     /// Commands this adapter serves itself, beside the ones the harness's own
     /// registry reports.
     ///
@@ -443,6 +466,7 @@ impl Session {
             deliver,
             profile,
             running: false,
+            history_pending: true,
             queued_prompts: Vec::new(),
             agent_preset: None,
             lane: CommandLane::new(),
@@ -528,6 +552,8 @@ impl Session {
 
         self.workflows = WorkflowTracker::default();
 
+        self.history_pending = true;
+
         load_conversation(
             &self.client,
             &opened,
@@ -549,6 +575,10 @@ impl Session {
     /// Map one delivered frame into transcript events. Frames for other
     /// sessions and types this build does not know produce nothing.
     pub fn process(&mut self, frame: Value) -> Vec<Event> {
+        if frame["payload"]["type"] == HISTORY_FRAME {
+            self.history_pending = false;
+        }
+
         if let Some(events) = failed_read_events(&frame["payload"], &self.session_id) {
             return events;
         }
@@ -777,6 +807,7 @@ impl Session {
     /// tab is told to replace the host instead of sending into a closed port.
     fn on_host_exited(&mut self, message: Option<&str>) -> Vec<Event> {
         self.running = false;
+        self.history_pending = false;
 
         let mut events = self.on_connection_reset();
 
@@ -943,7 +974,8 @@ impl Session {
                 steering: true,
                 error,
             }
-            | frames::SettledCommand::QueueRemovalRefused { error } => vec![
+            | frames::SettledCommand::QueueRemovalRefused { error }
+            | frames::SettledCommand::QueuePromotionRefused { error } => vec![
                 Event::QueuedPrompts(self.queued_prompts.clone()),
                 Event::ItemStarted(Item::Error { text: error }),
             ],
@@ -1283,7 +1315,7 @@ impl Session {
     pub fn respond_input(
         &mut self,
         id: &str,
-        answers: Option<Vec<Vec<String>>>,
+        answers: Option<Vec<QuestionAnswer>>,
     ) -> Result<QuestionResponse, String> {
         let request = self
             .pending_questions
@@ -1299,7 +1331,7 @@ impl Session {
                     .ids
                     .iter()
                     .zip(answers)
-                    .map(|(id, selected)| json!({"id": id, "selected": selected}))
+                    .map(|(id, answer)| question_answer(id, &answer))
                     .collect();
 
                 json!({"kind": "result", "value": {"answers": answers}})
@@ -1597,6 +1629,42 @@ impl Session {
                 deliver(settled(
                     &session_id,
                     json!({ "kind": "queueRemovalRefused", "error": error.message() }),
+                ));
+            }
+        });
+
+        true
+    }
+
+    /// Ask the harness to read one waiting prompt at the running turn's next
+    /// step instead of after that turn ends.
+    ///
+    /// The harness accepts this only while a turn runs and while the prompt is
+    /// still waiting for the next turn, so a refusal leaves the prompt exactly
+    /// where it was. The refusal is reported, and the last queue the harness
+    /// published is published again so a row this side moved on request returns
+    /// to the placement the harness kept.
+    pub fn promote_queued_prompt(&mut self, item_id: &str) -> bool {
+        let payload = json!({
+            "sessionId": self.session_id,
+            "itemId": item_id,
+            "action": { "kind": "steer" },
+        });
+
+        let client = self.client.clone();
+        let deliver = Arc::clone(&self.deliver);
+        let session_id = self.session_id.clone();
+
+        self.lane.run(async move {
+            if let Err(error) = client.request("session/updateQueue", payload).await {
+                tracing::warn!(
+                    "deepseek queued prompt could not be moved into the running turn: {}",
+                    error.message()
+                );
+
+                deliver(settled(
+                    &session_id,
+                    json!({ "kind": "queuePromotionRefused", "error": error.message() }),
                 ));
             }
         });

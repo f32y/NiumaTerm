@@ -54,9 +54,14 @@ impl QuestionPanel {
 
         let key = prompt.key();
 
+        // An answered batch stays pending until the harness confirms the
+        // answer, so a question that arrives in that window has to take the
+        // card over. Leaving the answered batch on screen puts the new question
+        // behind controls that no longer accept anything.
         let reveal = self.presentations.contains_key(&key)
             || self.questions(input).is_none_or(|question| {
                 !question.pending()
+                    || question.status() == QuestionStatus::Submitting
                     || (prompt.mode() != QuestionMode::Async
                         && question.mode() == QuestionMode::Async)
             });
@@ -91,6 +96,43 @@ impl QuestionPanel {
 
         self.active = Some(key);
         self.collapsed = false;
+    }
+
+    /// Move the card to a batch that still needs an answer while the shown one
+    /// has already taken one.
+    ///
+    /// The answered batch stays in the header's list, and the card that takes
+    /// its place still names its state. It stops holding the card because every
+    /// control of a batch whose answer is unconfirmed refuses input, so a later
+    /// question would be drawn with nothing the user can press.
+    pub(crate) fn yield_to_unanswered(&mut self, input: &SessionInput) {
+        if self
+            .questions(input)
+            .is_some_and(|draft| draft.status() != QuestionStatus::Submitting)
+        {
+            return;
+        }
+
+        let Some(unanswered) = input
+            .batches()
+            .iter()
+            .rev()
+            .find(|draft| draft.status() == QuestionStatus::Pending)
+        else {
+            return;
+        };
+
+        let key = unanswered.key();
+
+        if self.active == Some(key) {
+            return;
+        }
+
+        self.presentations
+            .entry(key)
+            .or_insert_with(|| QuestionPresentation::new(unanswered));
+
+        self.active = Some(key);
     }
 
     /// Completed batches release the panel; history the user opened stays visible.
@@ -374,6 +416,8 @@ impl QuestionPanel {
             return None;
         }
 
+        self.yield_to_unanswered(session.borrow().input());
+
         self.prepare_editors(session, window, cx);
 
         let active = self.active?;
@@ -386,6 +430,17 @@ impl QuestionPanel {
         let enabled = session.borrow().can_submit_question(prompt.key())
             && composer_free
             && !session.borrow().commands().awaiting_turn;
+
+        // Every control below is disabled while this is false, so the card
+        // names the condition that refuses the answer. A card with no reason
+        // reads as a click that went nowhere.
+        let waiting = (!enabled && prompt.status() == QuestionStatus::Pending).then(|| {
+            if session.borrow().input().has_submission() {
+                "agent-question-waiting-submission"
+            } else {
+                "agent-question-waiting-session"
+            }
+        });
 
         let count_in_batch = prompt.questions().len();
 
@@ -611,38 +666,58 @@ impl QuestionPanel {
             }
 
             if question.input != QuestionInput::SelectionOnly {
-                if !question.options.is_empty() {
-                    row = row.child(
-                        Radio::new((group.clone(), question.options.len()))
-                            .label(t!("agent-question-custom").into_owned())
-                            .checked(prompt.is_custom(index))
-                            .disabled(!enabled)
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                if let Some(prompt) = this
-                                    .prompts
-                                    .questions_mut(this.session.borrow_mut().input_mut())
-                                {
-                                    if !prompt.choose_custom(index) {
-                                        return;
-                                    }
-
-                                    if let Some(active) = this.prompts.active
-                                        && let Some(presentation) =
-                                            this.prompts.presentations.get(&active)
-                                        && let Some(editor) = &presentation.editors[index]
-                                    {
-                                        editor.focus(window, cx);
-                                    }
-
-                                    cx.notify();
-                                }
-                            })),
-                    );
-                }
-
                 if pending {
                     if let Some(editor) = &presentation.editors[index] {
-                        row = row.child(editor.render(!enabled, cx));
+                        // The last row keeps the same choice circle the
+                        // options do, and the answer box stands where their
+                        // labels stand: picking the circle is how the user says
+                        // the typed text is the answer, so it has to be
+                        // selectable like any other answer. The circle has no
+                        // visible text, because the box beside it already says
+                        // what it is for; its accessible name still describes
+                        // the choice to a screen reader.
+                        row = row.child(
+                            div()
+                                .w_full()
+                                .px_1p5()
+                                .py_0p5()
+                                .rounded(UI_RADIUS)
+                                .when(prompt.is_custom(index) && enabled, |this| {
+                                    this.bg(cx.theme().list_active)
+                                })
+                                .child(
+                                    Radio::new((group.clone(), question.options.len()))
+                                        .debug_selector(move || {
+                                            format!("question-text-choice-{index}")
+                                        })
+                                        .accessibility_label(
+                                            t!("agent-question-custom").into_owned(),
+                                        )
+                                        .checked(prompt.is_custom(index))
+                                        .disabled(!enabled)
+                                        .on_click(cx.listener(move |this, _, window, cx| {
+                                            if let Some(prompt) = this.prompts.questions_mut(
+                                                this.session.borrow_mut().input_mut(),
+                                            ) {
+                                                if !prompt.choose_custom(index) {
+                                                    return;
+                                                }
+
+                                                if let Some(active) = this.prompts.active
+                                                    && let Some(presentation) =
+                                                        this.prompts.presentations.get(&active)
+                                                    && let Some(editor) =
+                                                        &presentation.editors[index]
+                                                {
+                                                    editor.focus(window, cx);
+                                                }
+
+                                                cx.notify();
+                                            }
+                                        }))
+                                        .child(div().w_full().child(editor.render(!enabled, cx))),
+                                ),
+                        );
                     }
                 } else if prompt.status() == QuestionStatus::Submitted && prompt.is_custom(index) {
                     row = row.child(
@@ -670,6 +745,15 @@ impl QuestionPanel {
                 .gap_3()
                 .children(rows),
         );
+
+        if let Some(reason) = waiting {
+            panel = panel.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(t!(reason).to_string()),
+            );
+        }
 
         if let Some(error) = prompt.error() {
             let error = match error {

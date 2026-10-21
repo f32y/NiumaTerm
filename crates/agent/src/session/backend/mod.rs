@@ -13,8 +13,9 @@ use tracing::trace;
 use crate::background_task::BackgroundTaskKey;
 use crate::catalog::adapter_commands;
 use crate::chat::{
-    Event, ForkAnchor, MessageImage, QuestionRequest, QuestionResponse, SendOutcome, SessionScope,
-    SkillReference, SlashCommandInfo, SlashCommandOutcome, TeamDecisionRequest, ThreadSettings,
+    Event, ForkAnchor, MessageImage, QuestionAnswer, QuestionRequest, QuestionResponse,
+    SendOutcome, SessionScope, SkillReference, SlashCommandInfo, SlashCommandOutcome,
+    TeamDecisionRequest, ThreadSettings,
 };
 use crate::claude_code::sessions::{RestoredTask, load_task_history};
 use crate::claude_code::stream_json;
@@ -356,6 +357,19 @@ impl Backend {
         }
     }
 
+    /// Ask the backend to read one waiting prompt at the running turn's next
+    /// step. Answers whether the request could be put, not whether the backend
+    /// accepted it: only a backend that names its pending work can be asked,
+    /// and it reports the placement it committed.
+    pub fn promote_queued_prompt(&mut self, item_id: &str) -> bool {
+        match self {
+            Backend::DeepSeek(session) => session.promote_queued_prompt(item_id),
+            Backend::Codex(_) | Backend::Claude(_) => false,
+            #[cfg(any(test, feature = "test-support"))]
+            Backend::Test(_) => false,
+        }
+    }
+
     /// Ask which prompts this conversation can be branched in front of. The
     /// answer arrives as [`Event::ForkCheckpoints`], so there is nothing to
     /// return here beyond whether the question could be put at all.
@@ -572,6 +586,16 @@ impl Backend {
             ResumeOutcome::SwitchedInPlace
         } else {
             ResumeOutcome::Rejected
+        }
+    }
+
+    pub fn history_in_flight(&self) -> bool {
+        match self {
+            Backend::Codex(session) => session.history_in_flight(),
+            Backend::DeepSeek(session) => session.history_in_flight(),
+            Backend::Claude(_) => false,
+            #[cfg(any(test, feature = "test-support"))]
+            Backend::Test(_) => false,
         }
     }
 
@@ -886,7 +910,7 @@ impl Backend {
     pub fn respond_input(
         &mut self,
         id: &str,
-        answers: Option<Vec<Vec<String>>>,
+        answers: Option<Vec<QuestionAnswer>>,
         settings: &ThreadSettings,
     ) -> Result<QuestionResponse, String> {
         match self {

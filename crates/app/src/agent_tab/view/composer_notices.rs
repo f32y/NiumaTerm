@@ -9,7 +9,7 @@ use gpui::{AnyElement, App, Context, div, px};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::tooltip::Tooltip;
 use gpui_component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, v_flex};
-use nmt_agent::chat::QueuedPrompt;
+use nmt_agent::chat::{PromptPlacement, QueuedPrompt};
 use nmt_agent::session::capabilities::AgentCapabilities as _;
 use nmt_agent::{AgentWorkspace, MultiRootAccess};
 use rust_i18n::t;
@@ -65,21 +65,30 @@ pub(crate) fn multi_root_strip(notice: String, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
-/// One queued prompt on one line. A prompt spanning several lines is folded
+/// One waiting prompt on one line. A prompt spanning several lines is folded
 /// into one so every waiting row costs the composer the same height.
+///
+/// The wording names which turn reads the message: a correction the running
+/// turn takes at its next step is not the same promise as one that waits for
+/// the turn to end, and only the label tells the user which they got.
 pub(super) fn queued_message_label(prompt: &QueuedPrompt) -> String {
     let text = visible_prompt(&prompt.text)
         .lines()
         .collect::<Vec<_>>()
         .join(" ");
 
-    t!("agent-history-queued-message", text = &text).into_owned()
+    match prompt.placement {
+        PromptPlacement::Steering => {
+            t!("agent-history-steering-message", text = &text).into_owned()
+        }
+        PromptPlacement::Queued => t!("agent-history-queued-message", text = &text).into_owned(),
+    }
 }
 
 /// The prompts waiting behind the running turn, one row each, above the
-/// composer. A row whose backend named it has a control that drops it
-/// again; one this side is only remembering does not, because there is
-/// nothing on the backend such a control could address.
+/// composer. A row whose backend named it has controls that drop it again or
+/// move it into the running turn; one this side is only remembering has none,
+/// because there is nothing on the backend such a control could address.
 pub(crate) fn queued_prompts(
     pending: &VecDeque<QueuedPrompt>,
     cx: &mut Context<AgentPane>,
@@ -95,30 +104,48 @@ pub(crate) fn queued_prompts(
             .py_1p5()
             .gap_0p5()
             .children(pending.iter().enumerate().map(|(index, prompt)| {
-                h_flex()
-                    .w_full()
-                    .gap_1()
-                    .items_center()
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .child(queued_message_label(prompt)),
-                    )
-                    .children(prompt.id.clone().map(|id| {
+                let mut row = h_flex().w_full().gap_1().items_center().child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .child(queued_message_label(prompt)),
+                );
+
+                if let Some(id) = prompt.id.clone() {
+                    // Moving a prompt into the running turn is offered only for
+                    // one the harness is holding for the next turn: a prompt
+                    // already read by the running turn has nothing to move.
+                    if prompt.placement == PromptPlacement::Queued {
+                        let moved = id.clone();
+
+                        row = row.child(
+                            Button::new(("queued-prompt-steer", index))
+                                .ghost()
+                                .xsmall()
+                                .icon(IconName::Zap)
+                                .tooltip(t!("agent-history-queued-steer"))
+                                .accessibility_label(t!("agent-history-queued-steer"))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.promote_queued_prompt(&moved, cx)
+                                })),
+                        );
+                    }
+
+                    row = row.child(
                         Button::new(("queued-prompt-remove", index))
                             .ghost()
                             .xsmall()
                             .icon(IconName::Close)
                             .tooltip(t!("agent-history-queued-remove"))
                             .accessibility_label(t!("agent-history-queued-remove"))
-                            .on_click(
-                                cx.listener(move |this, _, _, cx| {
-                                    this.remove_queued_prompt(&id, cx)
-                                }),
-                            )
-                    }))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.remove_queued_prompt(&id, cx)
+                            })),
+                    );
+                }
+
+                row
             })),
     )
 }

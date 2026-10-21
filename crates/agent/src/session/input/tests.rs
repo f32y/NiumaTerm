@@ -1,8 +1,8 @@
 use std::time::{Duration, Instant};
 
 use crate::chat::{
-    Question, QuestionInput, QuestionMode, QuestionOption, QuestionRequest, QuestionResolution,
-    QuestionResponse, SlashCommandOutcome, ThreadSettings,
+    Question, QuestionAnswer, QuestionInput, QuestionMode, QuestionOption, QuestionRequest,
+    QuestionResolution, QuestionResponse, SlashCommandOutcome, ThreadSettings,
 };
 use crate::session::input::{
     ApprovalOutcome, QuestionAction, QuestionDraft, QuestionError, QuestionKey, QuestionStatus,
@@ -113,7 +113,16 @@ fn single_select_replaces_and_multi_select_answers_follow_option_order() {
     assert!(draft.is_complete());
     assert_eq!(
         draft.answers(),
-        vec![vec!["Postgres"], vec!["Metrics", "Audit"]]
+        vec![
+            QuestionAnswer {
+                selected: vec!["Postgres".to_owned()],
+                custom: None,
+            },
+            QuestionAnswer {
+                selected: vec!["Metrics".to_owned(), "Audit".to_owned()],
+                custom: None,
+            },
+        ]
     );
 
     draft.toggle(1, 0);
@@ -121,6 +130,36 @@ fn single_select_replaces_and_multi_select_answers_follow_option_order() {
     draft.toggle(1, 2);
 
     assert!(!draft.is_complete());
+}
+
+#[test]
+fn a_typed_answer_to_a_question_with_options_is_reported_as_typed() {
+    let mut runtime = runtime(AgentKind::Codex, "thread");
+    let mut input = SessionInput::default();
+
+    input.restore(&mut runtime);
+
+    let key = receive(&mut input, &runtime, "request", QuestionMode::Async);
+
+    // The options are not what the user wants to say, so they type instead.
+    // A question that offers options has one preselected, and that pick is not
+    // part of the answer once the typed text is the answer.
+    input
+        .draft_mut(key)
+        .unwrap()
+        .set_text(0, "  neither: use SQLite in WAL mode  ".into());
+
+    assert_eq!(
+        submit(&mut input, &mut runtime, key, QuestionAction::Answer),
+        Submission::Waiting
+    );
+    assert_eq!(
+        backend(&mut runtime).input_responses[0].answers,
+        Some(vec![QuestionAnswer {
+            selected: Vec::new(),
+            custom: Some("neither: use SQLite in WAL mode".into()),
+        }])
+    );
 }
 
 #[test]
@@ -159,7 +198,10 @@ fn submission_is_exclusive_and_failure_keeps_the_edited_draft_for_retry() {
     );
     assert_eq!(
         backend(&mut runtime).input_responses[1].answers,
-        Some(vec![vec!["edited answer".into()]])
+        Some(vec![QuestionAnswer {
+            selected: Vec::new(),
+            custom: Some("edited answer".into()),
+        }])
     );
     assert!(
         input
@@ -614,7 +656,10 @@ fn synchronous_question_responses_settle_once_and_clear_secrets() {
         backend(&mut runtime).input_responses,
         vec![InputResponse {
             id: "secret".into(),
-            answers: Some(vec![vec!["temporary value".into()]]),
+            answers: Some(vec![QuestionAnswer {
+                selected: Vec::new(),
+                custom: Some("temporary value".into()),
+            }]),
         }]
     );
 }

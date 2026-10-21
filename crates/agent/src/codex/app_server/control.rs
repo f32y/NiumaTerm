@@ -91,6 +91,13 @@ impl ControlState {
         self.track(id, ControlOperation::Query(kind));
     }
 
+    pub(super) fn history_in_flight(&self) -> bool {
+        self.pending
+            .operations
+            .values()
+            .any(|operation| matches!(operation, ControlOperation::Query(QueryKind::History)))
+    }
+
     pub(super) fn has_command(&self) -> bool {
         self.pending
             .operations

@@ -764,3 +764,269 @@ fn a_batch_answered_one_question_at_a_time_moves_on_only_from_an_answer(cx: &mut
         });
     });
 }
+
+#[gpui::test]
+fn an_answered_batch_yields_the_card_to_a_question_that_still_needs_one(cx: &mut TestAppContext) {
+    fn ask(cx: &VisualTestContext, pane: &Entity<AgentPane>, id: &str, label: &str) {
+        deliver_session_event(
+            pane,
+            Event::InputRequested(QuestionRequest {
+                id: id.into(),
+                mode: QuestionMode::Blocking,
+                questions: vec![question("Choose", false, &[label])],
+            }),
+            cx,
+        );
+    }
+
+    let (pane, window) = open_pane(cx);
+
+    let mut cx = VisualTestContext::from_window(window.into(), cx);
+
+    ask(&cx, &pane, "first", "one");
+    ask(&cx, &pane, "second", "two");
+
+    cx.update(|window, cx| {
+        pane.update(cx, |pane, cx| {
+            let session = pane.session.clone();
+
+            // The second request arrives while the first one is unanswered, so
+            // the card stays on the batch the turn is blocked on.
+            pane.prompts.render(&session, true, window, cx);
+
+            assert_eq!(
+                pane.prompts.active,
+                Some(session.borrow().input().batches()[0].key())
+            );
+
+            pane.toggle_question_option(0, 0, cx);
+            pane.submit_current_questions(cx);
+
+            assert_eq!(
+                session.borrow().input().batches()[0].status(),
+                QuestionStatus::Submitting
+            );
+
+            // Every control of an answered batch is disabled until the harness
+            // confirms the answer, so the card has to move to the question that
+            // still needs one.
+            pane.prompts.render(&session, true, window, cx);
+
+            assert_eq!(
+                pane.prompts.active,
+                Some(session.borrow().input().batches()[1].key())
+            );
+        });
+    });
+
+    // The harness confirms the first answer, and that confirmation is the only
+    // thing that lets the next question be answered at all. A backend confirms
+    // one answer at a time, so an unconfirmed one refuses every other batch.
+    deliver_session_event(
+        &pane,
+        Event::InputResolved {
+            id: "first".into(),
+            resolution: QuestionResolution::Submitted {
+                message: None,
+                started_turn: false,
+            },
+        },
+        &cx,
+    );
+
+    cx.update(|_, cx| {
+        pane.update(cx, |pane, cx| {
+            let session = pane.session.clone();
+
+            pane.toggle_question_option(0, 0, cx);
+            pane.submit_current_questions(cx);
+
+            assert_eq!(
+                session.borrow().input().batches()[1].status(),
+                QuestionStatus::Submitting
+            );
+        });
+    });
+
+    // A question that arrives while an answer is unconfirmed takes the card on
+    // arrival, without waiting for a frame to find the waiting question.
+    ask(&cx, &pane, "third", "three");
+
+    cx.update(|_, cx| {
+        pane.update(cx, |pane, _| {
+            let session = pane.session.clone();
+
+            assert_eq!(
+                pane.prompts.active,
+                Some(session.borrow().input().batches()[2].key())
+            );
+        });
+    });
+}
+
+#[gpui::test]
+fn a_question_that_accepts_text_offers_its_input_beside_the_options(cx: &mut TestAppContext) {
+    let (pane, window) = open_pane(cx);
+
+    let mut cx = VisualTestContext::from_window(window.into(), cx);
+
+    deliver_session_event(
+        &pane,
+        Event::InputRequested(QuestionRequest {
+            id: "mixed".into(),
+            mode: QuestionMode::Blocking,
+            questions: vec![
+                Question {
+                    input: QuestionInput::SelectionOnly,
+                    ..question("Which database?", false, &["Postgres", "SQLite"])
+                },
+                Question {
+                    input: QuestionInput::Text,
+                    ..question("Anything the options miss?", false, &["No"])
+                },
+            ],
+        }),
+        &cx,
+    );
+
+    cx.update(|window, cx| {
+        pane.update(cx, |pane, cx| {
+            pane.prompts.prepare_editors(&pane.session, window, cx);
+
+            let active = pane.prompts.active.expect("the batch is shown");
+            let editors = &pane.prompts.presentations[&active].editors;
+
+            // An option-only question has nowhere for typed text to go, so it
+            // keeps its options alone instead of collecting an answer nothing
+            // reads. A question the harness answers with text as well offers the
+            // input as part of the card, without the user having to select
+            // "Custom answer" first.
+            assert!(editors[0].is_none());
+            assert!(editors[1].is_some());
+        });
+    });
+}
+
+#[gpui::test]
+fn typing_in_the_card_answers_the_question_with_that_text(cx: &mut TestAppContext) {
+    let (pane, window) = open_pane(cx);
+
+    let mut cx = VisualTestContext::from_window(window.into(), cx);
+
+    deliver_session_event(
+        &pane,
+        Event::InputRequested(QuestionRequest {
+            id: "typed".into(),
+            mode: QuestionMode::Blocking,
+            questions: vec![Question {
+                input: QuestionInput::Text,
+                ..question("Which database?", false, &["Postgres", "SQLite"])
+            }],
+        }),
+        &cx,
+    );
+
+    cx.update(|window, cx| {
+        pane.update(cx, |pane, cx| {
+            pane.prompts.prepare_editors(&pane.session, window, cx);
+
+            let active = pane.prompts.active.expect("the batch is shown");
+
+            let editor = pane.prompts.presentations[&active].editors[0]
+                .as_ref()
+                .expect("a question that accepts text has an input");
+
+            let QuestionEditorState::Text(state) = &editor.state else {
+                panic!("text editor required");
+            };
+
+            // Typing needs the box focused, and a click on it is how that
+            // happens.
+            state.update(cx, |state, cx| state.focus(window, cx));
+        });
+    });
+
+    // A keystroke is what an input reports as a change; `set_value` sets the
+    // text without reporting one, so it cannot stand in for typing.
+    cx.simulate_input("neither: SQLite in WAL mode");
+
+    cx.update(|_, cx| {
+        pane.update(cx, |pane, cx| {
+            let active = pane.prompts.active.expect("the batch is shown");
+
+            // Typing is the answer, not a note beside the options: the card
+            // reports it as the custom answer, and the question counts as
+            // answered without any option being picked.
+            let typed = pane
+                .session
+                .borrow()
+                .input()
+                .draft(active)
+                .map(|draft| (draft.text(0).to_string(), draft.is_custom(0)));
+
+            assert_eq!(
+                typed,
+                Some(("neither: SQLite in WAL mode".to_string(), true))
+            );
+
+            pane.submit_current_questions(cx);
+
+            assert_eq!(
+                pane.session.borrow().input().batches()[0].status(),
+                QuestionStatus::Submitting,
+                "the typed answer went to the backend"
+            );
+        });
+    });
+}
+
+#[gpui::test]
+fn the_answer_box_stands_beside_a_choice_circle_of_its_own(cx: &mut TestAppContext) {
+    let (pane, window) = open_pane(cx);
+
+    let mut cx = VisualTestContext::from_window(window.into(), cx);
+
+    deliver_session_event(
+        &pane,
+        Event::InputRequested(QuestionRequest {
+            id: "choice".into(),
+            mode: QuestionMode::Blocking,
+            questions: vec![Question {
+                input: QuestionInput::Text,
+                ..question("Which database?", false, &["Postgres", "SQLite"])
+            }],
+        }),
+        &cx,
+    );
+
+    cx.run_until_parked();
+
+    cx.update(|window, cx| {
+        let _ = window.draw(cx);
+    });
+
+    let circle = cx
+        .debug_bounds("question-text-choice-0")
+        .expect("the answer box keeps the choice circle the option rows use");
+
+    cx.simulate_click(circle.center(), Default::default());
+
+    cx.run_until_parked();
+
+    cx.update(|_, cx| {
+        pane.update(cx, |pane, _| {
+            let active = pane.prompts.active.expect("the batch is shown");
+
+            // Picking the circle says the typed text is the answer, exactly
+            // as an option's circle says it for the label beside it.
+            assert!(
+                pane.session
+                    .borrow()
+                    .input()
+                    .draft(active)
+                    .is_some_and(|draft| draft.is_custom(0)),
+                "picking the answer-box circle answers the question with text"
+            );
+        });
+    });
+}

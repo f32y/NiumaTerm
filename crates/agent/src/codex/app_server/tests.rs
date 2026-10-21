@@ -131,9 +131,13 @@ fn steering_retries_require_an_explicit_refusal_and_an_active_owner() {
 fn history_refresh_rejects_old_pages_and_keeps_the_latest_cursor() {
     let mut session = disconnected_session();
 
+    assert!(!session.history_in_flight());
+
     let old = session.control.next_id();
 
     session.request_history(SessionScope::default());
+
+    assert!(session.history_in_flight());
 
     let current = session.control.next_id();
 
@@ -147,6 +151,10 @@ fn history_refresh_rejects_old_pages_and_keeps_the_latest_cursor() {
             .is_empty()
     );
     assert!(session.history_cursor.is_none());
+    assert!(
+        session.history_in_flight(),
+        "an older reply cannot finish the current read"
+    );
     assert!(matches!(
         session
             .process(json!({"id": current, "result": {"data": [], "nextCursor": "next"}}))
@@ -154,9 +162,13 @@ fn history_refresh_rejects_old_pages_and_keeps_the_latest_cursor() {
         [Event::History(_)]
     ));
 
+    assert!(!session.history_in_flight());
+
     let page = session.control.next_id();
 
     session.request_more_history();
+
+    assert!(session.history_in_flight());
 
     assert!(session.history_cursor.is_none());
 
@@ -178,6 +190,14 @@ fn history_refresh_rejects_old_pages_and_keeps_the_latest_cursor() {
     session.process(json!({"id": refresh, "result": {"data": [], "nextCursor": "fresh"}}));
 
     assert_eq!(session.history_cursor.as_deref(), Some("fresh"));
+    assert!(!session.history_in_flight());
+
+    let failed = session.control.next_id();
+
+    session.request_history(SessionScope::default());
+    session.process(json!({"id": failed, "error": {"message": "read failed"}}));
+
+    assert!(!session.history_in_flight());
 }
 
 #[test]
