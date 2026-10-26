@@ -106,6 +106,16 @@ impl Root {
         #[cfg(all(target_os = "macos", not(test)))]
         gpui_base::install_window_hit_test_forwarder(window);
 
+        // Losing activation may produce no further pointer events to clear
+        // visible tooltips or cancel their delayed display.
+        cx.observe_window_activation(window, |this, window, cx| {
+            if !window.is_window_active() {
+                this.tooltip_overlay
+                    .update(cx, |overlay, cx| overlay.hide(cx));
+            }
+        })
+        .detach();
+
         Self {
             style: StyleRefinement::default(),
             view: view.into(),
@@ -604,6 +614,12 @@ impl Render for Root {
             // Transcript selection can coexist with a focused input's earlier
             // selection. Consume Copy before the input replaces the clipboard.
             .capture_action(cx.listener(Self::on_action_copy))
+            // Clear the popup before child handlers open another window or
+            // stop mouse event propagation.
+            .capture_any_mouse_down(cx.listener(|this, _, _, cx| {
+                this.tooltip_overlay
+                    .update(cx, |overlay, cx| overlay.hide(cx));
+            }))
             .relative()
             .size_full()
             .font_family(cx.theme().font_family.clone())
