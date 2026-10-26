@@ -435,6 +435,26 @@
         }
       }
     },
+    "Clear logs": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "清空日志"
+          }
+        }
+      }
+    },
+    "Clear logs?": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "清空日志？"
+          }
+        }
+      }
+    },
     "Close": {
       "localizations": {
         "zh-Hans": {
@@ -531,6 +551,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "连接方式"
+          }
+        }
+      }
+    },
+    "Connection and core diagnostics from this app launch.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本次启动的连接和核心诊断日志。"
           }
         }
       }
@@ -868,6 +898,16 @@
         }
       }
     },
+    "Logs": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "日志"
+          }
+        }
+      }
+    },
     "Message %@": {
       "localizations": {
         "zh-Hans": {
@@ -1004,6 +1044,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "还没有电脑"
+          }
+        }
+      }
+    },
+    "No logs yet.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "暂无日志。"
           }
         }
       }
@@ -1477,6 +1527,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "显示键盘"
+          }
+        }
+      }
+    },
+    "Show logs": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显示日志"
           }
         }
       }

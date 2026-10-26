@@ -16,9 +16,10 @@ use parking_lot::Mutex;
 use tokio::select;
 use tokio::task::AbortHandle;
 use tokio::time::timeout;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::agent::{AgentHandle, AgentObserver};
+use crate::diagnostics;
 use crate::error::CoreError;
 use crate::records::{HostLink, HostOffer, HostRecord, NetworkMode, PushSettings, SessionRecord};
 use crate::terminal::{TerminalHandle, TerminalObserver};
@@ -90,6 +91,10 @@ impl MobileCore {
         device_name: String,
         app_version: String,
     ) -> Result<Arc<Self>, CoreError> {
+        diagnostics::initialize();
+
+        info!(%app_version, "starting mobile core");
+
         let dir = PathBuf::from(state_dir);
         let key = Arc::new(load_or_create_identity(&dir)?);
         let records = load_hosts(&dir);

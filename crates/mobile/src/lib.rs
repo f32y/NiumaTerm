@@ -12,5 +12,6 @@ pub mod records;
 pub mod terminal;
 
 mod commands;
+mod diagnostics;
 
 uniffi::setup_scaffolding!();

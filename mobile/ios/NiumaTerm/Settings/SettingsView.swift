@@ -118,6 +118,14 @@ struct SettingsView: View {
                 Section {
                     LabeledContent("Version", value: AppModel.appVersion)
                 }
+
+                Section {
+                    NavigationLink {
+                        LogsView()
+                    } label: {
+                        Label("Show logs", systemImage: "doc.text.magnifyingglass")
+                    }
+                }
             }
             .tint(Theme.accent)
             .onChange(of: [notifyTurnFinished, notifyApproval, notifyQuestion, notifyError]) {
