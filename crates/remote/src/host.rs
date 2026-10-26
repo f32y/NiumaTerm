@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use anyhow::{Result, bail};
+use anyhow::{Context as _, Result, bail};
 use futures::{Sink, Stream};
 use nmt_platform::runtime;
 use nmt_remote_core::channel::{Channel, HostHandshake};
@@ -51,7 +51,7 @@ use tokio_tungstenite::accept_hdr_async;
 use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
 use tokio_tungstenite::tungstenite::http::StatusCode;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
-use tracing::{debug, warn};
+use tracing::{Instrument as _, debug, info, info_span, warn};
 
 use crate::direct;
 use crate::discovery::Advertiser;
@@ -263,14 +263,21 @@ impl HostService {
                 // Relay connections count against the same limit as LAN
                 // sockets until their handshake completes.
                 let Ok(permit) = Arc::clone(&shared.unauthenticated).try_acquire_owned() else {
+                    info!(
+                        path = "relay",
+                        "rejecting remote connection: too many pending handshakes"
+                    );
+
                     return;
                 };
 
-                tokio::spawn(async move {
+                let task = async move {
                     if let Err(error) = serve_ws(shared, ws, permit).await {
-                        debug!(%error, "relayed connection ended");
+                        info!(error = %format_args!("{error:#}"), "relayed connection ended");
                     }
-                });
+                };
+
+                tokio::spawn(task.instrument(info_span!("remote_connection", path = "relay")));
             });
 
             runtime().spawn(run_host_link(
@@ -722,12 +729,21 @@ impl Connection {
     fn direct_offer(&self, id: u64, params: Value) {
         let offer: DirectOffer = match parse(params) {
             Ok(offer) => offer,
-            Err(error) => return respond(&self.queue, id, Err(error)),
+            Err(error) => {
+                info!(request = id, "rejecting malformed direct offer");
+
+                return respond(&self.queue, id, Err(error));
+            }
         };
 
         // The direct connection counts against the same limit as LAN
         // sockets until its handshake completes.
         let Ok(permit) = Arc::clone(&self.shared.unauthenticated).try_acquire_owned() else {
+            info!(
+                request = id,
+                "rejecting direct offer: too many pending handshakes"
+            );
+
             return respond(
                 &self.queue,
                 id,
@@ -741,12 +757,23 @@ impl Connection {
         let shared = Arc::clone(&self.shared);
         let queue = self.queue.clone();
 
-        tokio::spawn(async move {
+        let span = info_span!("direct_attempt", side = "host",
+            device = %DeviceId::from_public_key(&self.viewer.key), request = id);
+
+        let attempt = async move {
+            let started = Instant::now();
+
+            info!(peer_nat = ?offer.nat, public_candidates = ?offer.addrs,
+                local_candidates = ?offer.local, "received direct offer");
+
             let servers = direct::stun_servers(&shared.config.stun_servers);
 
             let gathered = match direct::gather(&servers).await {
                 Ok(gathered) => gathered,
                 Err(error) => {
+                    info!(stage = "gather", elapsed_ms = started.elapsed().as_millis(),
+                        error = %format_args!("{error:#}"), "direct attempt failed; existing connection retained");
+
                     let error = RpcError::new(ErrorCode::Unsupported, error.to_string());
 
                     return respond(&queue, id, Err(error));
@@ -754,11 +781,14 @@ impl Connection {
             };
 
             let answer = gathered.offer();
+            let same_nat = gathered.same_nat(&offer);
+
+            info!(same_nat, "selecting route for direct offer");
 
             // The device applies the same checks to the same two offers, so
             // both pick one route and a pair that cannot meet stops on both
             // sides here.
-            let prepared = if gathered.same_nat(&offer) {
+            let prepared = if same_nat {
                 direct::prepare_local(gathered, &offer, Side::Host)
             } else {
                 direct::prepare(gathered, &offer, Side::Host)
@@ -766,24 +796,34 @@ impl Connection {
 
             respond(&queue, id, reply(&answer));
 
-            let connected = match prepared {
-                Ok(prepared) => prepared.connect().await,
-                Err(error) => Err(error),
+            info!("sent direct answer");
+
+            let (stage, connected) = match prepared {
+                Ok(prepared) => ("connect", prepared.connect().await),
+                Err(error) => ("prepare", Err(error)),
             };
 
             let ws = match connected {
                 Ok((ws, _)) => ws,
                 Err(error) => {
-                    debug!(%error, "no direct path to the device");
+                    info!(stage, elapsed_ms = started.elapsed().as_millis(),
+                        error = %format_args!("{error:#}"), "direct attempt failed; existing connection retained");
 
                     return;
                 }
             };
 
+            info!(
+                elapsed_ms = started.elapsed().as_millis(),
+                "direct transport ready; starting channel handshake"
+            );
+
             if let Err(error) = serve_ws(shared, ws, permit).await {
-                debug!(%error, "direct connection ended");
+                info!(error = %format_args!("{error:#}"), "direct connection ended");
             }
-        });
+        };
+
+        tokio::spawn(attempt.instrument(span));
     }
 
     fn request(&mut self, method: &str, params: Value) -> Result<Value, RpcError> {
@@ -1391,23 +1431,29 @@ async fn accept_loop(shared: Arc<Shared>, listener: TcpListener) {
         }
 
         let Ok(permit) = Arc::clone(&shared.unauthenticated).try_acquire_owned() else {
-            debug!(%peer, "dropping a connection: too many pending handshakes");
+            info!(%peer, "dropping a connection: too many pending handshakes");
 
             continue;
         };
 
         let shared = Arc::clone(&shared);
 
-        tokio::spawn(async move {
-            if let Err(error) = serve(shared, tcp, permit).await {
-                debug!(%peer, %error, "remote connection ended");
+        tokio::spawn(
+            async move {
+                if let Err(error) = serve(shared, tcp, permit).await {
+                    info!(error = %format_args!("{error:#}"), "remote connection ended");
+                }
             }
-        });
+            .instrument(info_span!("remote_connection", path = "lan", %peer)),
+        );
     }
 }
 
 async fn serve(shared: Arc<Shared>, tcp: TcpStream, permit: OwnedSemaphorePermit) -> Result<()> {
-    let ws = timeout(HANDSHAKE_TIMEOUT, accept_hdr_async(tcp, check_path)).await??;
+    let ws = timeout(HANDSHAKE_TIMEOUT, accept_hdr_async(tcp, check_path))
+        .await
+        .context("LAN WebSocket handshake timed out")?
+        .context("LAN WebSocket handshake failed")?;
 
     serve_ws(shared, ws, permit).await
 }
@@ -1422,6 +1468,8 @@ where
         + Send
         + 'static,
 {
+    info!("starting remote protocol handshake");
+
     let (offer, answer) = timeout(HANDSHAKE_TIMEOUT, async {
         let offer = Preface::decode(&recv_binary(&mut ws).await?)?;
         let answer = offer.answer();
@@ -1430,27 +1478,39 @@ where
 
         anyhow::Ok((offer, answer))
     })
-    .await??;
+    .await
+    .context("remote protocol preface timed out")?
+    .context("remote protocol preface failed")?;
 
     match answer.kind {
-        PrefaceKind::Rejected => Ok(()),
-        PrefaceKind::Pairing => {
-            timeout(
-                PAIRING_TIMEOUT,
-                serve_pairing(&shared, &mut ws, &offer, &answer),
-            )
-            .await?
+        PrefaceKind::Rejected => {
+            info!("remote protocol preface rejected");
+
+            Ok(())
         }
+        PrefaceKind::Pairing => timeout(
+            PAIRING_TIMEOUT,
+            serve_pairing(&shared, &mut ws, &offer, &answer),
+        )
+        .await
+        .context("remote pairing timed out")?
+        .context("remote pairing failed"),
         PrefaceKind::Channel => {
             let (channel, client_key) = timeout(
                 HANDSHAKE_TIMEOUT,
                 accept_channel(&shared, &mut ws, &offer, &answer),
             )
-            .await??;
+            .await
+            .context("remote channel handshake timed out")?
+            .context("remote channel handshake failed")?;
 
             drop(permit);
 
-            run_channel(shared, ws, channel, client_key).await
+            run_channel(shared, ws, channel, client_key)
+                .instrument(
+                    info_span!("remote_channel", device = %DeviceId::from_public_key(&client_key)),
+                )
+                .await
         }
     }
 }
@@ -1649,6 +1709,9 @@ where
     // network changed runs the fast check from its side.
     let pump = tokio::spawn(pump(ws, channel, queue_rx, in_tx, Arc::default()));
     let pump_id = pump.id();
+    let channel_started = Instant::now();
+
+    info!(connection = %pump_id, "remote channel authenticated");
 
     // Clients that listed sessions refresh when the list changes, and
     // every client receives a new host name.
@@ -1774,11 +1837,23 @@ where
         registry.remove_viewer(session, &client_key);
     }
 
-    match pump.await {
+    let result = match pump.await {
         Ok(result) => result,
         Err(error) if error.is_cancelled() => Ok(()),
         Err(error) => Err(error.into()),
+    };
+
+    if result.is_ok() {
+        info!(connection = %pump_id, elapsed_ms = channel_started.elapsed().as_millis(), "remote channel closed");
     }
+
+    result.with_context(|| {
+        format!(
+            "remote channel {pump_id} for device {} failed after {} ms",
+            DeviceId::from_public_key(&client_key),
+            channel_started.elapsed().as_millis()
+        )
+    })
 }
 
 /// The person at the host using it means devices away from it are no longer

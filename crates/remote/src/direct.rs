@@ -37,7 +37,7 @@ use tokio::task::JoinHandle;
 use tokio::time::{Instant, sleep, sleep_until, timeout};
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::protocol::Role;
-use tracing::debug;
+use tracing::{Instrument as _, debug, info};
 
 #[cfg(feature = "lan")]
 use crate::lan::lan_addresses;
@@ -146,13 +146,17 @@ impl Gathered {
 /// at a time in list order, until two have answered or the list ends.
 pub(crate) async fn gather(servers: &[String]) -> Result<Gathered> {
     let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).await?;
+    let started = Instant::now();
+
+    info!(local_socket = ?socket.local_addr().ok(), servers = servers.len(), "gathering direct candidates");
 
     let mut asked = HashSet::new();
     let mut mapped = Vec::new();
     let mut route_target = None;
 
-    for batch in servers.chunks(STUN_BATCH) {
+    for (batch_index, batch) in servers.chunks(STUN_BATCH).enumerate() {
         let resolved = resolve(batch).await;
+        let resolved_count = resolved.len();
 
         // Names that share an address answer for one server; asking it again
         // would count one mapping twice.
@@ -165,14 +169,26 @@ pub(crate) async fn gather(servers: &[String]) -> Result<Gathered> {
             route_target = fresh.first().copied();
         }
 
-        mapped.extend(query(&socket, &fresh).await?);
+        let answers = query(&socket, &fresh).await?;
+
+        info!(batch = batch_index + 1, names = batch.len(), resolved = resolved_count,
+            queried = fresh.len(), answered = answers.len(), mappings = ?answers,
+            elapsed_ms = started.elapsed().as_millis(), "STUN batch completed");
+
+        mapped.extend(answers);
 
         if mapped.len() >= 2 {
             break;
         }
     }
 
-    let nat = classify(&mapped).context("fewer than two STUN servers answered")?;
+    let nat = classify(&mapped).with_context(|| {
+        format!(
+            "fewer than two STUN servers answered ({} answers from {} endpoints)",
+            mapped.len(),
+            asked.len()
+        )
+    })?;
 
     let mut addrs = Vec::new();
 
@@ -183,6 +199,9 @@ pub(crate) async fn gather(servers: &[String]) -> Result<Gathered> {
     }
 
     let local = local_addresses(socket.local_addr()?.port(), route_target);
+
+    info!(?nat, public_candidates = ?addrs, local_candidates = ?local, ?route_target,
+        elapsed_ms = started.elapsed().as_millis(), "direct candidates gathered");
 
     let cert = rcgen::generate_simple_self_signed(vec![SERVER_NAME.to_owned()])?;
 
@@ -232,11 +251,27 @@ async fn resolve(batch: &[String]) -> Vec<SocketAddr> {
     let lookups = batch
         .iter()
         .map(|server| async move {
-            timeout(STUN_RESOLVE_WAIT, lookup_host(server.as_str()))
-                .await
-                .ok()?
-                .ok()?
-                .find(SocketAddr::is_ipv4)
+            match timeout(STUN_RESOLVE_WAIT, lookup_host(server.as_str())).await {
+                Ok(Ok(mut addresses)) => {
+                    let address = addresses.find(SocketAddr::is_ipv4);
+
+                    if address.is_none() {
+                        debug!(%server, "STUN name has no IPv4 address");
+                    }
+
+                    address
+                }
+                Ok(Err(error)) => {
+                    debug!(%server, %error, "STUN name lookup failed");
+
+                    None
+                }
+                Err(_) => {
+                    debug!(%server, "STUN name lookup timed out");
+
+                    None
+                }
+            }
         })
         .collect::<FuturesUnordered<_>>();
 
@@ -270,12 +305,19 @@ async fn query(socket: &UdpSocket, servers: &[SocketAddr]) -> Result<Vec<SocketA
 
     let mut resend = Instant::now();
     let mut buf = [0u8; 1024];
+    let mut send_errors = 0;
+    let mut receive_errors = 0;
+    let mut last_error = None;
 
     while Instant::now() < deadline && answers.iter().any(Option::is_none) {
         if Instant::now() >= resend {
             for ((server, transaction), answer) in servers.iter().zip(&transactions).zip(&answers) {
-                if answer.is_none() {
-                    let _ = socket.send_to(&binding_request(transaction), server).await;
+                if answer.is_none()
+                    && let Err(error) = socket.send_to(&binding_request(transaction), server).await
+                {
+                    send_errors += 1;
+                    debug!(%server, %error, "STUN request send failed");
+                    last_error = Some(error);
                 }
             }
 
@@ -290,15 +332,26 @@ async fn query(socket: &UdpSocket, servers: &[SocketAddr]) -> Result<Vec<SocketA
         // Windows reports an ICMP port-unreachable from an earlier datagram
         // as an error on the next receive; the server that sent it simply
         // stays unanswered.
-        let Ok((len, from)) = received else {
-            continue;
+        let (len, from) = match received {
+            Ok(received) => received,
+            Err(error) => {
+                receive_errors += 1;
+                last_error = Some(error);
+
+                continue;
+            }
         };
 
         if let Some(index) = servers.iter().position(|server| *server == from)
             && let Some(mapped) = mapped_address(&buf[..len], &transactions[index])
         {
+            debug!(server = %from, %mapped, "STUN mapping received");
             answers[index] = Some(mapped);
         }
+    }
+
+    if let Some(error) = last_error {
+        info!(send_errors, receive_errors, %error, "STUN socket errors during batch");
     }
 
     Ok(answers.into_iter().flatten().collect())
@@ -328,6 +381,9 @@ impl Drop for Prepared {
 pub(crate) fn prepare(gathered: Gathered, peer: &DirectOffer, me: Side) -> Result<Prepared> {
     let peers = candidates(&peer.addrs);
 
+    info!(side = ?me, route = "public", local_nat = ?gathered.nat, peer_nat = ?peer.nat,
+        peer_candidates = ?peers, "selecting direct route");
+
     if peers.is_empty() {
         bail!("the peer has no public address");
     }
@@ -352,6 +408,9 @@ pub(crate) fn prepare(gathered: Gathered, peer: &DirectOffer, me: Side) -> Resul
 /// No NAT stands between the two, so the NAT kinds do not matter.
 pub(crate) fn prepare_local(gathered: Gathered, peer: &DirectOffer, me: Side) -> Result<Prepared> {
     let peers = candidates(&peer.local);
+
+    info!(side = ?me, route = "local", local_nat = ?gathered.nat, peer_nat = ?peer.nat,
+        peer_candidates = ?peers, "selecting direct route");
 
     if peers.is_empty() {
         bail!("the peer is behind the same NAT and offered no private address");
@@ -379,6 +438,9 @@ fn setup(
     dialer: Side,
 ) -> Result<Prepared> {
     let Gathered { socket, cert, .. } = gathered;
+
+    info!(side = ?me, ?dialer, local_socket = ?socket.local_addr().ok(), peer_candidates = ?peers,
+        "preparing direct QUIC endpoint");
 
     let transport = Arc::new(transport_config()?);
     let runtime = Arc::new(TokioRuntime);
@@ -415,7 +477,7 @@ fn setup(
 
     let endpoint = Endpoint::new(EndpointConfig::default(), Some(server), socket, runtime)?;
 
-    let punching = tokio::spawn(punch(punch_socket, peers.clone()));
+    let punching = tokio::spawn(punch(punch_socket, peers.clone()).in_current_span());
 
     Ok(Prepared {
         endpoint,
@@ -430,6 +492,11 @@ impl Prepared {
     /// Complete the QUIC connection and open its stream. Returns the socket
     /// and the peer address that answered.
     pub(crate) async fn connect(mut self) -> Result<(DirectSocket, SocketAddr)> {
+        let started = Instant::now();
+
+        info!(side = ?self.me, dialing = self.dial.is_some(), timeout_ms = CONNECT_WAIT.as_millis(),
+            "connecting direct QUIC endpoint");
+
         let connection = match self.dial.take() {
             Some(client) => timeout(CONNECT_WAIT, dial(&self.endpoint, &self.peers, &client))
                 .await
@@ -444,6 +511,8 @@ impl Prepared {
         }
 
         let remote = connection.remote_address();
+
+        info!(%remote, elapsed_ms = started.elapsed().as_millis(), "direct QUIC connected");
 
         // The client writes first on every path, which also makes the stream
         // visible to the host: QUIC announces a stream with its first data.
@@ -469,6 +538,8 @@ impl Prepared {
             _endpoint: self.endpoint.clone(),
         };
 
+        info!(%remote, elapsed_ms = started.elapsed().as_millis(), "direct stream ready");
+
         Ok((
             WebSocketStream::from_raw_socket(io, role, None).await,
             remote,
@@ -489,11 +560,18 @@ fn transport_config() -> Result<TransportConfig> {
 /// Send punch datagrams to every peer address until aborted. Each opens
 /// this side's NAT for packets from that address.
 async fn punch(socket: StdUdpSocket, peers: Vec<SocketAddr>) {
+    let mut reported = HashSet::new();
+
     loop {
         for peer in &peers {
             // The socket is non-blocking; a full send buffer only skips one
             // round.
-            let _ = socket.send_to(&PUNCH, peer);
+            if let Err(error) = socket.send_to(&PUNCH, peer)
+                && error.kind() != io::ErrorKind::WouldBlock
+                && reported.insert(*peer)
+            {
+                info!(%peer, %error, "direct punch send failed");
+            }
         }
 
         sleep(PUNCH_INTERVAL).await;
@@ -508,15 +586,23 @@ async fn dial(
 ) -> Result<Connection> {
     let mut attempts: FuturesUnordered<_> = peers
         .iter()
-        .map(|peer| endpoint.connect_with(client.clone(), *peer, SERVER_NAME))
+        .map(|peer| {
+            endpoint
+                .connect_with(client.clone(), *peer, SERVER_NAME)
+                .with_context(|| format!("starting direct QUIC connection to {peer} failed"))
+                .map(|attempt| async move { (*peer, attempt.await) })
+        })
         .collect::<Result<_, _>>()?;
 
     let mut last_error = anyhow!("no peer address to dial");
 
-    while let Some(result) = attempts.next().await {
+    while let Some((peer, result)) = attempts.next().await {
         match result {
             Ok(connection) => return Ok(connection),
-            Err(error) => last_error = error.into(),
+            Err(error) => {
+                info!(%peer, %error, "direct QUIC candidate failed");
+                last_error = error.into();
+            }
         }
     }
 
@@ -526,6 +612,8 @@ async fn dial(
 /// Accept the first connection from one of the peer's addresses. Others are
 /// refused: the port is open to anyone who learns it while punching runs.
 async fn accept(endpoint: &Endpoint, peers: &[SocketAddr]) -> Result<Connection> {
+    let mut reported_unexpected = false;
+
     loop {
         let incoming = endpoint
             .accept()
@@ -535,7 +623,10 @@ async fn accept(endpoint: &Endpoint, peers: &[SocketAddr]) -> Result<Connection>
         let from = incoming.remote_address();
 
         if !peers.iter().any(|peer| peer.ip() == from.ip()) {
-            debug!(%from, "refusing a direct connection from an unexpected address");
+            if !reported_unexpected {
+                info!(%from, expected_candidates = ?peers, "refusing a direct connection from an unexpected address");
+                reported_unexpected = true;
+            }
 
             incoming.refuse();
 
@@ -544,7 +635,7 @@ async fn accept(endpoint: &Endpoint, peers: &[SocketAddr]) -> Result<Connection>
 
         match incoming.await {
             Ok(connection) => return Ok(connection),
-            Err(error) => debug!(%from, %error, "a direct connection failed"),
+            Err(error) => info!(%from, %error, "incoming direct QUIC handshake failed"),
         }
     }
 }

@@ -21,8 +21,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
-use anyhow::{Result, anyhow};
-use futures::FutureExt as _;
+use anyhow::{Context as _, Result, anyhow};
+use futures::{FutureExt as _, TryFutureExt as _};
 use getrandom::fill;
 use nmt_platform::runtime;
 use nmt_remote_core::channel::Channel;
@@ -44,7 +44,7 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{Notify, oneshot, watch};
 use tokio::task::{AbortHandle, JoinHandle};
 use tokio::time::{Instant, sleep, sleep_until, timeout};
-use tracing::{debug, info};
+use tracing::{Instrument as _, info, info_span, warn};
 
 use crate::client::{LinkPath, PathPolicy, Refused, establish, establish_direct, establish_lan};
 use crate::link::{BoxSocket, Outbound, SendQueue, pump};
@@ -905,6 +905,9 @@ impl RemoteHost {
 
                     let started = Instant::now();
                     let policy = *self.policy.borrow();
+
+                    info!(host = %self.id, ?policy, "connecting to remote host");
+
                     let attempt = establish(&mut record, &self.key, &self.app_version, policy);
 
                     let result = match self.retry {
@@ -927,6 +930,8 @@ impl RemoteHost {
                             (Box::new(ws) as BoxSocket, channel, path)
                         }
                         Err(error) if error.is::<Refused>() => {
+                            info!(host = %self.id, "remote host refused authentication");
+
                             self.status.send_replace(Status::Refused);
 
                             self.end_views();
@@ -934,7 +939,8 @@ impl RemoteHost {
                             return;
                         }
                         Err(error) => {
-                            debug!(host = %self.id, %error, "connecting to the remote host failed");
+                            info!(host = %self.id, elapsed_ms = started.elapsed().as_millis(),
+                                error = %format_args!("{error:#}"), "connecting to the remote host failed");
 
                             if let Retry::Limited { attempts, window } = self.retry {
                                 failures += 1;
@@ -998,7 +1004,13 @@ impl RemoteHost {
 
             let probe = Arc::new(Notify::new());
 
-            let pump = tokio::spawn(pump(ws, channel, queue_rx, inbound, Arc::clone(&probe)));
+            let pump = tokio::spawn(
+                pump(ws, channel, queue_rx, inbound, Arc::clone(&probe))
+                    .inspect_err(|error| {
+                        info!(error = %format_args!("{error:#}"), "remote channel receive/send task failed");
+                    })
+                    .instrument(info_span!("remote_link", host = %self.id, ?path)),
+            );
 
             *self.link.lock() = Some(link.clone());
 
@@ -1009,7 +1021,7 @@ impl RemoteHost {
 
             self.status.send_replace(Status::Connected);
 
-            info!(host = %self.id, "connected to the remote host");
+            info!(host = %self.id, ?path, "connected to the remote host");
 
             // Views the host ended wait for the user to take them up.
             let ended = self.ended.lock().clone();
@@ -1045,6 +1057,12 @@ impl RemoteHost {
                 .await;
 
             pump.abort();
+
+            if let Err(error) = pump.await
+                && !error.is_cancelled()
+            {
+                warn!(host = %self.id, ?path, %error, "remote channel task failed to complete");
+            }
 
             *self.link.lock() = None;
             *self.path.lock() = None;
@@ -1118,6 +1136,9 @@ impl RemoteHost {
                 }
 
                 if since.elapsed() >= UPGRADE_WAIT {
+                    info!(host = %self.id, pending_requests = link.calls.lock().len(),
+                        "discarding ready path: requests on current connection did not finish in time");
+
                     ready = None;
                     next_attempt = Instant::now() + LAN_RETRY;
                     next_direct = Instant::now() + DIRECT_RETRY;
@@ -1153,6 +1174,8 @@ impl RemoteHost {
                 }
 
                 Ok(()) = network.changed() => {
+                    info!(host = %self.id, ?path, "network changed; probing current connection and retrying available paths");
+
                     probe.notify_one();
 
                     // The new network may be the host's, or its NAT may
@@ -1184,11 +1207,15 @@ impl RemoteHost {
                         }
                         Ok(Ok(_)) => {}
                         Ok(Err(error)) => {
-                            debug!(host = %self.id, %error, "no direct path to the host");
+                            info!(host = %self.id, retry_secs = DIRECT_RETRY.as_secs(),
+                                error = %format_args!("{error:#}"), "direct attempt failed; keeping relay connection");
 
                             next_direct = Instant::now() + DIRECT_RETRY;
                         }
-                        Err(_) => next_direct = Instant::now() + DIRECT_RETRY,
+                        Err(error) => {
+                            warn!(host = %self.id, %error, "direct attempt task failed");
+                            next_direct = Instant::now() + DIRECT_RETRY;
+                        }
                     }
 
                     continue;
@@ -1200,11 +1227,15 @@ impl RemoteHost {
                     match result {
                         Ok(Ok(upgrade)) => ready = Some((Box::new(upgrade), Instant::now())),
                         Ok(Err(error)) => {
-                            debug!(host = %self.id, %error, "the host is not reachable on the LAN");
+                            info!(host = %self.id, retry_secs = LAN_RETRY.as_secs(),
+                                error = %format_args!("{error:#}"), "LAN attempt failed; keeping current connection");
 
                             next_attempt = Instant::now() + LAN_RETRY;
                         }
-                        Err(_) => next_attempt = Instant::now() + LAN_RETRY,
+                        Err(error) => {
+                            warn!(host = %self.id, %error, "LAN attempt task failed");
+                            next_attempt = Instant::now() + LAN_RETRY;
+                        }
                     }
 
                     continue;
@@ -1259,44 +1290,104 @@ impl RemoteHost {
         let host = Arc::clone(self);
         let link = link.clone();
         let servers = direct::stun_servers(&self.stun_servers.lock());
+        let span = info_span!("direct_attempt", side = "client", host = %self.id);
 
-        Attempt(runtime().spawn(async move {
-            let attempt = async {
-                let gathered = direct::gather(&servers).await?;
+        Attempt(
+            runtime().spawn(
+                async move {
+                    let started = Instant::now();
 
-                let answer = host
-                    .call_on(&link, rpc::DIRECT_OFFER, &gathered.offer())
-                    .await?
-                    .map_err(|error| anyhow!("{}: {}", rpc::DIRECT_OFFER, error.message))?;
+                    let mut stage = "gather";
 
-                let answer: DirectOffer = serde_json::from_value(answer)?;
+                    info!(
+                        timeout_secs = DIRECT_TIMEOUT.as_secs(),
+                        "starting direct attempt"
+                    );
 
-                let prepared = if gathered.same_nat(&answer) {
-                    direct::prepare_local(gathered, &answer, Side::Client)?
-                } else {
-                    direct::prepare(gathered, &answer, Side::Client)?
-                };
+                    let attempt = async {
+                        let gathered = direct::gather(&servers)
+                            .await
+                            .context("direct candidate gathering failed")?;
 
-                let (ws, address) = prepared.connect().await?;
+                        stage = "offer";
+                        info!("sending direct offer");
 
-                let mut record = host.record.lock().clone();
+                        let answer = host
+                            .call_on(&link, rpc::DIRECT_OFFER, &gathered.offer())
+                            .await
+                            .context("direct offer exchange failed")?
+                            .map_err(|error| anyhow!("{}: {}", rpc::DIRECT_OFFER, error.message))?;
 
-                let (ws, channel, path) =
-                    establish_direct(&mut record, &host.key, &host.app_version, ws, address)
-                        .await?;
+                        let answer: DirectOffer = serde_json::from_value(answer)?;
+                        let same_nat = gathered.same_nat(&answer);
 
-                Ok(Upgrade {
-                    ws: Box::new(ws),
-                    channel,
-                    path,
-                    record,
-                })
-            };
+                        info!(
+                            peer_nat = ?answer.nat,
+                            public_candidates = ?answer.addrs,
+                            local_candidates = ?answer.local,
+                            same_nat,
+                            "received direct answer"
+                        );
 
-            timeout(DIRECT_TIMEOUT, attempt)
-                .await
-                .unwrap_or_else(|_| Err(anyhow!("the direct attempt timed out")))
-        }))
+                        stage = "prepare";
+
+                        let prepared = if same_nat {
+                            direct::prepare_local(gathered, &answer, Side::Client)?
+                        } else {
+                            direct::prepare(gathered, &answer, Side::Client)?
+                        };
+
+                        stage = "connect";
+
+                        let (ws, address) = prepared
+                            .connect()
+                            .await
+                            .context("direct QUIC connection failed")?;
+
+                        let mut record = host.record.lock().clone();
+
+                        stage = "handshake";
+
+                        let (ws, channel, path) = establish_direct(
+                            &mut record,
+                            &host.key,
+                            &host.app_version,
+                            ws,
+                            address,
+                        )
+                        .await
+                        .context("direct channel handshake failed")?;
+
+                        info!(
+                            elapsed_ms = started.elapsed().as_millis(),
+                            ?path,
+                            "direct channel ready for migration"
+                        );
+
+                        Result::<Upgrade>::Ok(Upgrade {
+                            ws: Box::new(ws),
+                            channel,
+                            path,
+                            record,
+                        })
+                    };
+
+                    match timeout(DIRECT_TIMEOUT, attempt).await {
+                        Ok(result) => result.with_context(|| {
+                            format!(
+                                "direct attempt failed during {stage} after {} ms",
+                                started.elapsed().as_millis()
+                            )
+                        }),
+                        Err(_) => Err(anyhow!(
+                            "direct attempt timed out during {stage} after {} ms",
+                            started.elapsed().as_millis()
+                        )),
+                    }
+                }
+                .instrument(span),
+            ),
+        )
     }
 
     fn route(&self, link: &Link, message: FrameMessage) {

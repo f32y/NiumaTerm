@@ -13,7 +13,7 @@ use tokio::select;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::sleep;
 use tokio_tungstenite::tungstenite::Message;
-use tracing::{debug, info, warn};
+use tracing::{Instrument as _, info, info_span, warn};
 
 use crate::relay::{RelaySocket, open};
 
@@ -61,7 +61,7 @@ pub(crate) async fn run_host_link(
         let mut control = match control {
             Ok(control) => control,
             Err(error) => {
-                debug!(%error, "relay control socket failed");
+                warn!(retry_secs = backoff.as_secs(), error = %format_args!("{error:#}"), "relay control socket failed");
 
                 // Commands arriving meanwhile still update the wanted slot.
                 select! {
@@ -84,15 +84,17 @@ pub(crate) async fn run_host_link(
         backoff = MIN_BACKOFF;
 
         // A slot claimed before a reconnect is claimed again.
-        if let Some(slot) = &claimed {
-            let _ = send_control(
+        if let Some(slot) = &claimed
+            && let Err(error) = send_control(
                 &mut control,
                 &ControlMessage::Slot {
                     slot: slot.clone(),
                     ttl: 300,
                 },
             )
-            .await;
+            .await
+        {
+            warn!(error = %format_args!("{error:#}"), "restoring relay pairing registration failed");
         }
 
         loop {
@@ -105,27 +107,33 @@ pub(crate) async fn run_host_link(
                                 let token = token.clone();
                                 let path = format!("/v1/host/{}/accept/{id}", host.as_str());
                                 let serve = Arc::clone(&serve);
+                                let span = info_span!("relay_data", connection = %id);
 
                                 tokio::spawn(async move {
+                                    info!("opening relay data socket");
                                     match open(&relay, &path, Some(&token)).await {
                                         Ok(ws) => serve(ws),
-                                        Err(error) => debug!(%error, "relay data socket failed"),
+                                        Err(error) => warn!(error = %format_args!("{error:#}"), "relay data socket failed"),
                                     }
-                                });
+                                }.instrument(span));
                             }
                             Ok(ControlMessage::SlotTaken { slot }) => {
                                 warn!(%slot, "another host on this relay holds the pairing slot");
                             }
-                            _ => {}
+                            Err(error) => warn!(%error, "invalid relay control message"),
+                            Ok(_) => {}
                         }
                     }
                     Some(Ok(_)) => {}
                     Some(Err(error)) => {
-                        debug!(%error, "relay control socket dropped");
+                        info!(%error, "relay control socket dropped");
 
                         break;
                     }
-                    None => break,
+                    None => {
+                        info!("relay control socket closed");
+                        break;
+                    }
                 },
                 command = commands.recv() => {
                     let message = match command {
@@ -146,18 +154,27 @@ pub(crate) async fn run_host_link(
                         }
                     };
 
-                    if send_control(&mut control, &message).await.is_err() {
+                    if let Err(error) = send_control(&mut control, &message).await {
+                        info!(error = %format_args!("{error:#}"), "relay control message send failed");
+
                         break;
                     }
                 }
 
                 () = sleep(CONTROL_PING) => {
-                    if control.send(Message::Text("ping".into())).await.is_err() {
+                    if let Err(error) = control.send(Message::Text("ping".into())).await {
+                        info!(%error, "relay keepalive send failed");
+
                         break;
                     }
                 }
             }
         }
+
+        info!(
+            retry_secs = backoff.as_secs(),
+            "reconnecting relay control socket"
+        );
 
         sleep(backoff).await;
     }
