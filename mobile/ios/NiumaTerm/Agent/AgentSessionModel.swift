@@ -624,7 +624,7 @@ final class AgentSessionModel {
 
     func selectModel(_ model: String) {
         let efforts = models.first { $0.model == model }?.efforts ?? []
-        let effort = effort.flatMap { efforts.contains($0) ? $0 : nil } ?? efforts.first
+        let effort = effort.flatMap { efforts.contains($0) ? $0 : nil }
 
         apply(model: model, effort: effort)
     }

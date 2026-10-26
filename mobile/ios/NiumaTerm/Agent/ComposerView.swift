@@ -89,56 +89,50 @@ struct ComposerView: View {
                     .opacity(model.draft.isEmpty && !model.commands.isEmpty ? 1 : 0.4)
                     .accessibilityLabel("Commands")
 
-                    if !model.models.isEmpty || !model.efforts.isEmpty {
+                    if !model.models.isEmpty {
                         Menu {
-                            if !model.models.isEmpty {
-                                Menu {
-                                    ForEach(model.models, id: \.model) { choice in
-                                        Button {
-                                            model.selectModel(choice.model)
-                                        } label: {
-                                            if choice.model == model.model {
-                                                Label(choice.display, systemImage: "checkmark")
-                                            } else {
-                                                Text(choice.display)
-                                            }
-                                        }
-                                    }
+                            ForEach(model.models, id: \.model) { choice in
+                                Button {
+                                    model.selectModel(choice.model)
                                 } label: {
-                                    Label("Model", systemImage: "cpu")
-                                    Text(model.modelLabel)
-                                }
-                            }
-
-                            if !model.efforts.isEmpty {
-                                Menu {
-                                    ForEach(model.efforts, id: \.self) { effort in
-                                        Button {
-                                            model.selectEffort(effort)
-                                        } label: {
-                                            if effort == model.effort {
-                                                Label(effort.capitalized, systemImage: "checkmark")
-                                            } else {
-                                                Text(effort.capitalized)
-                                            }
-                                        }
+                                    if choice.model == model.model {
+                                        Label(choice.display, systemImage: "checkmark")
+                                    } else {
+                                        Text(choice.display)
                                     }
-                                } label: {
-                                    Label("Effort", systemImage: "gauge.with.dots.needle.50percent")
-                                    Text(model.effort?.capitalized ?? tr("Default"))
                                 }
                             }
                         } label: {
-                            Image(systemName: "ellipsis")
+                            Image(systemName: "cpu")
                                 .font(.system(size: 14, weight: .semibold))
                                 .foregroundStyle(Theme.ink)
                                 .frame(width: 32, height: 32)
                                 .background(Theme.fill, in: .circle)
                         }
-                        // Opening upward would otherwise reverse the entries,
-                        // putting Effort above the Model it depends on.
                         .menuOrder(.fixed)
-                        .accessibilityLabel("Model and effort")
+                        .disabled(!model.attached || model.ended != nil)
+                        .accessibilityLabel(tr("Model") + ": " + model.modelLabel)
+                    }
+
+                    if !model.efforts.isEmpty {
+                        Menu {
+                            ForEach(model.efforts, id: \.self) { effort in
+                                Button {
+                                    model.selectEffort(effort)
+                                } label: {
+                                    if effort == model.effort {
+                                        Label(effort.capitalized, systemImage: "checkmark")
+                                    } else {
+                                        Text(effort.capitalized)
+                                    }
+                                }
+                            }
+                        } label: {
+                            ChipLabel(text: model.effort?.capitalized ?? tr("Effort"))
+                        }
+                        .menuOrder(.fixed)
+                        .disabled(!model.attached || model.ended != nil)
+                        .accessibilityLabel(tr("Effort") + ": " + (model.effort?.capitalized ?? tr("Default")))
                     }
 
                     if !model.skills.isEmpty {

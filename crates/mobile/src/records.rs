@@ -2,9 +2,14 @@
 //! they are, and every protocol and view type is converted here, once, so
 //! the desktop types never grow FFI attributes.
 
+#[cfg(test)]
+#[path = "records_tests.rs"]
+mod records_tests;
+
 use std::time::{Duration, Instant};
 
 use nmt_agent::chat::{Item, QuestionInput, QuestionMode};
+use nmt_agent::session::AgentKind;
 use nmt_agent::session::input::{QuestionError, QuestionStatus};
 use nmt_agent::session::lifecycle::Status as LifecycleStatus;
 use nmt_agent::session::view::{AgentView, DraftView, ViewEntry};
@@ -584,7 +589,15 @@ pub(crate) fn agent_state(
             .map(|model| ModelChoice {
                 model: model.model.clone(),
                 display: model.display.clone(),
-                efforts: model.efforts.clone(),
+                // Codex uses application-wide levels instead of reporting
+                // them in each model entry. Other agents report their own.
+                efforts: if slots.catalogs.kind == Some(AgentKind::Codex) {
+                    ["low", "medium", "high", "xhigh", "max", "ultra"]
+                        .map(str::to_owned)
+                        .to_vec()
+                } else {
+                    model.efforts.clone()
+                },
             })
             .collect(),
         plan_mode: slots.settings.plan_mode,
