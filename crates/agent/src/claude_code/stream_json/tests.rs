@@ -2,6 +2,8 @@
 use std::thread;
 use std::time::Instant;
 
+#[cfg(windows)]
+use crate::background_task::{BackgroundTaskState, BackgroundTaskUpdate};
 use crate::chat::{ContextComposition, Item, QuestionAnswer, QuestionInput, TokenUsageBreakdown};
 use crate::claude_code::stream_json::*;
 use crate::session::input::QuestionDraft;
@@ -1135,7 +1137,7 @@ fn fake_stream_json_process_never_receives_rewind_as_a_user_turn() {
 
 #[cfg(windows)]
 #[test]
-fn resumed_session_id_is_available_before_the_first_init_event() {
+fn resumed_tasks_restore_before_init_and_stop_when_the_process_exits() {
     use std::env;
     use std::path::Path;
     use std::time::Duration;
@@ -1158,7 +1160,7 @@ fn resumed_session_id_is_available_before_the_first_init_event() {
 
     let resume_id = "70000000-0000-4000-8000-000000000000".to_string();
 
-    let session = Session::spawn(
+    let mut session = Session::spawn(
         &launch,
         &AgentWorkspace::default(),
         Some(resume_id.clone()),
@@ -1168,6 +1170,32 @@ fn resumed_session_id_is_available_before_the_first_init_event() {
     .expect("fake resumed Claude process starts");
 
     let published_id = session.session_id().map(str::to_owned);
+
+    let starting_sequence = session.begin_task_restoration();
+
+    let events = session.finish_task_restoration(
+        Ok(vec![RestoredTask {
+            id: "restored-agent".into(),
+            update: BackgroundTaskUpdate {
+                state: Some(BackgroundTaskState::Done),
+                ..BackgroundTaskUpdate::default()
+            },
+            items: Vec::new(),
+            output_file: None,
+        }]),
+        starting_sequence,
+    );
+
+    assert!(events.iter().any(
+        |event| matches!(event, Event::BackgroundTasks(snapshot) if snapshot.tasks.len() == 1)
+    ));
+
+    session.process(json!({
+        "type":"system", "subtype":"task_started", "session_id":resume_id,
+        "task_id":"live-agent", "task_type":"local_agent",
+    }));
+
+    assert!(session.on_exit().iter().any(|event| matches!(event, Event::BackgroundTasks(snapshot) if snapshot.tasks.iter().any(|task| task.key.id == "live-agent" && task.state == BackgroundTaskState::Stopped))));
 
     drop(session);
 

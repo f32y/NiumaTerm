@@ -241,6 +241,12 @@ impl Session {
             },
         )?;
 
+        let mut tasks = ClaudeTasks::default();
+
+        if let Some(session_id) = resume.as_deref() {
+            tasks.set_session(session_id);
+        }
+
         let mut session = Self {
             process,
             transcript: TranscriptState::default(),
@@ -259,7 +265,7 @@ impl Session {
             active_slash_command: None,
             structured_commands_published: false,
             compacting: false,
-            tasks: ClaudeTasks::default(),
+            tasks,
             workflows: ClaudeWorkflows::default(),
             workflow_source: Arc::new(ClaudeWorkflowSource::default()),
             progress_monitor: Box::new(progress_monitor),
@@ -885,6 +891,12 @@ impl Session {
         let message = "Claude exited before the control request completed.";
 
         let mut events = self.control.close(message);
+
+        if self.tasks.stop_active_tasks()
+            && let Some(snapshot) = self.tasks.snapshot()
+        {
+            events.push(Event::BackgroundTasks(snapshot));
+        }
 
         if self.compacting {
             self.compacting = false;

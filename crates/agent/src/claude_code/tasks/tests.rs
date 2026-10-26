@@ -5,8 +5,10 @@ use serde_json::{Value, json};
 
 use crate::background_task::{
     BackgroundTaskKey, BackgroundTaskKind, BackgroundTaskRefs, BackgroundTaskState,
+    BackgroundTaskUpdate,
 };
 use crate::chat::Item;
+use crate::claude_code::sessions::RestoredTask;
 use crate::claude_code::tasks::shells::{MAX_OUTPUT_BYTES, ShellIndex, shell_items};
 use crate::claude_code::tasks::{ClaudeTasks, ShellDetail};
 
@@ -327,7 +329,7 @@ fn an_explicit_lifecycle_record_resumes_a_finished_task() {
 }
 
 #[test]
-fn a_process_boundary_stops_children_the_previous_process_owned() {
+fn repeated_init_preserves_running_children_and_shells() {
     let mut tasks = reducer();
 
     tasks.observe(&launch("toolu_1"));
@@ -345,39 +347,150 @@ fn a_process_boundary_stops_children_the_previous_process_owned() {
         Some(BackgroundTaskState::Working)
     );
 
-    // A second `init` is a new CLI process, which cannot still be running the
-    // children the previous one owned.
+    tasks.observe(&bash_launch("toolu_shell", "sleep 20"));
+
+    let mut shell = shell_started(true);
+
+    shell["tool_use_id"] = json!("toolu_shell");
+
+    tasks.observe(&shell);
+
     tasks.observe(&json!({"type": "system", "subtype": "init", "session_id": SESSION}));
 
     assert_eq!(
         state_of(&tasks, "toolu_1"),
-        Some(BackgroundTaskState::Stopped)
+        Some(BackgroundTaskState::Working)
     );
+    assert_eq!(tasks.snapshot().unwrap().active_count(), 2);
 }
 
 #[test]
-fn a_child_started_in_this_process_survives_its_own_init() {
+fn an_async_agent_result_keeps_the_child_running_until_its_notification() {
     let mut tasks = reducer();
 
-    // The launch arrives after this process announced itself, so the boundary
-    // that created its epoch must not retire it.
     tasks.observe(&launch("toolu_1"));
+
+    tasks.observe(&json!({
+        "type": "system", "subtype": "task_started", "session_id": SESSION,
+        "task_id": "agent-1", "tool_use_id": "toolu_1", "task_type": "local_agent",
+    }));
+
+    let mut result = tool_result("toolu_1", false);
+
+    result["tool_use_result"] = json!({
+        "isAsync": true, "status": "async_launched", "agentId": "agent-1",
+    });
+
+    tasks.observe(&result);
+    tasks.observe(&json!({"type": "result", "session_id": SESSION, "subtype": "success"}));
+
+    let snapshot = tasks.snapshot().unwrap();
+
+    assert_eq!(snapshot.active_count(), 1);
+    assert_eq!(snapshot.tasks[0].completed_at, None);
+    assert_eq!(tasks.stop_target(&snapshot.tasks[0].key), Some("agent-1"));
+
+    tasks.observe(&json!({
+        "type": "system", "subtype": "task_notification", "session_id": SESSION,
+        "task_id": "agent-1", "status": "completed",
+    }));
+
+    assert_eq!(state_of(&tasks, "toolu_1"), Some(BackgroundTaskState::Done));
+
+    tasks.observe(&result);
+
+    assert_eq!(tasks.snapshot().unwrap().active_count(), 0);
+}
+
+#[test]
+fn restored_shells_keep_their_output_and_do_not_create_duplicate_rows() {
+    let mut tasks = reducer();
+
+    let output = scratch_file("restored.output", b"background output\n");
+    let starting_sequence = tasks.begin_restoration();
+
+    tasks.finish_restoration(
+        Ok(vec![RestoredTask {
+            id: "shell-1".into(),
+            update: BackgroundTaskUpdate {
+                kind: Some(BackgroundTaskKind::Shell),
+                state: Some(BackgroundTaskState::Working),
+                refs: Some(BackgroundTaskRefs::ClaudeCode {
+                    task_id: Some("shell-1".into()),
+                    tool_use_id: Some("toolu_shell".into()),
+                    agent_id: None,
+                }),
+                objective: Some("sleep 20".into()),
+                display_name: Some("Wait in background".into()),
+                ..BackgroundTaskUpdate::default()
+            },
+            items: Vec::new(),
+            output_file: Some(output.to_string_lossy().into_owned()),
+        }]),
+        starting_sequence,
+    );
+
+    let detail = tasks.shell_detail("toolu_shell").unwrap();
+
+    assert_eq!(detail.state, BackgroundTaskState::Stopped);
+
+    let (command, text, _) = command_item(&detail);
+
+    assert_eq!(command, "sleep 20");
+    assert_eq!(text.as_deref(), Some("background output\n"));
+
+    tasks.observe(&json!({
+        "type":"system", "subtype":"task_notification", "session_id":SESSION,
+        "tool_use_id":"toolu_shell", "status":"completed",
+    }));
+
+    let snapshot = tasks.snapshot().unwrap();
+
+    assert_eq!(snapshot.tasks.len(), 1);
+    assert_eq!(snapshot.tasks[0].state, BackgroundTaskState::Done);
+
+    fs::remove_file(output).unwrap();
+}
+
+#[test]
+fn restoration_merges_with_a_live_row_first_identified_by_task_id() {
+    let mut tasks = reducer();
+
+    let sequence = tasks.begin_restoration();
 
     tasks.observe(&json!({
         "type": "system",
         "subtype": "task_started",
         "session_id": SESSION,
+        "task_id": "agent-1",
         "task_type": "local_agent",
         "tool_use_id": "toolu_1",
     }));
 
-    let baseline = tasks.snapshot();
-
-    assert_eq!(
-        state_of(&tasks, "toolu_1"),
-        Some(BackgroundTaskState::Working)
+    tasks.finish_restoration(
+        Ok(vec![RestoredTask {
+            id: "toolu_1".into(),
+            update: BackgroundTaskUpdate {
+                state: Some(BackgroundTaskState::Done),
+                refs: Some(BackgroundTaskRefs::ClaudeCode {
+                    task_id: None,
+                    tool_use_id: Some("toolu_1".into()),
+                    agent_id: None,
+                }),
+                ..BackgroundTaskUpdate::default()
+            },
+            items: Vec::new(),
+            output_file: None,
+        }]),
+        sequence,
     );
-    assert_eq!(tasks.snapshot(), baseline);
+
+    let snapshot = tasks.snapshot().unwrap();
+
+    assert_eq!(snapshot.tasks.len(), 1);
+    assert_eq!(snapshot.tasks[0].key.id, "agent-1");
+    assert_eq!(snapshot.tasks[0].state, BackgroundTaskState::Working);
+    assert_eq!(tasks.stop_target(&snapshot.tasks[0].key), Some("agent-1"));
 }
 
 #[test]

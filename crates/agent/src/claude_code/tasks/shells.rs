@@ -10,7 +10,7 @@ use std::io::{Read, Seek, SeekFrom};
 use indexmap::IndexMap;
 use serde_json::Value;
 
-use crate::background_task::BackgroundTaskState;
+use crate::background_task::{BackgroundTaskRefs, BackgroundTaskState, BackgroundTaskUpdate};
 use crate::chat::Item;
 use crate::claude_code::tasks::ShellDetail;
 use crate::claude_code::tasks::records::result_content;
@@ -25,7 +25,7 @@ const MAX_SHELL_META: usize = 256;
 /// is `<task id>.output`, so that name locates it inside the sentence; the path
 /// itself starts at the last `": "` before it, which keeps a directory
 /// containing spaces intact where splitting on whitespace would truncate it.
-pub(super) fn handoff_output_file(text: &str, task_id: &str) -> Option<String> {
+pub(crate) fn handoff_output_file(text: &str, task_id: &str) -> Option<String> {
     let name = format!("{task_id}.output");
     let end = text.find(&name)? + name.len();
     let start = text[..end].rfind(": ")? + 2;
@@ -65,6 +65,32 @@ pub(super) struct ShellIndex {
 }
 
 impl ShellIndex {
+    /// Stored command details fill missing fields without replacing metadata
+    /// received from the running process during the history read.
+    pub(super) fn restore(
+        &mut self,
+        task_id: &str,
+        update: &BackgroundTaskUpdate,
+        output_file: Option<String>,
+    ) {
+        self.reserve_shell_meta(task_id);
+
+        let meta = &mut self.shell_meta[task_id];
+
+        if let Some(BackgroundTaskRefs::ClaudeCode { tool_use_id, .. }) = &update.refs {
+            meta.tool_use_id = meta.tool_use_id.take().or_else(|| tool_use_id.clone());
+        }
+
+        meta.command = meta.command.take().or_else(|| update.objective.clone());
+
+        meta.description = meta
+            .description
+            .take()
+            .or_else(|| update.display_name.clone());
+
+        meta.output_file = meta.output_file.take().or(output_file);
+    }
+
     pub(super) fn clear(&mut self) {
         self.shell_meta.clear();
         self.bash_commands.clear();

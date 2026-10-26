@@ -23,8 +23,9 @@
 pub(crate) use crate::claude_code::tasks::shells::shell_items;
 
 pub(super) use crate::claude_code::tasks::records::{
-    lifecycle_state, record_identifiers, sidechain_preview,
+    async_agent_result, lifecycle_state, record_identifiers, sidechain_preview,
 };
+pub(super) use crate::claude_code::tasks::shells::handoff_output_file;
 
 mod children;
 mod records;
@@ -72,7 +73,7 @@ pub(super) const AGENT_TASK_TYPE: &str = "local_agent";
 /// The task type of a shell command the CLI runs as a task. Every `Bash` call
 /// registers one; only the backgrounded ones belong in this view, which is why
 /// admission tests `is_backgrounded` instead of the type alone.
-const SHELL_TASK_TYPE: &str = "local_bash";
+pub(super) const SHELL_TASK_TYPE: &str = "local_bash";
 
 #[derive(Default)]
 pub(crate) struct ClaudeTasks {
@@ -174,8 +175,43 @@ impl ClaudeTasks {
             Ok(tasks) => {
                 let mut changed = false;
 
-                for task in tasks {
-                    let key = BackgroundTaskKey::claude_code(&task.id);
+                for mut task in tasks {
+                    let canonical = self.aliases.lookup(&task.id).unwrap_or(&task.id).to_owned();
+                    let key = BackgroundTaskKey::claude_code(&canonical);
+
+                    // Stored running statuses do not confirm work in this
+                    // process. Keep existing states and show new rows as
+                    // stopped without inventing a completion time.
+                    if task
+                        .update
+                        .state
+                        .is_some_and(BackgroundTaskState::is_active)
+                    {
+                        task.update.state =
+                            (!registry.contains(&key)).then_some(BackgroundTaskState::Stopped);
+
+                        task.update.completed_at = None;
+                    }
+
+                    if let Some(BackgroundTaskRefs::ClaudeCode {
+                        task_id,
+                        tool_use_id,
+                        agent_id,
+                    }) = &task.update.refs
+                    {
+                        let ids = [task_id, tool_use_id, agent_id]
+                            .into_iter()
+                            .flatten()
+                            .cloned()
+                            .collect::<Vec<_>>();
+
+                        self.aliases.link_all(&canonical, &ids);
+                    }
+
+                    if task.update.kind == Some(BackgroundTaskKind::Shell) {
+                        self.shells
+                            .restore(&canonical, &task.update, task.output_file);
+                    }
 
                     if !task.items.is_empty() {
                         // History predates whatever the live stream produced,
@@ -379,9 +415,6 @@ impl ClaudeTasks {
         let subtype = message["subtype"].as_str().unwrap_or_default();
 
         match subtype {
-            // The CLI emits `init` once per process, so it is the only
-            // reliable process boundary in the stream.
-            "init" => self.stop_active_tasks(),
             "hook_started" | "hook_response" => self.observe_hook(message),
             "background_tasks_changed" => self.observe_background_snapshot(message),
             _ if LIFECYCLE_RECORDS.contains(&subtype) => self.observe_lifecycle(subtype, message),
@@ -389,9 +422,9 @@ impl ClaudeTasks {
         }
     }
 
-    /// The CLI emits `init` once per process, and a new process cannot still
-    /// be running the children of the previous one.
-    fn stop_active_tasks(&mut self) -> bool {
+    /// Process exit ends its active tasks. The CLI can repeat `init` for later
+    /// turns in the same process while those tasks are still running.
+    pub(super) fn stop_active_tasks(&mut self) -> bool {
         let Some(snapshot) = self.snapshot() else {
             return false;
         };
@@ -542,6 +575,37 @@ impl ClaudeTasks {
                 }
 
                 let failed = block["is_error"].as_bool().unwrap_or(false);
+
+                if !failed && let Some(result) = async_agent_result(message) {
+                    let agent_id = text_field(result, &["agentId"]);
+
+                    let ids = [Some(tool_use_id.to_owned()), agent_id.clone()]
+                        .into_iter()
+                        .flatten()
+                        .collect::<Vec<_>>();
+
+                    self.aliases.link_all(&canonical, &ids);
+
+                    let state = self
+                        .state_of(&canonical)
+                        .filter(|state| state.is_active())
+                        .map(|_| BackgroundTaskState::Working);
+
+                    changed |= self.apply(
+                        &canonical,
+                        BackgroundTaskUpdate {
+                            refs: Some(BackgroundTaskRefs::ClaudeCode {
+                                task_id: None,
+                                tool_use_id: Some(tool_use_id.to_owned()),
+                                agent_id,
+                            }),
+                            state,
+                            ..BackgroundTaskUpdate::default()
+                        },
+                    );
+
+                    continue;
+                }
 
                 changed |= self.apply(
                     &canonical,

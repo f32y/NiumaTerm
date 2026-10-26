@@ -93,6 +93,18 @@ pub(super) fn result_text(block: &Value) -> Option<String> {
     condense(&result_content(block)?)
 }
 
+/// SDK messages and stored transcripts use different field names for the
+/// metadata that distinguishes an asynchronous launch from its final result.
+pub(crate) fn async_agent_result(record: &Value) -> Option<&Value> {
+    record
+        .get("tool_use_result")
+        .or_else(|| record.get("toolUseResult"))
+        .filter(|result| {
+            result["isAsync"].as_bool() == Some(true)
+                || result["status"].as_str() == Some("async_launched")
+        })
+}
+
 /// A tool result's text as the CLI wrote it. Kept apart from the condensed
 /// preview a row shows, because a handoff result states a path that is longer
 /// than the preview bound and would be cut in half by it.

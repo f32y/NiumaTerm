@@ -1,12 +1,15 @@
-//! Rebuild child-agent summaries from a persisted Claude Code session file.
+//! Rebuild background-task summaries from a persisted Claude Code session file.
 //!
 //! Claude replays nothing on resume, so the transcript JSONL is the only
 //! record of children that ran before the tab reopened. This pass is separate
 //! from conversation replay: it selects `Task`/`Agent` launches from the main
 //! conversation, then enriches them with the sidechain branches those launches
-//! own. A sidechain that no selected launch claims is left alone, because
+//! own. Background shell commands are selected by their Bash result metadata.
+//! A sidechain that no selected launch claims is left alone, because
 //! abandoned branches and other conversations' children would otherwise appear
 //! in the current session.
+
+mod shells;
 
 use std::collections::HashMap;
 use std::fs;
@@ -16,20 +19,23 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 
-use crate::background_task::{BackgroundTaskRefs, BackgroundTaskState, BackgroundTaskUpdate};
+use crate::background_task::{
+    BackgroundTaskKind, BackgroundTaskRefs, BackgroundTaskState, BackgroundTaskUpdate,
+};
 use crate::chat::Item;
 use crate::claude_code::records::child_content_items;
 use crate::claude_code::sessions::index::TranscriptIndex;
 use crate::claude_code::sessions::project_dir;
 use crate::claude_code::sessions::replay::parse_child_replay;
+use crate::claude_code::sessions::task_history::shells::collect_shells;
 use crate::claude_code::sessions::titles::conversation_user_text;
 use crate::claude_code::tasks::{
-    AGENT_TASK_TYPE, LAUNCH_TOOLS, LIFECYCLE_RECORDS, lifecycle_state, record_identifiers,
-    sidechain_preview,
+    AGENT_TASK_TYPE, LAUNCH_TOOLS, LIFECYCLE_RECORDS, SHELL_TASK_TYPE, async_agent_result,
+    lifecycle_state, record_identifiers, sidechain_preview,
 };
 use crate::json::{text_field, unix_seconds_from_rfc3339};
 
-/// One child agent rebuilt from history, keyed by the identity the live
+/// One background task rebuilt from history, keyed by the identity the live
 /// reducer uses so the two merge into a single row.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RestoredTask {
@@ -39,9 +45,11 @@ pub struct RestoredTask {
     /// The child's own conversation, rebuilt from the sidechain records that
     /// link to its launch. Empty when the history holds only the launch.
     pub items: Vec<Item>,
+
+    pub(crate) output_file: Option<String>,
 }
 
-/// Read one session's child agents. Meant for a background thread; the parent
+/// Read one session's background tasks. Meant for a background thread; the parent
 /// transcript and composer never depend on this succeeding.
 ///
 /// A conversation that has not written its transcript yet restores nothing
@@ -183,6 +191,22 @@ pub(super) fn parse_task_history(reader: impl BufRead) -> Vec<RestoredTask> {
         collect_results(record, &mut tasks, &index);
     }
 
+    for task in collect_shells(transcript.active_records()) {
+        let position = tasks.len();
+
+        index.insert(task.id.clone(), position);
+
+        if let Some(BackgroundTaskRefs::ClaudeCode {
+            tool_use_id: Some(id),
+            ..
+        }) = &task.update.refs
+        {
+            index.insert(id.clone(), position);
+        }
+
+        tasks.push(task);
+    }
+
     // Only now can sidechains and lifecycle records be attributed, because a
     // link is accepted only against a launch the pass above already selected.
     let mut process_restarted = false;
@@ -257,6 +281,7 @@ fn collect_launches(
         tasks.push(RestoredTask {
             id: tool_use_id.to_owned(),
             items: Vec::new(),
+            output_file: None,
             update: BackgroundTaskUpdate {
                 refs: Some(BackgroundTaskRefs::ClaudeCode {
                     task_id: None,
@@ -292,6 +317,18 @@ fn collect_results(record: &Value, tasks: &mut [RestoredTask], index: &HashMap<S
         };
 
         let update = &mut tasks[*position].update;
+
+        if block["is_error"].as_bool() != Some(true)
+            && let Some(result) = async_agent_result(record)
+        {
+            update.state = Some(BackgroundTaskState::Working);
+
+            if let Some(BackgroundTaskRefs::ClaudeCode { agent_id, .. }) = &mut update.refs {
+                *agent_id = text_field(result, &["agentId"]);
+            }
+
+            continue;
+        }
 
         update.state = Some(if block["is_error"].as_bool().unwrap_or(false) {
             BackgroundTaskState::Failed
@@ -348,13 +385,6 @@ fn collect_lifecycle(record: &Value, tasks: &mut [RestoredTask], index: &HashMap
         return;
     };
 
-    if record["task_type"]
-        .as_str()
-        .is_some_and(|task_type| task_type != AGENT_TASK_TYPE)
-    {
-        return;
-    }
-
     // History only enriches launches the main conversation already selected, so
     // a record naming an unknown task belongs to another branch.
     let Some(position) = record_identifiers(record)
@@ -365,6 +395,19 @@ fn collect_lifecycle(record: &Value, tasks: &mut [RestoredTask], index: &HashMap
     };
 
     let update = &mut tasks[*position].update;
+
+    let task_type = if update.kind == Some(BackgroundTaskKind::Shell) {
+        SHELL_TASK_TYPE
+    } else {
+        AGENT_TASK_TYPE
+    };
+
+    if record["task_type"]
+        .as_str()
+        .is_some_and(|kind| kind != task_type)
+    {
+        return;
+    }
 
     if let Some(state) = lifecycle_state(kind, record) {
         update.state = Some(state);
@@ -379,10 +422,10 @@ fn collect_lifecycle(record: &Value, tasks: &mut [RestoredTask], index: &HashMap
     }
 }
 
-/// A record that starts a new CLI process for the same conversation.
+/// A stored session-start record identifies a new process. An `init` record
+/// can also describe a later turn in the current process.
 fn is_process_boundary(record: &Value) -> bool {
-    record["type"].as_str() == Some("system")
-        && matches!(record["subtype"].as_str(), Some("init" | "session_start"))
+    record["type"].as_str() == Some("system") && record["subtype"].as_str() == Some("session_start")
 }
 
 /// The launch a sidechain record belongs to. Records without this link cannot

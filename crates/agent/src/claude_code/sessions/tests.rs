@@ -2,7 +2,9 @@ use std::io::BufRead;
 
 use tempfile::tempdir;
 
-use crate::background_task::{BackgroundTaskState, BackgroundTaskTranscriptUpdate};
+use crate::background_task::{
+    BackgroundTaskKind, BackgroundTaskState, BackgroundTaskTranscriptUpdate,
+};
 use crate::chat::{CompactionTrigger, Item};
 use crate::claude_code::sessions::*;
 use crate::session::children::ChildTranscript;
@@ -809,12 +811,66 @@ fn task_history_reads_a_killed_task_from_its_update_patch() {
 fn an_interrupted_history_stops_children_the_next_process_never_confirmed() {
     let lines = task_history_lines(&[
         assistant_launch("a1", None, "toolu_1"),
-        serde_json::json!({"type": "system", "subtype": "init", "uuid": "i1", "parentUuid": "a1"}),
+        serde_json::json!({"type": "system", "subtype": "session_start", "uuid": "i1", "parentUuid": "a1"}),
     ]);
 
     let tasks = parse_task_history(lines.as_bytes());
 
     assert_eq!(tasks[0].update.state, Some(BackgroundTaskState::Stopped));
+}
+
+#[test]
+fn task_history_keeps_async_agents_running_across_repeated_init() {
+    let mut result = tool_result_record("r1", "a1", "toolu_1", false);
+
+    result["toolUseResult"] = serde_json::json!({
+        "isAsync": true, "status": "async_launched", "agentId": "agent-1",
+    });
+
+    let lines = task_history_lines(&[
+        assistant_launch("a1", None, "toolu_1"),
+        result,
+        serde_json::json!({"type":"system", "subtype":"init", "uuid":"i1", "parentUuid":"r1"}),
+    ]);
+
+    let tasks = parse_task_history(lines.as_bytes());
+
+    assert_eq!(tasks[0].update.state, Some(BackgroundTaskState::Working));
+    assert_eq!(tasks[0].update.completed_at, None);
+}
+
+#[test]
+fn task_history_restores_background_shell_commands_and_completion() {
+    let lines = task_history_lines(&[
+        serde_json::json!({
+            "type":"assistant", "uuid":"a1", "parentUuid":null,
+            "message":{"content":[{"type":"tool_use", "id":"toolu_shell", "name":"Bash",
+                "input":{"command":"sleep 20", "description":"Wait in background"}}]},
+        }),
+        serde_json::json!({
+            "type":"user", "uuid":"r1", "parentUuid":"a1",
+            "toolUseResult":{"backgroundTaskId":"shell-1"},
+            "message":{"content":[{"type":"tool_result", "tool_use_id":"toolu_shell",
+                "content":"Output file: /tmp/shell-1.output"}]},
+        }),
+        serde_json::json!({
+            "type":"user", "uuid":"n1", "parentUuid":"r1",
+            "message":{"content":[{"type":"text", "text":
+                "<task-notification>\n<task-id>shell-1</task-id>\n<status>completed</status>\n<output-file>/tmp/shell-1.output</output-file>\n<summary>Command completed</summary>\n</task-notification>"}]},
+        }),
+    ]);
+
+    let tasks = parse_task_history(lines.as_bytes());
+
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].id, "shell-1");
+    assert_eq!(tasks[0].update.kind, Some(BackgroundTaskKind::Shell));
+    assert_eq!(tasks[0].update.objective.as_deref(), Some("sleep 20"));
+    assert_eq!(tasks[0].update.state, Some(BackgroundTaskState::Done));
+    assert_eq!(
+        tasks[0].update.display_name.as_deref(),
+        Some("Wait in background")
+    );
 }
 
 #[test]
