@@ -16,85 +16,80 @@ struct AgentSessionView: View {
     private var linkText: String? { app.host(model.route.hostID)?.linkText }
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
-                    if !model.attached && app.host(model.route.hostID)?.status == .unreachable {
-                        VStack(spacing: 10) {
-                            Text("Could not connect to \(hostName).").foregroundStyle(Theme.attention)
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 14) {
+                if !model.attached && app.host(model.route.hostID)?.status == .unreachable {
+                    VStack(spacing: 10) {
+                        Text("Could not connect to \(hostName).").foregroundStyle(Theme.attention)
 
-                            Button("Retry") { app.retry(model.route.hostID) }
-                                .buttonStyle(.bordered)
-                        }
+                        Button("Retry") { app.retry(model.route.hostID) }
+                            .buttonStyle(.bordered)
+                    }
+                    .font(.system(size: 15))
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 120)
+                } else if !model.attached {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text("Connecting to \(hostName)…")
+                    }
+                    .font(.system(size: 15))
+                    .foregroundStyle(Theme.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 120)
+                } else if model.rows.isEmpty && !model.isWorking {
+                    Text("Send a message to start.")
                         .font(.system(size: 15))
+                        .foregroundStyle(Theme.tertiary)
                         .frame(maxWidth: .infinity)
                         .padding(.top, 120)
-                    } else if !model.attached {
-                        HStack(spacing: 10) {
-                            ProgressView()
-                            Text("Connecting to \(hostName)…")
-                        }
-                        .font(.system(size: 15))
-                        .foregroundStyle(Theme.secondary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 120)
-                    } else if model.rows.isEmpty && !model.isWorking {
-                        Text("Send a message to start.")
-                            .font(.system(size: 15))
-                            .foregroundStyle(Theme.tertiary)
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, 120)
-                    }
-
-                    ForEach(model.rows) { row in
-                        TranscriptRow(row: row)
-                    }
-
-                    if model.approval.map({ !$0.submitted }) == true && !model.showApproval {
-                        Button { model.showApproval = true } label: {
-                            Label("Review approval request", systemImage: "hand.raised")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(Theme.attention)
-                                .padding(.horizontal, 14)
-                                .frame(height: 40)
-                                .background(Theme.attention.opacity(0.1), in: .capsule)
-                        }
-                        .buttonStyle(.plain)
-                    }
-
-                    if model.question != nil && !model.showQuestions {
-                        Button { model.showQuestions = true } label: {
-                            Label("Answer \(model.agentName)'s question", systemImage: "questionmark.bubble")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(Theme.attention)
-                                .padding(.horizontal, 14)
-                                .frame(height: 40)
-                                .background(Theme.attention.opacity(0.1), in: .capsule)
-                        }
-                        .buttonStyle(.plain)
-                    }
-
-                    if model.isWorking, let started = model.workStarted {
-                        WorkingRow(started: started, tokens: model.tokensText)
-                    }
-
-                    if let notice = model.notice {
-                        Text(notice)
-                            .font(Theme.mono(12.5))
-                            .foregroundStyle(Theme.attention)
-                    }
-
-                    Color.clear.frame(height: 1).id("bottom")
                 }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 12)
+
+                ForEach(model.rows) { row in
+                    TranscriptRow(row: row)
+                }
+
+                if model.approval.map({ !$0.submitted }) == true && !model.showApproval {
+                    Button { model.showApproval = true } label: {
+                        Label("Review approval request", systemImage: "hand.raised")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Theme.attention)
+                            .padding(.horizontal, 14)
+                            .frame(height: 40)
+                            .background(Theme.attention.opacity(0.1), in: .capsule)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                if model.question != nil && !model.showQuestions {
+                    Button { model.showQuestions = true } label: {
+                        Label("Answer \(model.agentName)'s question", systemImage: "questionmark.bubble")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Theme.attention)
+                            .padding(.horizontal, 14)
+                            .frame(height: 40)
+                            .background(Theme.attention.opacity(0.1), in: .capsule)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                if model.isWorking, let started = model.workStarted {
+                    WorkingRow(started: started, tokens: model.tokensText)
+                }
+
+                if let notice = model.notice {
+                    Text(notice)
+                        .font(Theme.mono(12.5))
+                        .foregroundStyle(Theme.attention)
+                }
+
             }
-            .defaultScrollAnchor(.bottom)
-            .scrollDismissesKeyboard(.interactively)
-            .onChange(of: model.rows.last) {
-                withAnimation(.snappy) { proxy.scrollTo("bottom", anchor: .bottom) }
-            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
         }
+        .defaultScrollAnchor(.bottom, for: .initialOffset)
+        .defaultScrollAnchor(.top, for: .sizeChanges)
+        .scrollDismissesKeyboard(.interactively)
         .background(Theme.transcriptBackground)
         .safeAreaInset(edge: .bottom) {
             ComposerView(model: model, focused: $composerFocused)
