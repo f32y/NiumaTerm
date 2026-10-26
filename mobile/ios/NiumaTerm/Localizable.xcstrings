@@ -625,6 +625,16 @@
         }
       }
     },
+    "Could not load sessions.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法加载会话。"
+          }
+        }
+      }
+    },
     "Could not rename the session": {
       "localizations": {
         "zh-Hans": {
@@ -894,6 +904,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "正在加载会话…"
+          }
+        }
+      }
+    },
+    "Loading sessions…": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "加载中…"
           }
         }
       }

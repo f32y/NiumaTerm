@@ -19,6 +19,10 @@ final class CoreEvents: CoreObserver, @unchecked Sendable {
     func sessionsChanged(host: String, sessions: [SessionRecord], offer: HostOffer?) {
         Task { @MainActor [weak app] in app?.sessionsChanged(host: host, sessions: sessions, offer: offer) }
     }
+
+    func sessionsFailed(host: String, message: String) {
+        Task { @MainActor [weak app] in app?.sessionsFailed(host: host, message: message) }
+    }
 }
 
 /// Tells an agent screen its view changed. Callbacks only mark the view

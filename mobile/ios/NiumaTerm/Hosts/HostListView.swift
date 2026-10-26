@@ -42,9 +42,27 @@ struct HostListView: View {
                                             onRetry: host.status == .unreachable ? { app.retry(host.id) } : nil)
                         .textCase(nil)
 
-                    if groups.isEmpty || hostFold == .collapsed {
+                    if !host.sessionsLoaded || groups.isEmpty || hostFold == .collapsed {
                         Section {
-                            if groups.isEmpty && host.isOnline {
+                            if let error = host.sessionLoadError, host.isOnline {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("Could not load sessions.")
+
+                                    Text(error).font(.caption).foregroundStyle(Theme.secondary)
+
+                                    Button("Retry") { app.retrySessions(host.id) }
+                                }
+                                .foregroundStyle(Theme.attention)
+                                .listRowBackground(Theme.rowBackground)
+                            } else if host.isLoadingSessions {
+                                HStack(spacing: 10) {
+                                    ProgressView()
+                                    Text("Loading sessions…")
+                                }
+                                .font(.system(size: 14))
+                                .foregroundStyle(Theme.secondary)
+                                .listRowBackground(Theme.rowBackground)
+                            } else if groups.isEmpty && host.isOnline && host.sessionsLoaded {
                                 Text("No sessions. Tap + to start a terminal or an agent.")
                                     .font(.system(size: 14))
                                     .foregroundStyle(Theme.tertiary)

@@ -175,6 +175,8 @@ struct Host: Identifiable {
     var link: HostLink?
 
     var sessions: [Session] = []
+    var sessionsLoaded = false
+    var sessionLoadError: String?
 
     /// The agents and workspaces the host offers, from the same moment as
     /// `sessions`; nil when the host did not say.
@@ -188,6 +190,12 @@ struct Host: Identifiable {
     }
 
     var isOnline: Bool { status == .connected }
+
+    var isLoadingSessions: Bool {
+        status == .connecting || status == .reconnecting
+            || (isOnline && !sessionsLoaded && sessionLoadError == nil)
+    }
+
     var icon: String { "desktopcomputer" }
 
     /// The network the link runs over, as session title bars show it.

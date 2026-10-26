@@ -102,6 +102,8 @@ final class AppModel {
             if record.status != .connected {
                 hosts[index].sessions = []
                 hosts[index].offer = nil
+                hosts[index].sessionsLoaded = false
+                hosts[index].sessionLoadError = nil
             }
         } else if core?.hosts().contains(where: { $0.id == record.id }) == true {
             // Events reach the main actor asynchronously, so one sent just
@@ -118,10 +120,19 @@ final class AppModel {
     }
 
     func sessionsChanged(host: String, sessions: [SessionRecord], offer: HostOffer?) {
-        guard let index = hosts.firstIndex(where: { $0.id == host }) else { return }
+        guard let index = hosts.firstIndex(where: { $0.id == host }), hosts[index].isOnline else { return }
 
         hosts[index].sessions = sessions.map { Session(record: $0, hostID: host) }
         hosts[index].offer = offer
+        hosts[index].sessionsLoaded = true
+        hosts[index].sessionLoadError = nil
+    }
+
+    func sessionsFailed(host: String, message: String) {
+        guard let index = hosts.firstIndex(where: { $0.id == host }), hosts[index].isOnline else { return }
+
+        hosts[index].sessionsLoaded = false
+        hosts[index].sessionLoadError = message
     }
 
     // MARK: Lookups
@@ -173,6 +184,20 @@ final class AppModel {
     /// Try a host that failed to connect again.
     func retry(_ hostID: String) {
         core?.retry(host: hostID)
+    }
+
+    func retrySessions(_ hostID: String) {
+        guard let core, let index = hosts.firstIndex(where: { $0.id == hostID }), hosts[index].isOnline else { return }
+
+        hosts[index].sessionLoadError = nil
+
+        Task {
+            do {
+                try await core.refreshSessions(host: hostID)
+            } catch {
+                sessionsFailed(host: hostID, message: error.displayText)
+            }
+        }
     }
 
     func hostOffer(_ hostID: String) async throws -> HostOffer {

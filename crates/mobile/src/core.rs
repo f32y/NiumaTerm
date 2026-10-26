@@ -40,6 +40,8 @@ pub trait CoreObserver: Send + Sync {
         sessions: Vec<SessionRecord>,
         offer: Option<HostOffer>,
     );
+
+    fn sessions_failed(&self, host: String, message: String);
 }
 
 /// The paired hosts of this device and a lasting connection to each.
@@ -142,6 +144,21 @@ impl MobileCore {
 
             paired.watcher = Some(spawn_watcher(&paired.remote, &observer));
         }
+    }
+
+    /// Reload the host list after a query failed while the link stayed open.
+    pub async fn refresh_sessions(&self, host: String) -> Result<(), CoreError> {
+        let remote = self.remote(&host)?;
+
+        let observer = self
+            .observer
+            .lock()
+            .clone()
+            .ok_or_else(|| anyhow!("the host list is not being observed"))?;
+
+        runtime()
+            .spawn(async move { publish_sessions(&remote, observer.as_ref()).await })
+            .await?
     }
 
     /// In the foreground every paired host stays connected so its session
@@ -568,29 +585,10 @@ async fn watch(remote: Arc<RemoteHost>, observer: Arc<dyn CoreObserver>) {
 
         observer.host_changed(host_record(&remote, current));
 
-        if current == Status::Connected {
-            match remote.list_sessions().await {
-                Ok(list) => {
-                    // Opening and closing workspaces on the host changes
-                    // what it lists sessions under, so the offer is asked
-                    // for again with every list.
-                    let offer = match remote.host_info().await {
-                        Ok(info) => Some(HostOffer::from(info)),
-                        Err(error) => {
-                            debug!(%error, "asking the host what it offers failed");
-
-                            None
-                        }
-                    };
-
-                    observer.sessions_changed(
-                        remote.id().as_str().to_owned(),
-                        list.into_iter().map(SessionRecord::from).collect(),
-                        offer,
-                    );
-                }
-                Err(error) => debug!(%error, "listing the host's sessions failed"),
-            }
+        if current == Status::Connected
+            && let Err(error) = publish_sessions(&remote, observer.as_ref()).await
+        {
+            observer.sessions_failed(remote.id().as_str().to_owned(), error.to_string());
         }
 
         select! {
@@ -602,4 +600,34 @@ async fn watch(remote: Arc<RemoteHost>, observer: Arc<dyn CoreObserver>) {
             },
         }
     }
+}
+
+async fn publish_sessions(
+    remote: &RemoteHost,
+    observer: &dyn CoreObserver,
+) -> Result<(), CoreError> {
+    let list = remote.list_sessions().await?;
+
+    // Workspace changes need a fresh offer so the list and its grouping
+    // update together. Older hosts may not implement the offer query.
+    let offer = match remote.host_info().await {
+        Ok(info) => Some(HostOffer::from(info)),
+        Err(error) => {
+            debug!(%error, "asking the host what it offers failed");
+
+            None
+        }
+    };
+
+    if *remote.status().borrow() != Status::Connected {
+        return Err(anyhow!("the computer disconnected while loading sessions").into());
+    }
+
+    observer.sessions_changed(
+        remote.id().as_str().to_owned(),
+        list.into_iter().map(SessionRecord::from).collect(),
+        offer,
+    );
+
+    Ok(())
 }
