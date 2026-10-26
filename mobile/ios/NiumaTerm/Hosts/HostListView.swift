@@ -108,12 +108,12 @@ struct HostListView: View {
                     Button("Settings", systemImage: "gearshape") { showSettings = true }
                 }
             }
-            .confirmationDialog(
+            .alert(
                 "Close “\(closing?.title ?? "")”?",
                 isPresented: Binding(get: { closing != nil }, set: { if !$0 { closing = nil } }),
-                titleVisibility: .visible,
                 presenting: closing
             ) { request in
+                Button("Cancel", role: .cancel) {}
                 Button("Close Session", role: .destructive) { close(request) }
             } message: { request in
                 Text("The session ends on \(request.hostName), along with anything running in it.")
