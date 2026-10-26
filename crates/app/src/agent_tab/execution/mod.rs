@@ -1520,7 +1520,8 @@ impl AgentSession {
                         if matches!(
                             outcome,
                             Submission::Settled {
-                                waiting_finished: true
+                                waiting_finished: true,
+                                ..
                             }
                         ) {
                             this.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);

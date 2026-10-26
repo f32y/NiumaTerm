@@ -26,6 +26,62 @@ fn draw(cx: &mut VisualTestContext) {
 }
 
 #[gpui::test]
+fn retracting_a_reply_before_its_text_update_is_drawn_clears_the_row(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+
+        cx.set_global(AgentSettings::default());
+    });
+
+    let (root, cx) = cx.add_window_view(|_, cx| TranscriptRoot {
+        transcript: cx.new(|_| {
+            let mut view = TranscriptView::new(AgentKind::Claude, None);
+
+            view.push_stamped(
+                1,
+                Item::AgentMessage {
+                    id: "refused".into(),
+                    text: Some("Partial reply".into()),
+                    questions: None,
+                },
+            );
+
+            view
+        }),
+    });
+
+    let cx: &mut VisualTestContext = cx;
+    let transcript = root.read_with(cx, |root, _| root.transcript.clone());
+
+    cx.run_until_parked();
+
+    draw(cx);
+
+    assert!(cx.debug_bounds("transcript-agent-0").is_some());
+
+    transcript.update(cx, |view, cx| {
+        let mut conversation = view.conversation.borrow_mut();
+
+        conversation.append_delta("refused", " unread tail", TextField::Reply);
+        conversation.remove_items(&["refused".into()]);
+
+        drop(conversation);
+
+        view.sync_content();
+
+        cx.notify();
+    });
+
+    cx.run_until_parked();
+
+    draw(cx);
+
+    assert!(cx.debug_bounds("transcript-agent-0").is_none());
+
+    transcript.read_with(cx, |view, _| assert!(view.rows.is_empty()));
+}
+
+#[gpui::test]
 fn streaming_while_revisiting_long_reply_preserves_height_and_position(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_component::init(cx);

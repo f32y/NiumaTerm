@@ -1,4 +1,8 @@
-use std::collections::HashMap;
+#[cfg(test)]
+#[path = "replay_tests.rs"]
+mod replay_tests;
+
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader};
 
@@ -8,7 +12,7 @@ use tracing::warn;
 use crate::chat::{Compaction, Item, ReplayItem, ReplayTurn};
 use crate::claude_code::records::{
     AssistantBlock, assistant_block, compaction_metadata, complete_tool_item, is_api_error,
-    parse_compaction,
+    model_notice, parse_compaction, retracted_message_uuids,
 };
 use crate::claude_code::sessions::index::TranscriptIndex;
 use crate::claude_code::sessions::titles::{
@@ -90,6 +94,39 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
     // collected up front and matched by that parent as the chain is walked.
     let durations = turn_durations(&transcript.records);
 
+    let records = replay_records(&transcript)
+        .into_iter()
+        .filter(|record| {
+            record["isSidechain"].as_bool().unwrap_or(false) == sidechain
+                && record["isMeta"].as_bool() != Some(true)
+        })
+        .collect::<Vec<_>>();
+
+    let retracted = records
+        .iter()
+        .flat_map(|record| retracted_message_uuids(record))
+        .collect::<HashSet<_>>();
+
+    // Tool calls and their results use one row. A removed result must also
+    // remove its call, even when only the result's record UUID was listed.
+    let retracted_tools = records
+        .iter()
+        .filter(|record| {
+            record["uuid"]
+                .as_str()
+                .is_some_and(|uuid| retracted.contains(uuid))
+                && record["type"].as_str() == Some("user")
+        })
+        .flat_map(|record| {
+            record["message"]["content"]
+                .as_array()
+                .into_iter()
+                .flatten()
+        })
+        .filter(|block| block["type"].as_str() == Some("tool_result"))
+        .filter_map(|block| block["tool_use_id"].as_str())
+        .collect::<HashSet<_>>();
+
     let mut items: Vec<ReplayItem> = Vec::new();
     let mut turns: Vec<TurnBuilder> = vec![TurnBuilder::default()];
     let mut pending_tools: HashMap<String, usize> = HashMap::new();
@@ -107,13 +144,7 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
     let mut summary_awaiting_boundary: Option<usize> = None;
     let mut boundary_awaiting_summary: Option<usize> = None;
 
-    for record in transcript.active_records() {
-        if record["isSidechain"].as_bool().unwrap_or(false) != sidechain
-            || record["isMeta"].as_bool() == Some(true)
-        {
-            continue;
-        }
-
+    for record in &records {
         let at = record_time(record);
 
         if let Some(turn) = turns.last_mut() {
@@ -131,6 +162,19 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
                 (Some(total), Some(tokens)) => Some(total + tokens),
                 (total, tokens) => total.or(tokens),
             };
+        }
+
+        if record["uuid"]
+            .as_str()
+            .is_some_and(|uuid| retracted.contains(uuid))
+        {
+            continue;
+        }
+
+        if let Some(item) = model_notice(record) {
+            items.push(ReplayItem { item, at });
+
+            continue;
         }
 
         match record["type"].as_str() {
@@ -279,6 +323,10 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
                             });
                         }
                         Some(AssistantBlock::ToolUse { id, item }) => {
+                            if retracted_tools.contains(id) {
+                                continue;
+                            }
+
                             pending_tools.insert(id.to_string(), items.len());
 
                             items.push(ReplayItem { item, at });
@@ -292,6 +340,47 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
     }
 
     slice_turns(items, turns)
+}
+
+/// The active chain ends at an assistant or user record. Model notices written
+/// after it still describe that conversation and may withdraw its output.
+fn replay_records(transcript: &TranscriptIndex) -> Vec<&Value> {
+    let mut indices = transcript.chain.iter().copied().collect::<HashSet<_>>();
+
+    let mut uuids = transcript
+        .active_records()
+        .filter_map(|record| record["uuid"].as_str())
+        .collect::<HashSet<_>>();
+
+    for (index, record) in transcript.records.iter().enumerate() {
+        if indices.contains(&index)
+            || record["type"].as_str() != Some("system")
+            || !matches!(
+                record["subtype"].as_str(),
+                Some("model_refusal_fallback" | "model_fallback" | "model_consent_fallback")
+            )
+            || !record["parentUuid"]
+                .as_str()
+                .is_some_and(|parent| uuids.contains(parent))
+        {
+            continue;
+        }
+
+        indices.insert(index);
+
+        if let Some(uuid) = record["uuid"].as_str() {
+            uuids.insert(uuid);
+        }
+    }
+
+    let mut indices = indices.into_iter().collect::<Vec<_>>();
+
+    indices.sort_unstable();
+
+    indices
+        .into_iter()
+        .map(|index| &transcript.records[index])
+        .collect()
 }
 
 /// Accumulates one turn's accounting while its items are still being appended

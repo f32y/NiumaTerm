@@ -1,8 +1,11 @@
 #[cfg(test)]
 #[path = "generation_tests.rs"]
 mod generation_tests;
+#[cfg(test)]
+#[path = "retraction_tests.rs"]
+mod retraction_tests;
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Instant;
 
 use serde_json::Value;
@@ -12,7 +15,7 @@ use crate::chat::{
 };
 use crate::claude_code::records::{
     AssistantBlock, assistant_block, compaction_metadata, complete_tool_item, is_api_error,
-    parse_compaction,
+    parse_compaction, retracted_message_uuids,
 };
 use crate::claude_code::stream_json::parse::{
     claude_context_window, context_window_usage, parse_claude_usage, update_claude_output,
@@ -68,6 +71,12 @@ pub(super) struct TranscriptState {
     /// Started tool items by `tool_use_id`; the matching `tool_result` block
     /// completes them with output and status.
     pending_tools: HashMap<String, Item>,
+
+    /// Record UUIDs and UI item IDs differ for streamed text and reasoning.
+    /// Tool results share the row created for their tool call.
+    message_items: HashMap<String, Vec<String>>,
+
+    retracted_messages: HashSet<String>,
 
     item_seq: u64,
 
@@ -169,6 +178,62 @@ impl TranscriptState {
         self.item_seq += 1;
 
         format!("{prefix}-{}", self.item_seq)
+    }
+
+    pub(super) fn retract_messages(&mut self, uuids: &[String]) -> Vec<Event> {
+        let mut item_ids = Vec::new();
+
+        for uuid in uuids {
+            self.retracted_messages.insert(uuid.clone());
+
+            if let Some(ids) = self.message_items.remove(uuid) {
+                for id in ids {
+                    if !item_ids.contains(&id) {
+                        item_ids.push(id);
+                    }
+                }
+            }
+        }
+
+        if item_ids.is_empty() {
+            return Vec::new();
+        }
+
+        let removed = item_ids.iter().map(String::as_str).collect::<HashSet<_>>();
+
+        self.open_blocks
+            .retain(|_, id| !removed.contains(id.as_str()));
+
+        self.open_texts.retain(|id| !removed.contains(id.as_str()));
+
+        self.open_thinkings
+            .retain(|id| !removed.contains(id.as_str()));
+
+        self.pending_tools
+            .retain(|id, _| !removed.contains(id.as_str()));
+
+        for ids in self.message_items.values_mut() {
+            ids.retain(|id| !removed.contains(id.as_str()));
+        }
+
+        vec![Event::ItemsRemoved { item_ids }]
+    }
+
+    fn remember_items(&mut self, message: &Value, events: &[Event]) {
+        let Some(uuid) = message["uuid"].as_str() else {
+            return;
+        };
+
+        let ids = self.message_items.entry(uuid.to_owned()).or_default();
+
+        for event in events {
+            if let Event::ItemStarted(item) | Event::ItemCompleted(item) = event
+                && let Some(id) = item.id()
+                && !ids.iter().any(|stored| stored == id)
+            {
+                ids.push(id.to_owned());
+            }
+        }
     }
 
     pub(super) fn on_stream_event(&mut self, message: &Value) -> Vec<Event> {
@@ -334,11 +399,18 @@ impl TranscriptState {
             return Vec::new();
         }
 
-        let Some(blocks) = message["message"]["content"].as_array() else {
-            return Vec::new();
-        };
+        let mut events = self.retract_messages(&retracted_message_uuids(message));
 
-        let mut events = Vec::new();
+        if message["uuid"]
+            .as_str()
+            .is_some_and(|uuid| self.retracted_messages.contains(uuid))
+        {
+            return events;
+        }
+
+        let Some(blocks) = message["message"]["content"].as_array() else {
+            return events;
+        };
 
         if let Some(usage) = parse_claude_usage(&message["message"]["usage"]) {
             self.context_usage = Some(usage);
@@ -394,6 +466,8 @@ impl TranscriptState {
             }
         }
 
+        self.remember_items(message, &events);
+
         events
     }
 
@@ -401,6 +475,13 @@ impl TranscriptState {
     /// complete existing tool rows. Both arrive under the same message type.
     pub(super) fn on_user_message(&mut self, message: &Value) -> Vec<Event> {
         if !message["parent_tool_use_id"].is_null() {
+            return Vec::new();
+        }
+
+        if message["uuid"]
+            .as_str()
+            .is_some_and(|uuid| self.retracted_messages.contains(uuid))
+        {
             return Vec::new();
         }
 
@@ -429,6 +510,8 @@ impl TranscriptState {
 
             events.push(Event::ItemCompleted(complete_tool_item(started, block)));
         }
+
+        self.remember_items(message, &events);
 
         events
     }

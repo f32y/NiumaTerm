@@ -78,6 +78,24 @@ pub(crate) fn work_step(item: &SessionItem) -> Option<WorkStep<'_>> {
             kind,
             title,
             output,
+            ..
+        } if matches!(
+            kind.as_str(),
+            "model_refusal_fallback" | "model_fallback" | "model_consent_fallback"
+        ) =>
+        {
+            (
+                IconName::Info,
+                title.clone(),
+                output.clone().filter(|text| !text.trim().is_empty()),
+                None,
+                None,
+            )
+        }
+        SessionItem::Other {
+            kind,
+            title,
+            output,
             status,
             ..
         } => (

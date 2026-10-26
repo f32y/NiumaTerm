@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::chat::Event;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum QuestionInput {
     #[default]
@@ -70,6 +72,10 @@ pub enum QuestionMode {
     Optional,
     /// Answers arrive as new user messages and remain valid after the asking turn ends.
     Async,
+    /// A form can be declined without completing its required fields.
+    Form,
+    /// A provider confirmation can be answered or dismissed.
+    Dialog,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -94,4 +100,22 @@ pub enum QuestionResolution {
 pub enum QuestionResponse {
     Settled,
     Pending,
+}
+
+/// Provider updates caused by an accepted input response.
+#[derive(Clone, Debug, PartialEq)]
+pub struct InputReply {
+    pub response: QuestionResponse,
+    pub events: Vec<Event>,
+    pub edit_prompt: Option<String>,
+}
+
+impl From<QuestionResponse> for InputReply {
+    fn from(response: QuestionResponse) -> Self {
+        Self {
+            response,
+            events: Vec::new(),
+            edit_prompt: None,
+        }
+    }
 }

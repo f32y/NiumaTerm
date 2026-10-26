@@ -264,6 +264,22 @@ impl ConversationState {
         }
     }
 
+    /// Removing entries changes later positions and the grouping of adjacent
+    /// rows. Turn IDs and recorded usage remain valid for retained entries.
+    pub fn remove_items(&mut self, item_ids: &[String]) -> bool {
+        if self.content.remove_items(item_ids).is_none() {
+            return false;
+        }
+
+        // Saved row indices and pending text offsets become invalid after removal.
+        self.generation += 1;
+
+        self.changes.clear();
+        self.changed(0, None);
+
+        true
+    }
+
     pub fn append_delta(
         &mut self,
         item_id: &str,

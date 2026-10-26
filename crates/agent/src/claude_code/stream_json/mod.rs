@@ -12,9 +12,13 @@
 //! switching into `bypassPermissions` mode).
 
 mod control;
+mod dialogs;
 mod parse;
 mod transcript;
 
+#[cfg(test)]
+#[cfg(windows)]
+mod dialog_tests;
 #[cfg(test)]
 mod tests;
 
@@ -33,17 +37,19 @@ use crate::background_task::{BackgroundTaskKey, BackgroundTaskTranscriptUpdate};
 #[cfg(test)]
 use crate::chat::ContextUsageScope;
 use crate::chat::{
-    Event, MessageImage, QuestionAnswer, QuestionMode, QuestionRequest, QuestionResolution,
-    QuestionResponse, SendOutcome, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome,
-    SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
+    Event, InputReply, MessageImage, QuestionAnswer, QuestionMode, QuestionRequest,
+    QuestionResolution, QuestionResponse, SendOutcome, SlashCommandArguments, SlashCommandInfo,
+    SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
 };
 use crate::claude_code::config_home;
+use crate::claude_code::records::{model_notice, retracted_message_uuids};
 use crate::claude_code::sessions::progress::{PROGRESS_METHOD, ProgressMonitor, ProgressSnapshot};
 use crate::claude_code::sessions::{RestoredTask, load_child_transcript};
 use crate::claude_code::stream_json::control::{
     ControlState, PendingApproval, PendingControlOperation, PendingQuestions,
     merge_question_answers, parse_questions,
 };
+use crate::claude_code::stream_json::dialogs::{DialogReply, supported_kinds};
 use crate::claude_code::stream_json::parse::{
     approval_description, claude_result_error, compaction_progress, initialize_command_catalog,
     parse_models, parse_slash_commands, slash_command_text, ui_owns_slash_command,
@@ -114,6 +120,7 @@ pub struct Session {
 
     applied_permission: Option<String>,
     active_slash_command: Option<String>,
+    editable_prompt: Option<String>,
 
     /// A structured initialize catalog has richer metadata than the
     /// string-only first-turn fallback, so the fallback must not replace it.
@@ -263,6 +270,7 @@ impl Session {
             // under it and a later pick compares against it.
             applied_permission: launch.approval.clone(),
             active_slash_command: None,
+            editable_prompt: None,
             structured_commands_published: false,
             compacting: false,
             tasks,
@@ -283,6 +291,7 @@ impl Session {
                 // forwards their text and thinking blocks under the spawning
                 // tool-use id so the nested transcript can be rendered.
                 "forwardSubagentText": true,
+                "supportedDialogKinds": supported_kinds(),
             },
         }))?;
 
@@ -370,12 +379,27 @@ impl Session {
             Some("system") => events.extend(self.on_system(&message)),
             Some("stream_event") => events.extend(self.transcript.on_stream_event(&message)),
             Some("assistant") => events.extend(self.transcript.on_assistant(&message)),
-            Some("user") => events.extend(self.transcript.on_user_message(&message)),
+            Some("user") => {
+                if let Some(text) = user_prompt_text(&message) {
+                    self.editable_prompt = Some(text);
+                }
+
+                events.extend(self.transcript.on_user_message(&message));
+            }
             Some("result") => events.extend(self.on_result(&message)),
             Some("control_request") => events.extend(self.on_control_request(&message)),
             Some("control_response") => events.extend(self.on_control_response(&message)),
             Some("control_cancel_request") => {
                 if let Some(id) = message["request_id"].as_str() {
+                    if let Some(uuids) = self.control.dialogs.retire(id) {
+                        events.extend(self.transcript.retract_messages(&uuids));
+
+                        events.push(Event::InputResolved {
+                            id: id.to_owned(),
+                            resolution: QuestionResolution::Expired,
+                        });
+                    }
+
                     events.extend(self.control.cancel_prompt(id));
                 }
             }
@@ -523,6 +547,8 @@ impl Session {
         if !self.turn.begin_message_turn() {
             return SendOutcome::Steered;
         }
+
+        self.editable_prompt = Some(text.to_owned());
 
         self.transcript.begin_turn();
 
@@ -1001,7 +1027,7 @@ impl Session {
         true
     }
 
-    /// Answer the pending `AskUserQuestion` request. `answers` holds the chosen
+    /// Answer a pending dialog or `AskUserQuestion` request. `answers` holds the chosen
     /// option labels, and the text typed where they did not cover the answer,
     /// per question in question order; `None` declines. The CLI re-runs the tool
     /// with the merged input and writes the tool result itself, so nothing
@@ -1010,7 +1036,13 @@ impl Session {
         &mut self,
         id: &str,
         answers: Option<Vec<QuestionAnswer>>,
-    ) -> Result<QuestionResponse, String> {
+    ) -> Result<InputReply, String> {
+        if self.control.dialogs.contains(id) {
+            let reply = self.control.dialogs.respond(id, answers.as_deref())?;
+
+            return self.send_dialog_reply(id, reply);
+        }
+
         let pending = self
             .control
             .pending_questions
@@ -1051,7 +1083,35 @@ impl Session {
 
         self.control.pending_questions = None;
 
-        Ok(QuestionResponse::Settled)
+        Ok(QuestionResponse::Settled.into())
+    }
+
+    pub(crate) fn decline_input(&mut self, id: &str) -> Result<InputReply, String> {
+        let reply = self.control.dialogs.decline(id)?;
+
+        self.send_dialog_reply(id, reply)
+    }
+
+    fn send_dialog_reply(&mut self, id: &str, reply: DialogReply) -> Result<InputReply, String> {
+        self.try_send(json!({
+            "type": "control_response",
+            "response": {
+                "subtype": "success",
+                "request_id": id,
+                "response": reply.response,
+            },
+        }))?;
+
+        self.control.dialogs.retire(id);
+
+        Ok(InputReply {
+            response: QuestionResponse::Settled,
+            events: self.transcript.retract_messages(&reply.retracted_messages),
+            edit_prompt: reply
+                .edit_prompt
+                .then(|| self.editable_prompt.clone())
+                .flatten(),
+        })
     }
 
     /// The background reader shares this session's transcript revisions.
@@ -1176,6 +1236,34 @@ impl Session {
 
                 self.transcript.on_compact_boundary(message)
             }
+            Some("model_refusal_fallback" | "model_fallback" | "model_consent_fallback") => {
+                let mut events = self
+                    .transcript
+                    .retract_messages(&retracted_message_uuids(message));
+
+                if message["scope"].as_str() != Some("local") {
+                    let (snake, camel) = if message["direction"].as_str() == Some("revert") {
+                        ("original_model", "originalModel")
+                    } else {
+                        ("fallback_model", "fallbackModel")
+                    };
+
+                    if let Some(model) = message[snake].as_str().or_else(|| message[camel].as_str())
+                    {
+                        self.applied_model = Some(model.to_owned());
+
+                        events.push(Event::ModelSelection {
+                            model: self.applied_model.clone(),
+                            effort: self.control.effort().map(str::to_owned),
+                            refusal: None,
+                        });
+                    }
+                }
+
+                events.extend(model_notice(message).map(Event::ItemCompleted));
+
+                events
+            }
             // Every other subtype (hook_*, thinking_tokens, informational, …)
             // is telemetry the UI ignores.
             _ => Vec::new(),
@@ -1291,6 +1379,33 @@ impl Session {
             .to_string();
 
         let request = &message["request"];
+
+        if matches!(
+            request["subtype"].as_str(),
+            Some("request_user_dialog" | "elicitation")
+        ) {
+            return match self.control.dialogs.receive(&request_id, request) {
+                Ok(Some(question)) => vec![Event::InputRequested(question)],
+                Ok(None) => Vec::new(),
+                Err(error) => {
+                    // An error leaves the request available to another attached client.
+                    // A cancellation would instead record a user decision that did not occur.
+                    self.send(json!({
+                        "type": "control_response",
+                        "response": {
+                            "subtype": "error",
+                            "request_id": request_id,
+                            "error": error,
+                        },
+                    }));
+
+                    vec![Event::Error {
+                        message: error,
+                        fatal: false,
+                    }]
+                }
+            };
+        }
 
         if request["subtype"].as_str() != Some("can_use_tool") {
             // Unsupported server→client requests (hook_callback, mcp_message,
@@ -1538,6 +1653,9 @@ fn claude_command(
     // way to get that text for the whole session; the per-session control
     // request only overrides a mode that was already chosen here.
     command.args(["--thinking-display", "summarized"]);
+
+    // The SDK can ask before switching models only when automatic switching is off.
+    command.args(["--settings", r#"{"switchModelsOnFlag":false}"#]);
 
     // The CLI takes effort as a launch flag; its `/effort` command is the
     // only other way in, and that costs a visible turn on every new

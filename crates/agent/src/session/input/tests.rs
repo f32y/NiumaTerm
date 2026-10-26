@@ -81,13 +81,15 @@ fn submit(
     key: QuestionKey,
     action: QuestionAction,
 ) -> Submission {
-    input.submit(
-        runtime,
-        key,
-        action,
-        &ThreadSettings::default(),
-        Instant::now(),
-    )
+    input
+        .submit(
+            runtime,
+            key,
+            action,
+            &ThreadSettings::default(),
+            Instant::now(),
+        )
+        .0
 }
 
 #[test]
@@ -130,6 +132,43 @@ fn single_select_replaces_and_multi_select_answers_follow_option_order() {
     draft.toggle(1, 2);
 
     assert!(!draft.is_complete());
+}
+
+#[test]
+fn declining_a_form_does_not_require_answers_and_other_questions_cannot_be_declined() {
+    let mut runtime = runtime(AgentKind::Claude, "session");
+    let mut input = SessionInput::default();
+
+    input.restore(&mut runtime);
+
+    let mut form = request("form", QuestionMode::Form);
+
+    form.questions[0].options.clear();
+
+    let index = input.receive(&runtime, form).unwrap();
+    let key = input.batches()[index].key();
+
+    assert!(!input.batches()[index].is_complete());
+
+    backend(&mut runtime).input_result = Ok(QuestionResponse::Settled);
+
+    assert!(matches!(
+        submit(&mut input, &mut runtime, key, QuestionAction::Decline),
+        Submission::Settled {
+            waiting_finished: true,
+            ..
+        }
+    ));
+    assert_eq!(input.batches()[index].status(), QuestionStatus::Skipped);
+    assert_eq!(backend(&mut runtime).input_responses.len(), 1);
+
+    let key = receive(&mut input, &runtime, "question", QuestionMode::Blocking);
+
+    assert_eq!(
+        submit(&mut input, &mut runtime, key, QuestionAction::Decline),
+        Submission::Ignored
+    );
+    assert_eq!(backend(&mut runtime).input_responses.len(), 1);
 }
 
 #[test]
@@ -326,33 +365,39 @@ fn optional_timeout_only_skips_untouched_pending_requests_after_the_deadline() {
     let later = Instant::now() + Duration::from_secs(121);
 
     assert_eq!(
-        input.submit(
-            &mut runtime,
-            touched,
-            QuestionAction::Timeout,
-            &ThreadSettings::default(),
-            later
-        ),
+        input
+            .submit(
+                &mut runtime,
+                touched,
+                QuestionAction::Timeout,
+                &ThreadSettings::default(),
+                later
+            )
+            .0,
         Submission::Ignored
     );
     assert_eq!(
-        input.submit(
-            &mut runtime,
-            key,
-            QuestionAction::Timeout,
-            &ThreadSettings::default(),
-            later
-        ),
+        input
+            .submit(
+                &mut runtime,
+                key,
+                QuestionAction::Timeout,
+                &ThreadSettings::default(),
+                later
+            )
+            .0,
         Submission::Waiting
     );
     assert_eq!(
-        input.submit(
-            &mut runtime,
-            key,
-            QuestionAction::Timeout,
-            &ThreadSettings::default(),
-            later
-        ),
+        input
+            .submit(
+                &mut runtime,
+                key,
+                QuestionAction::Timeout,
+                &ThreadSettings::default(),
+                later
+            )
+            .0,
         Submission::Ignored
     );
     assert_eq!(

@@ -1221,6 +1221,13 @@ impl SessionController {
 
                 SessionEffect::Changed
             }
+            Event::ItemsRemoved { item_ids } => {
+                if self.conversation.borrow_mut().remove_items(&item_ids) {
+                    SessionEffect::Changed
+                } else {
+                    SessionEffect::Unchanged
+                }
+            }
             Event::AgentMessageDelta { item_id, delta } => {
                 self.append_delta(&item_id, &delta, TextField::Reply);
 
@@ -1435,8 +1442,15 @@ impl SessionController {
             return Submission::Ignored;
         }
 
-        self.input
-            .submit(&mut self.runtime, key, action, &self.controls.settings, now)
+        let (outcome, updates) =
+            self.input
+                .submit(&mut self.runtime, key, action, &self.controls.settings, now);
+
+        for event in updates {
+            self.apply_event(self.runtime.epoch(), event);
+        }
+
+        outcome
     }
 
     #[cfg(any(test, feature = "test-support"))]

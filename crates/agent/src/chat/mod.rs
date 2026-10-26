@@ -480,6 +480,10 @@ pub enum Event {
     },
     ItemStarted(Item),
     ItemCompleted(Item),
+    /// Remove outputs the provider replaced or withdrew.
+    ItemsRemoved {
+        item_ids: Vec<String>,
+    },
     AgentMessageDelta {
         item_id: String,
         delta: String,

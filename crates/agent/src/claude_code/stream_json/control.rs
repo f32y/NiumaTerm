@@ -12,6 +12,7 @@ use crate::chat::{
     ContextComposition, ContextSegment, Event, Question, QuestionAnswer, QuestionInput,
     QuestionOption, QuestionResolution,
 };
+use crate::claude_code::stream_json::dialogs::Dialogs;
 use crate::subprocess::InputTicket;
 use crate::subprocess::requests::{DeadlineTimer, RequestClass};
 
@@ -56,6 +57,7 @@ pub(super) struct ControlState {
     effort: EffortState,
     pub(super) pending_approval: Option<PendingApproval>,
     pub(super) pending_questions: Option<PendingQuestions>,
+    pub(super) dialogs: Dialogs,
 }
 
 impl Default for ControlState {
@@ -68,6 +70,7 @@ impl Default for ControlState {
             effort: EffortState::default(),
             pending_approval: None,
             pending_questions: None,
+            dialogs: Dialogs::default(),
         }
     }
 }
@@ -220,6 +223,7 @@ impl ControlState {
         self.effort.has_pending()
             || self.pending_approval.is_some()
             || self.pending_questions.is_some()
+            || self.dialogs.has_pending()
             || self.pending.values().any(|pending| {
                 matches!(
                     pending.operation,
@@ -291,6 +295,16 @@ impl ControlState {
 
     pub(super) fn finish_turn(&mut self) -> Vec<Event> {
         let mut events = Vec::new();
+
+        events.extend(
+            self.dialogs
+                .finish()
+                .into_iter()
+                .map(|id| Event::InputResolved {
+                    id,
+                    resolution: QuestionResolution::Expired,
+                }),
+        );
 
         if self.pending_approval.take().is_some() {
             events.push(Event::ApprovalResolved);

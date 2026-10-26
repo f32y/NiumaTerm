@@ -9,6 +9,7 @@ use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::checkbox::Checkbox;
 use gpui_component::input::{InputEvent, InputState, TextareaState};
 use gpui_component::radio::Radio;
+use gpui_component::text::TextView;
 use gpui_component::{ActiveTheme as _, Disableable as _, Sizable as _, h_flex, v_flex};
 use nmt_agent::chat::{Question, QuestionInput, QuestionMode};
 use nmt_agent::session::controller::SessionController;
@@ -617,7 +618,17 @@ impl QuestionPanel {
                                 .child(header.clone())
                         }),
                 )
-                .child(div().text_sm().child(question.question.clone()));
+                .child(
+                    TextView::markdown(group.clone(), question.question.clone())
+                        .text_sm()
+                        .on_link_click(|target, event, _, cx| {
+                            if !event.is_right_click()
+                                && (target.starts_with("https://") || target.starts_with("http://"))
+                            {
+                                cx.open_url(target);
+                            }
+                        }),
+                );
 
             for (option_index, option) in question.options.iter().enumerate() {
                 let label = option
@@ -804,13 +815,23 @@ impl QuestionPanel {
                 Button::new("question-skip")
                     .ghost()
                     .disabled(!enabled)
-                    .label(t!(if prompt.mode() == QuestionMode::Async {
-                        "agent-question-dismiss"
-                    } else {
-                        "agent-question-skip"
+                    .label(t!(match prompt.mode() {
+                        QuestionMode::Async | QuestionMode::Dialog => "agent-question-dismiss",
+                        QuestionMode::Form => "settings-common-cancel",
+                        _ => "agent-question-skip",
                     }))
                     .on_click(cx.listener(|this, _, _, cx| this.skip_current_questions(cx))),
             );
+
+            if prompt.mode() == QuestionMode::Form {
+                footer = footer.child(
+                    Button::new("question-decline")
+                        .ghost()
+                        .disabled(!enabled)
+                        .label(t!("agent-approval-decline"))
+                        .on_click(cx.listener(|this, _, _, cx| this.decline_current_questions(cx))),
+                );
+            }
 
             if presentation.page.is_some_and(|page| page > 0) {
                 footer = footer.child(

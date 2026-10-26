@@ -13,9 +13,9 @@ use tracing::trace;
 use crate::background_task::BackgroundTaskKey;
 use crate::catalog::adapter_commands;
 use crate::chat::{
-    Event, ForkAnchor, MessageImage, QuestionAnswer, QuestionRequest, QuestionResponse,
-    SendOutcome, SessionScope, SkillReference, SlashCommandInfo, SlashCommandOutcome,
-    TeamDecisionRequest, ThreadSettings,
+    Event, ForkAnchor, InputReply, MessageImage, QuestionAnswer, QuestionRequest, SendOutcome,
+    SessionScope, SkillReference, SlashCommandInfo, SlashCommandOutcome, TeamDecisionRequest,
+    ThreadSettings,
 };
 use crate::claude_code::sessions::{RestoredTask, load_task_history};
 use crate::claude_code::stream_json;
@@ -910,11 +910,13 @@ impl Backend {
         id: &str,
         answers: Option<Vec<QuestionAnswer>>,
         settings: &ThreadSettings,
-    ) -> Result<QuestionResponse, String> {
+    ) -> Result<InputReply, String> {
         match self {
-            Backend::Codex(session) => session.respond_input(id, answers, settings),
+            Backend::Codex(session) => session
+                .respond_input(id, answers, settings)
+                .map(InputReply::from),
             Backend::Claude(session) => session.respond_input(id, answers),
-            Backend::DeepSeek(session) => session.respond_input(id, answers),
+            Backend::DeepSeek(session) => session.respond_input(id, answers).map(InputReply::from),
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(session) => {
                 let outcome = session.input_result.clone()?;
@@ -924,8 +926,26 @@ impl Backend {
                     answers,
                 });
 
-                Ok(outcome)
+                Ok(outcome.into())
             }
+        }
+    }
+
+    pub(crate) fn decline_input(&mut self, id: &str) -> Result<InputReply, String> {
+        match self {
+            Self::Claude(session) => session.decline_input(id),
+            #[cfg(any(test, feature = "test-support"))]
+            Self::Test(session) => {
+                let outcome = session.input_result.clone()?;
+
+                session.input_responses.push(InputResponse {
+                    id: id.to_owned(),
+                    answers: None,
+                });
+
+                Ok(outcome.into())
+            }
+            _ => Err("This provider cannot decline a form.".into()),
         }
     }
 

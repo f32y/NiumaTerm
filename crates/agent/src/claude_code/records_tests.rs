@@ -1,5 +1,82 @@
 use crate::claude_code::records::*;
 
+#[test]
+fn model_notices_keep_content_and_accept_both_model_field_spellings() {
+    for (original_key, fallback_key) in [
+        ("original_model", "fallback_model"),
+        ("originalModel", "fallbackModel"),
+    ] {
+        for subtype in [
+            "model_refusal_fallback",
+            "model_fallback",
+            "model_consent_fallback",
+        ] {
+            let mut record = serde_json::json!({
+                "type": "system", "subtype": subtype, "uuid": "notice",
+            });
+
+            record[original_key] = "first-model".into();
+            record[fallback_key] = "second-model".into();
+
+            assert!(matches!(
+                model_notice(&record),
+                Some(Item::Other { id, output: Some(output), status: Some(status), .. })
+                    if id == "model-notice-notice"
+                        && output == "Model changed from first-model to second-model."
+                        && status == "completed"
+            ));
+
+            record["content"] = "\n  Provider explanation\n\nAdditional details. \n".into();
+
+            assert!(matches!(
+                model_notice(&record),
+                Some(Item::Other { output: Some(output), .. })
+                    if output == "\n  Provider explanation\n\nAdditional details. \n"
+            ));
+        }
+    }
+
+    assert!(
+        model_notice(&serde_json::json!({
+            "type": "system", "subtype": "unrecognized", "content": "ignore"
+        }))
+        .is_none()
+    );
+}
+
+#[test]
+fn model_restoration_notice_describes_the_original_model_as_current() {
+    for (original_key, fallback_key) in [
+        ("original_model", "fallback_model"),
+        ("originalModel", "fallbackModel"),
+    ] {
+        let mut record = serde_json::json!({
+            "type": "system", "subtype": "model_fallback", "direction": "revert"
+        });
+
+        record[original_key] = "first-model".into();
+        record[fallback_key] = "second-model".into();
+
+        assert!(matches!(model_notice(&record),
+            Some(Item::Other { output: Some(output), .. })
+                if output == "Model changed from second-model to first-model."
+        ));
+    }
+}
+
+#[test]
+fn retracted_ids_combine_saved_and_streamed_fields_without_duplicates() {
+    assert_eq!(
+        retracted_message_uuids(&serde_json::json!({
+            "retracted_message_uuids": ["first", "", 4],
+            "retractedMessageUuids": ["second", "first"],
+            "supersedes_uuids": ["third"],
+            "supersedesUuids": ["second", "fourth"]
+        })),
+        vec!["first", "second", "third", "fourth"]
+    );
+}
+
 /// A child's conversation decodes server-side tool calls like the parent's,
 /// and a message wrapping an API failure reads as an error.
 #[test]

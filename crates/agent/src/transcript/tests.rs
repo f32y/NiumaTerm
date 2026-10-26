@@ -25,6 +25,46 @@ fn reasoning(id: &str, summary: Option<&str>) -> Item {
 }
 
 #[test]
+fn removing_duplicate_ids_keeps_remaining_metadata_and_reindexes_updates() {
+    let mut content = TranscriptContent::default();
+
+    content.append(entry(1, reply("removed", Some("old"))));
+    content.append(entry(1, reasoning("removed", Some("old reasoning"))));
+    content.append(entry(2, reply("retained", Some("new"))));
+
+    assert_eq!(
+        content.remove_items(&["removed".into(), "missing".into()]),
+        Some(0)
+    );
+    assert_eq!(content.entries().len(), 1);
+    assert_eq!(content.entries()[0].turn, 2);
+    assert!(!content.contains_item("removed"));
+    assert!(content.contains_item("retained"));
+    assert!(
+        content
+            .append_delta("removed", "ignored", TextField::Reply)
+            .is_none()
+    );
+    assert_eq!(
+        content
+            .append_delta("retained", " text", TextField::Reply)
+            .unwrap()
+            .index,
+        0
+    );
+    assert_eq!(
+        content.entries()[0].item,
+        reply("retained", Some("new text"))
+    );
+    assert_eq!(content.remove_items(&["removed".into()]), None);
+    assert_eq!(
+        content.merge_completed(&reply("retained", Some("final"))),
+        Some(0)
+    );
+    assert_eq!(content.entries()[0].item, reply("retained", Some("final")));
+}
+
+#[test]
 fn indexed_deltas_select_the_first_compatible_duplicate_without_changing_other_entries() {
     let mut content = TranscriptContent::default();
 

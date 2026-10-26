@@ -1030,3 +1030,55 @@ fn the_answer_box_stands_beside_a_choice_circle_of_its_own(cx: &mut TestAppConte
         });
     });
 }
+
+#[gpui::test]
+fn editing_a_refused_prompt_restores_text_without_sending_or_losing_a_draft(
+    cx: &mut TestAppContext,
+) {
+    for draft in ["", "Unsent notes"] {
+        let (pane, window) = open_pane(cx);
+
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+
+        cx.update(|window, cx| {
+            pane.update(cx, |pane, cx| {
+                pane.input
+                    .update(cx, |input, cx| input.set_value(draft, window, cx));
+
+                pane.pending_prompt_edit = Some("Original prompt".into());
+
+                cx.notify();
+            });
+        });
+
+        cx.run_until_parked();
+
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+
+        cx.run_until_parked();
+
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, cx| {
+                let expected = if draft.is_empty() {
+                    "Original prompt".to_owned()
+                } else {
+                    format!("Original prompt\n\n{draft}")
+                };
+
+                assert_eq!(pane.input.read(cx).text().to_string(), expected);
+                assert!(pane.pending_prompt_edit.is_none());
+                assert!(
+                    pane.session
+                        .borrow()
+                        .conversation()
+                        .borrow()
+                        .content
+                        .entries()
+                        .is_empty()
+                );
+            });
+        });
+    }
+}

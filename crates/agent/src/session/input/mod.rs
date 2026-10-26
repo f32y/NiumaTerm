@@ -12,7 +12,8 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 
 use crate::chat::{
-    Question, QuestionMode, QuestionRequest, QuestionResolution, QuestionResponse, ThreadSettings,
+    Event, Question, QuestionMode, QuestionRequest, QuestionResolution, QuestionResponse,
+    ThreadSettings,
 };
 use crate::session::SessionRuntime;
 use crate::session::lifecycle::Status;
@@ -36,6 +37,7 @@ pub enum QuestionAction {
     Answer,
     Skip,
     Timeout,
+    Decline,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -47,6 +49,8 @@ pub enum Submission {
     /// finishing.
     Settled {
         waiting_finished: bool,
+        #[serde(default)]
+        edit_prompt: Option<String>,
     },
     Failed,
 }
@@ -196,21 +200,23 @@ impl SessionInput {
         action: QuestionAction,
         settings: &ThreadSettings,
         now: Instant,
-    ) -> Submission {
+    ) -> (Submission, Vec<Event>) {
         if !self.can_submit(runtime, key) {
-            return Submission::Ignored;
+            return (Submission::Ignored, Vec::new());
         }
 
         let waiting = self.waiting();
 
         let Some(draft) = self.draft_mut(key) else {
-            return Submission::Ignored;
+            return (Submission::Ignored, Vec::new());
         };
 
         let answers = match action {
             QuestionAction::Answer if draft.is_complete() => Some(draft.answers()),
-            QuestionAction::Answer => return Submission::Ignored,
+            QuestionAction::Answer => return (Submission::Ignored, Vec::new()),
             QuestionAction::Skip => None,
+            QuestionAction::Decline if draft.mode == QuestionMode::Form => None,
+            QuestionAction::Decline => return (Submission::Ignored, Vec::new()),
             QuestionAction::Timeout
                 if draft
                     .auto_resolve_remaining(now)
@@ -218,19 +224,31 @@ impl SessionInput {
             {
                 None
             }
-            QuestionAction::Timeout => return Submission::Ignored,
+            QuestionAction::Timeout => return (Submission::Ignored, Vec::new()),
         };
 
         let Some(backend) = runtime.backend_mut() else {
-            return Submission::Ignored;
+            return (Submission::Ignored, Vec::new());
         };
 
-        let result = backend.respond_input(&draft.id, answers, settings);
+        let result = match action {
+            QuestionAction::Decline => backend.decline_input(&draft.id),
+            _ => backend.respond_input(&draft.id, answers, settings),
+        };
 
         draft.touch();
 
-        match result {
-            Ok(QuestionResponse::Settled) => {
+        let reply = match result {
+            Ok(reply) => reply,
+            Err(message) => {
+                draft.error = Some(QuestionError::Rejected(message));
+
+                return (Submission::Failed, Vec::new());
+            }
+        };
+
+        let outcome = match reply.response {
+            QuestionResponse::Settled => {
                 draft.settle(if action == QuestionAction::Answer {
                     QuestionStatus::Submitted
                 } else {
@@ -239,20 +257,18 @@ impl SessionInput {
 
                 Submission::Settled {
                     waiting_finished: waiting && !self.waiting(),
+                    edit_prompt: reply.edit_prompt,
                 }
             }
-            Ok(QuestionResponse::Pending) => {
+            QuestionResponse::Pending => {
                 draft.error = None;
                 draft.status = QuestionStatus::Submitting;
 
                 Submission::Waiting
             }
-            Err(message) => {
-                draft.error = Some(QuestionError::Rejected(message));
+        };
 
-                Submission::Failed
-            }
-        }
+        (outcome, reply.events)
     }
 
     pub(crate) fn resolve(

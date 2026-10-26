@@ -452,7 +452,7 @@ fn question_ids_reject_stale_answers_and_settle_accepted_responses() {
                 custom: None,
             }])
         ),
-        Ok(QuestionResponse::Settled)
+        Ok(QuestionResponse::Settled.into())
     );
     assert!(session.control.pending_questions.is_none());
     assert!(session.respond_input("current", None).is_err());
@@ -1750,6 +1750,20 @@ fn launch_arguments(workspace: &AgentWorkspace, resume: Option<&str>) -> Vec<Str
         .get_args()
         .map(|arg| arg.to_string_lossy().into_owned())
         .collect()
+}
+
+#[test]
+fn launch_requests_user_consent_before_a_safeguard_model_switch() {
+    let arguments = launch_arguments(&AgentWorkspace::default(), None);
+
+    let settings = arguments
+        .windows(2)
+        .find(|pair| pair[0] == "--settings")
+        .unwrap();
+
+    let settings: Value = serde_json::from_str(&settings[1]).unwrap();
+
+    assert_eq!(settings["switchModelsOnFlag"], false);
 }
 
 /// The `--add-dir` group of `arguments`, or `None` when the launch passes no

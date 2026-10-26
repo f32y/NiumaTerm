@@ -245,6 +245,7 @@ pub struct AgentPane {
     transcript: Entity<TranscriptView>,
 
     input: Entity<TextareaState>,
+    pending_prompt_edit: Option<String>,
     history_ui: SessionHistoryUi,
     progress_panel: ProgressPanel,
     side_chat: SideChatWindow,
@@ -2292,6 +2293,17 @@ impl AgentPane {
         }
     }
 
+    pub(crate) fn decline_current_questions(&mut self, cx: &mut Context<Self>) {
+        let key = self
+            .prompts
+            .questions(self.session.borrow().input())
+            .map(|prompt| prompt.key());
+
+        if let Some(key) = key {
+            self.submit_question(key, QuestionAction::Decline, cx);
+        }
+    }
+
     fn submit_question(
         &mut self,
         key: QuestionKey,
@@ -2322,7 +2334,14 @@ impl AgentPane {
         self.dispatch(command, cx, |this, outcome, cx| {
             match outcome {
                 Submission::Ignored => return,
-                Submission::Settled { waiting_finished } => {
+                Submission::Settled {
+                    waiting_finished,
+                    edit_prompt,
+                } => {
+                    if edit_prompt.is_some() {
+                        this.pending_prompt_edit = edit_prompt;
+                    }
+
                     if waiting_finished {
                         this.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
                     }
@@ -2332,7 +2351,7 @@ impl AgentPane {
 
             this.prompts.hide_settled(this.session.borrow().input());
 
-            cx.notify();
+            this.present_session_effect(SessionEffect::Changed, cx);
         });
     }
 
@@ -3749,6 +3768,7 @@ impl AgentPane {
             attachments: ComposerAttachments::default(),
             transcript,
             input,
+            pending_prompt_edit: None,
             session,
             host: host.downgrade(),
             binding,
@@ -5149,6 +5169,26 @@ impl gpui::Focusable for AgentPane {
 
 impl Render for AgentPane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if let Some(prompt) = self.pending_prompt_edit.take() {
+            cx.defer_in(window, move |this, window, cx| {
+                let draft = this.input.read(cx).text().to_string();
+
+                let text = if draft.is_empty() {
+                    prompt
+                } else {
+                    format!("{prompt}\n\n{draft}")
+                };
+
+                this.palette.reset_for_recall();
+
+                replace_input_with_history(&this.input, text, window, cx);
+
+                this.input.update(cx, |input, cx| input.focus(window, cx));
+
+                cx.notify();
+            });
+        }
+
         let Some(session_host) = self.host.upgrade() else {
             return div().into_any_element();
         };

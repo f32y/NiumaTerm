@@ -1,8 +1,103 @@
 use std::sync::Arc;
 
-use crate::chat::{Item, ReplayTurn};
+use crate::chat::{Item, ReplayItem, ReplayTurn};
 use crate::transcript::TextField;
 use crate::transcript::conversation::{ConversationImage, ConversationState, EntryChange};
+
+#[test]
+fn removed_output_invalidates_shifted_rows_and_preserves_turn_accounting() {
+    let mut conversation = ConversationState::default();
+
+    for (turn, id, at, seconds, output_tokens) in [(1, "old", 100, 12, 30), (2, "new", 200, 6, 15)]
+    {
+        conversation.replay(
+            turn,
+            ReplayTurn {
+                items: vec![
+                    ReplayItem {
+                        at: Some(at),
+                        item: Item::UserMessage {
+                            text: Some("prompt".into()),
+                        },
+                    },
+                    ReplayItem {
+                        at: Some(at + 1),
+                        item: Item::AgentMessage {
+                            id: id.into(),
+                            text: Some(id.into()),
+                            questions: None,
+                        },
+                    },
+                ],
+                generation_samples: Vec::new(),
+                seconds: Some(seconds),
+                output_tokens: Some(output_tokens),
+                interrupted: false,
+            },
+        );
+    }
+
+    let version = conversation.version();
+
+    assert!(conversation.remove_items(&["old".into()]));
+    assert_eq!(
+        conversation.changes_since(version).unwrap().reset_from,
+        Some(0)
+    );
+    assert_eq!(conversation.content.entries().len(), 3);
+    assert_eq!(conversation.content.entries()[2].turn, 2);
+    assert_eq!(conversation.content.entries()[2].metadata.at, Some(201));
+    assert_eq!(conversation.turns.seconds(1), Some(12));
+    assert_eq!(conversation.turns.output_tokens(1), Some(30));
+    assert_eq!(conversation.turns.seconds(2), Some(6));
+    assert_eq!(conversation.turns.output_tokens(2), Some(15));
+    assert_eq!(
+        conversation
+            .append_delta("new", " reply", TextField::Reply)
+            .unwrap()
+            .index,
+        2
+    );
+    assert_eq!(
+        conversation.content.latest_agent_message(2),
+        Some("new reply")
+    );
+    assert_eq!(conversation.content.latest_agent_message(1), None);
+
+    let version = conversation.version();
+
+    assert!(!conversation.remove_items(&["old".into(), "missing".into()]));
+    assert_eq!(conversation.version(), version);
+}
+
+#[test]
+fn removing_a_reply_discards_unread_text_updates_and_invalid_row_offsets() {
+    let mut conversation = ConversationState::default();
+
+    conversation.push(
+        1,
+        Item::AgentMessage {
+            id: "refused".into(),
+            text: Some("Partial".into()),
+            questions: None,
+        },
+        Vec::new(),
+    );
+
+    let version = conversation.version();
+
+    conversation.append_delta("refused", " response", TextField::Reply);
+
+    assert!(conversation.remove_items(&["refused".into()]));
+
+    let change = conversation.changes_since(version).unwrap();
+
+    assert_ne!(conversation.version().0, version.0);
+    assert_eq!(change.reply, None);
+    assert!(change.entries.is_empty());
+    assert_eq!(change.reset_from, Some(0));
+    assert!(conversation.content.entries().is_empty());
+}
 
 #[test]
 fn accumulated_output_changes_preserve_append_offsets_and_replacement_order() {

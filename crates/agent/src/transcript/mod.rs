@@ -126,6 +126,29 @@ impl<M> TranscriptContent<M> {
         self.item_index.contains_key(id)
     }
 
+    /// Remove all matching IDs and rebuild positions for the remaining entries.
+    pub fn remove_items(&mut self, item_ids: &[String]) -> Option<usize> {
+        let first = item_ids
+            .iter()
+            .filter_map(|id| self.item_index.get(id))
+            .flatten()
+            .copied()
+            .min()?;
+
+        self.entries.retain(|entry| {
+            entry
+                .item
+                .id()
+                .is_none_or(|id| !item_ids.iter().any(|removed| removed == id))
+        });
+
+        let entries = mem::take(&mut self.entries);
+
+        self.replace(entries);
+
+        Some(first)
+    }
+
     pub(crate) fn last_metadata_mut(&mut self) -> Option<&mut M> {
         self.entries.last_mut().map(|entry| &mut entry.metadata)
     }

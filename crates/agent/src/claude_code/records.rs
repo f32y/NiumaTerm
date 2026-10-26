@@ -13,9 +13,10 @@
 #[path = "records_tests.rs"]
 mod records_tests;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
+use uuid::Uuid;
 
 use crate::chat::{Compaction, CompactionTrigger, Item};
 use crate::json::{block_text, diff_lines};
@@ -259,6 +260,77 @@ pub(crate) fn assistant_block(block: &Value) -> Option<AssistantBlock<'_>> {
 pub(crate) fn is_api_error(message: &Value) -> bool {
     message["is_api_error_message"].as_bool() == Some(true)
         || message["isApiErrorMessage"].as_bool() == Some(true)
+}
+
+/// Both SDK messages and saved records identify replaced content by record UUID.
+pub(super) fn retracted_message_uuids(record: &Value) -> Vec<String> {
+    let mut seen = HashSet::new();
+
+    [
+        "retracted_message_uuids",
+        "retractedMessageUuids",
+        "supersedes_uuids",
+        "supersedesUuids",
+    ]
+    .into_iter()
+    .flat_map(|key| record[key].as_array().into_iter().flatten())
+    .filter_map(Value::as_str)
+    .filter(|uuid| !uuid.is_empty() && seen.insert(*uuid))
+    .map(str::to_owned)
+    .collect()
+}
+
+/// Model changes are completed informational rows, including changes reported
+/// after a response has already finished.
+pub(super) fn model_notice(record: &Value) -> Option<Item> {
+    if record["type"].as_str() != Some("system") {
+        return None;
+    }
+
+    let kind = record["subtype"].as_str()?;
+
+    let title = match kind {
+        "model_refusal_fallback" => "Model changed after refusal",
+        "model_fallback" => "Model fallback",
+        "model_consent_fallback" => "Model changed after consent",
+        _ => return None,
+    };
+
+    let output = record["content"]
+        .as_str()
+        .filter(|content| !content.trim().is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| {
+            let original = text(record, "original_model", "originalModel");
+            let fallback = text(record, "fallback_model", "fallbackModel");
+
+            let (previous, current) = if record["direction"].as_str() == Some("revert") {
+                (fallback, original)
+            } else {
+                (original, fallback)
+            };
+
+            match (previous, current) {
+                (Some(previous), Some(current)) => {
+                    format!("Model changed from {previous} to {current}.")
+                }
+                (_, Some(current)) => format!("Model changed to {current}."),
+                _ => "Claude changed the active model.".to_owned(),
+            }
+        });
+
+    let uuid = record["uuid"]
+        .as_str()
+        .map(str::to_owned)
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
+
+    Some(Item::Other {
+        id: format!("model-notice-{uuid}"),
+        kind: kind.to_owned(),
+        title: title.to_owned(),
+        output: Some(output),
+        status: Some("completed".to_owned()),
+    })
 }
 
 /// Decode child content while retaining tool starts until their results arrive.
