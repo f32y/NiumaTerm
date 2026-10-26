@@ -33,8 +33,11 @@ pub(crate) struct GitTab {
 /// A tab's surface. Restored tabs start `Pending` (the saved snapshot with no
 /// shell process behind it) and become `Live` (spawning their shells) the
 /// first time they are activated, so startup only pays for the visible tab.
+/// Hibernated tabs retain their saved state until the user wakes them.
 pub(crate) enum TabSurface {
     Pending(Box<TabState>),
+    /// A saved surface that starts only after the user chooses to wake it.
+    Hibernated(Box<TabState>),
     Live(TerminalPaneTree),
     /// An agent conversation rendered as chat bubbles instead of a terminal
     /// grid. It owns an agent route but no terminal panes or child-process
@@ -68,7 +71,7 @@ impl TabSurface {
                     .as_deref()
                     .is_some_and(matches)
             }),
-            Self::Pending(state)
+            Self::Pending(state) | Self::Hibernated(state)
                 if state.git_cwd.is_none()
                     && state.team_room.is_none()
                     && !state.orchestration
@@ -195,7 +198,9 @@ impl TabSurface {
     pub(crate) fn agent_kind(&self, cx: &App) -> Option<AgentKind> {
         match self {
             Self::Agent(tab) => Some(tab.owner.session().read(cx).profile().kind),
-            Self::Pending(state) => state.agent.as_deref().and_then(AgentKind::from_id),
+            Self::Pending(state) | Self::Hibernated(state) => {
+                state.agent.as_deref().and_then(AgentKind::from_id)
+            }
             Self::Live(_)
             | Self::Git(_)
             | Self::Settings
@@ -210,7 +215,7 @@ impl TabSurface {
     pub(super) fn is_agent(&self) -> bool {
         match self {
             Self::Agent(_) => true,
-            Self::Pending(state) => state
+            Self::Pending(state) | Self::Hibernated(state) => state
                 .agent
                 .as_deref()
                 .and_then(AgentKind::from_id)
@@ -259,6 +264,7 @@ impl TabSurface {
             }),
             Self::Agent(tab) => tab.pane.read(cx).remote_address().is_none(),
             Self::Pending(_)
+            | Self::Hibernated(_)
             | Self::Git(_)
             | Self::Settings
             | Self::Team(_)
@@ -272,7 +278,7 @@ impl TabSurface {
     /// The id paired devices know a still-pending agent or terminal tab by.
     pub(crate) fn pending_session(&self) -> Option<&str> {
         match self {
-            Self::Pending(state) => state
+            Self::Pending(state) | Self::Hibernated(state) => state
                 .shared_agent
                 .as_deref()
                 .or(state.shared_terminal.as_deref()),
@@ -296,19 +302,18 @@ impl TabSurface {
         matches!(self, Self::Settings)
     }
 
-    /// The live pane tree. Every activation path materializes the newly active
-    /// tab before touching its surface, so active-tab code may assume `Live`.
+    /// The live pane tree for callers that have already checked the surface.
     pub(crate) fn live(&self) -> &TerminalPaneTree {
         match self {
             TabSurface::Live(tree) => tree,
-            _ => unreachable!("active tab surface is always live"),
+            _ => unreachable!("tab surface has no live terminal"),
         }
     }
 
     pub(crate) fn live_mut(&mut self) -> &mut TerminalPaneTree {
         match self {
             TabSurface::Live(tree) => tree,
-            _ => unreachable!("active tab surface is always live"),
+            _ => unreachable!("tab surface has no live terminal"),
         }
     }
 

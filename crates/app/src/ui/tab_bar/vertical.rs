@@ -169,7 +169,10 @@ impl VerticalTabList {
                 bell: tab.bell(),
                 agent_kind: tab.surface().agent_kind(cx),
                 icon: tab.surface().icon(cx),
-                pending: matches!(tab.surface(), TabSurface::Pending(_)),
+                pending: matches!(
+                    tab.surface(),
+                    TabSurface::Pending(_) | TabSurface::Hibernated(_)
+                ),
                 exited: tab.exited(),
                 progress: tab.progress(),
                 terminal: AppWindow::tab_terminal_activity(tab, cx),

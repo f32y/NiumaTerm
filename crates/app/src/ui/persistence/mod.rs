@@ -348,7 +348,7 @@ fn offer_pending_agent(
 }
 
 /// Put the tab `id` to sleep the way a restored tab starts: its surface
-/// becomes the pending snapshot a session save would record, and paired
+/// becomes a hibernated snapshot, and paired
 /// devices keep listing it as a tab waiting to start. Returns the surface it
 /// replaced, whose panes and agent session end once the caller drops it, or
 /// `None` when the tab runs nothing a snapshot could restart.
@@ -394,7 +394,7 @@ pub(super) fn hibernate_tab(
 
     Some(mem::replace(
         tab.surface_mut(),
-        TabSurface::Pending(Box::new(state)),
+        TabSurface::Hibernated(Box::new(state)),
     ))
 }
 
@@ -413,7 +413,7 @@ pub(super) fn materialize_active_tab(
     cx: &mut Context<AppWindow>,
 ) -> bool {
     let state = match workspaces.active_tabs().active() {
-        TabSurface::Pending(state) => (**state).clone(),
+        TabSurface::Pending(state) | TabSurface::Hibernated(state) => (**state).clone(),
         TabSurface::TeamDisabled(state)
             if cx.global::<AppSettings>().config().agent.enable_agent_team =>
         {
@@ -465,7 +465,7 @@ pub(super) fn materialize_tab(
         .and_then(|tabs| tabs.list().find(id))
         .map(|tab| tab.surface())
     {
-        Some(TabSurface::Pending(state)) => (**state).clone(),
+        Some(TabSurface::Pending(state) | TabSurface::Hibernated(state)) => (**state).clone(),
         _ => return false,
     };
 

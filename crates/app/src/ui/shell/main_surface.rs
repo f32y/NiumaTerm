@@ -4,12 +4,14 @@
 use app::agent_tab::AgentPane;
 use app::terminal_tab::view::TerminalPane;
 use gpui::prelude::*;
-use gpui::{AnyElement, App, Context, Div, Entity, MouseDownEvent, StyleRefinement, div};
-use gpui_component::ActiveTheme;
+use gpui::{AnyElement, App, Context, Div, Entity, MouseDownEvent, StyleRefinement, div, px};
+use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::resizable::{ResizablePanelGroup, resizable_panel};
 use gpui_component::setting::SettingsView;
+use gpui_component::{ActiveTheme, h_flex, v_flex};
 use rust_i18n::t;
 
+use crate::tabs::TabId;
 use crate::ui::main_view_background_opacity;
 use crate::ui::pane_tree::{PaneId, PaneNode};
 use crate::ui::shell::{AppWindow, TabSurface};
@@ -28,11 +30,13 @@ use crate::ui::shell::{AppWindow, TabSurface};
 /// settings page to show when the surface is the settings entry.
 pub(super) fn tab_surface_view(
     surface: &TabSurface,
+    tab_id: TabId,
     agent: Option<Entity<AgentPane>>,
     settings: Option<Entity<SettingsView>>,
     cx: &mut Context<AppWindow>,
 ) -> AnyElement {
     match surface {
+        TabSurface::Hibernated(_) => return hibernated_tab_view(tab_id, cx),
         TabSurface::Git(tab) => {
             return div()
                 .size_full()
@@ -109,6 +113,56 @@ pub(super) fn tab_surface_view(
     render_pane_node(tree.tree().root(), tree.tree().focused(), multi, cx)
 }
 
+fn hibernated_tab_view(tab_id: TabId, cx: &mut Context<AppWindow>) -> AnyElement {
+    div()
+        .id("hibernated-tab-overlay")
+        .size_full()
+        .occlude()
+        .flex()
+        .items_center()
+        .justify_center()
+        .p_6()
+        .backdrop_blur(px(24.))
+        .bg(cx.theme().background.opacity(0.45))
+        .text_color(cx.theme().foreground)
+        .child(
+            v_flex()
+                .max_w(px(480.))
+                .gap_4()
+                .items_center()
+                .child(div().text_lg().child(t!("shell-hibernated-tab-title")))
+                .child(
+                    div()
+                        .text_center()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(t!("shell-hibernated-tab-description")),
+                )
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .child(
+                            Button::new("wake-hibernated-tab")
+                                .debug_selector(|| "wake-hibernated-tab".into())
+                                .primary()
+                                .label(t!("shell-hibernated-tab-wake"))
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.wake_tab(tab_id, window, cx);
+                                })),
+                        )
+                        .child(
+                            Button::new("close-hibernated-tab")
+                                .debug_selector(|| "close-hibernated-tab".into())
+                                .outline()
+                                .label(t!("menu-close-tab"))
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.request_close_tab(tab_id, window, cx);
+                                })),
+                        ),
+                ),
+        )
+        .into_any_element()
+}
+
 fn render_pane_node(
     node: &PaneNode<Entity<TerminalPane>>,
     focused: PaneId,
@@ -175,6 +229,7 @@ pub(super) fn floating_surface_card(surface: &TabSurface, cx: &App) -> Div {
     let pane_fills_card = matches!(
         surface,
         TabSurface::Live(_)
+            | TabSurface::Hibernated(_)
             | TabSurface::Agent(_)
             | TabSurface::Team(_)
             | TabSurface::Orchestration(_)

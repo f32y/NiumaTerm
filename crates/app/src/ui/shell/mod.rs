@@ -25,6 +25,8 @@ mod updates_layer;
 mod workspace_dirs;
 
 #[cfg(test)]
+mod hibernation_tests;
+#[cfg(test)]
 mod tests;
 
 use std::path::PathBuf;
@@ -762,6 +764,17 @@ impl AppWindow {
     /// panes' agent routes; the startup registration sweep only saw tabs that
     /// were live at window creation.
     fn ensure_active_tab_live(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if matches!(
+            self.workspaces.active_tabs().active(),
+            TabSurface::Hibernated(_)
+        ) {
+            return;
+        }
+
+        self.start_active_tab(window, cx);
+    }
+
+    fn start_active_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !materialize_active_tab(&mut self.workspaces, &mut self.next_id, window, cx) {
             return;
         }
@@ -782,6 +795,20 @@ impl AppWindow {
                 .agent_monitor
                 .register_route(route, activity_policy, now);
         }
+    }
+
+    fn wake_tab(&mut self, id: TabId, window: &mut Window, cx: &mut Context<Self>) {
+        if self.workspaces.active_tabs().list().active_id() != id
+            || !matches!(
+                self.workspaces.active_tabs().active(),
+                TabSurface::Hibernated(_)
+            )
+        {
+            return;
+        }
+
+        self.start_active_tab(window, cx);
+        self.show_active_tab(window, cx);
     }
 
     fn sync_team_setting(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -903,6 +930,15 @@ impl AppWindow {
     }
 
     pub(crate) fn focus_active(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if matches!(
+            self.workspaces.active_tabs().active(),
+            TabSurface::Hibernated(_)
+        ) {
+            window.focus(&self.focus, cx);
+
+            return;
+        }
+
         if let Some(git) = self.workspaces.active_tabs().active().git() {
             let view = git.view.clone();
 
@@ -1390,6 +1426,12 @@ impl AppWindow {
             return;
         }
 
+        if matches!(surface, TabSurface::Hibernated(_)) {
+            self.close_tab_now(id, window, cx);
+
+            return;
+        }
+
         let settings = cx.global::<AppSettings>();
         let warn_before_terminating_shell = settings.config().system.warn_before_terminating_shell;
 
@@ -1474,8 +1516,7 @@ impl AppWindow {
     }
 
     /// Whether the tab `id` can hibernate: it runs work a snapshot can
-    /// restart, and it is not the lone tab of the workspace on screen, which
-    /// always shows a live tab and would have nothing to switch to.
+    /// restart, with another tab available to select when it is on screen.
     pub(crate) fn can_hibernate_tab(&self, id: TabId, cx: &App) -> bool {
         let Some(tabs) = self
             .workspaces
@@ -1537,9 +1578,8 @@ impl AppWindow {
         );
     }
 
-    /// Turn the tab `id` back into a pending tab that starts again when it
-    /// is next opened. The tab on screen hands the screen to a neighbour
-    /// first, since the active tab of the visible workspace is always live.
+    /// Save the tab `id` and end its processes until the user wakes it.
+    /// Select a neighbour first so hibernation does not interrupt navigation.
     fn hibernate_tab_now(&mut self, id: TabId, window: &mut Window, cx: &mut Context<Self>) {
         // The tab may have changed while the dialog was open.
         if !self.can_hibernate_tab(id, cx) {
@@ -2942,9 +2982,9 @@ impl AppWindow {
 
         self.ensure_active_tab_live(window, cx);
 
-        let tree = self.workspaces.active_tabs_mut().active_mut().live_mut();
-
-        if let Some(pane_id) = tree.tree().leaves().get(pane_index).map(|(id, _)| *id) {
+        if let Some(tree) = self.workspaces.active_tabs_mut().active_mut().tree_mut()
+            && let Some(pane_id) = tree.tree().leaves().get(pane_index).map(|(id, _)| *id)
+        {
             tree.tree_mut().set_focused(pane_id);
         }
 
@@ -4458,9 +4498,8 @@ struct AgentRouteLocation {
 
 impl Render for AppWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Safety net for any activation path that reaches a render without
-        // passing `focus_active`: the visible tab must be live before anything
-        // below reads the active pane.
+        // Restore lazily loaded tabs before rendering. Hibernated tabs keep
+        // their saved state until the wake button is selected.
         self.ensure_active_tab_live(window, cx);
 
         self.window_active = Self::exact_window_active(window);
@@ -4660,6 +4699,7 @@ impl Render for AppWindow {
 
         let pane_tree = tab_surface_view(
             self.workspaces.active_tabs().active(),
+            active_id,
             self.active_agent(),
             self.settings.render(cx),
             cx,
@@ -4711,6 +4751,13 @@ impl Render for AppWindow {
             .flex_col()
             // All chrome inherits the configured UI font; terminal panes override it.
             .font(ui::chrome_font(cx))
+            .when(
+                matches!(
+                    self.workspaces.active_tabs().active(),
+                    TabSurface::Hibernated(_)
+                ),
+                |shell| shell.track_focus(&self.focus),
+            )
             .key_context("AppWindow");
 
         Self::bind_actions(shell, cx)

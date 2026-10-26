@@ -167,7 +167,7 @@ pub(crate) fn surface_snapshot(
         // A tab that never went live re-saves its restored snapshot
         // unchanged: its shells never ran, so the saved launch state is
         // still the truth.
-        TabSurface::Pending(state) => (**state).clone(),
+        TabSurface::Pending(state) | TabSurface::Hibernated(state) => (**state).clone(),
         // Flat fields always mirror the focused pane, so a snapshot
         // without splits stays in the old format and an old build restores
         // something sensible from a split one.
