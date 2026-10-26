@@ -8,7 +8,8 @@ use std::time::Instant;
 use anyhow::anyhow;
 use nmt_agent::catalog::{SlashRefusal, SlashRoute};
 use nmt_agent::chat::{
-    Question, QuestionInput, SkillReference, SlashCommandOutcome, SlashCommandRunPolicy,
+    Question, QuestionInput, SessionScope, SkillReference, SlashCommandOutcome,
+    SlashCommandRunPolicy,
 };
 use nmt_agent::session::OperationError;
 use nmt_agent::session::command::{
@@ -19,10 +20,11 @@ use nmt_agent::session::command::{
 use nmt_agent::session::commands::{CommandAdmission, PendingSlashCommand};
 use nmt_agent::session::controller::SubmissionBlock;
 use nmt_agent::session::delivery::RecoverablePrompt;
+use nmt_agent::session::history::{HISTORY_METHOD, HistoryStep};
 use nmt_agent::session::input::{
     ApprovalOutcome, QuestionAction, QuestionDraft, QuestionStatus, Submission,
 };
-use nmt_agent::session::lifecycle::InterruptOutcome;
+use nmt_agent::session::lifecycle::{InterruptOutcome, Status};
 use nmt_agent::session::view::{AgentView, DraftAnswers, ViewOp, ViewSlot};
 use nmt_platform::runtime;
 use nmt_remote::connection::{AgentLink, AgentUpdate, RemoteHost};
@@ -100,6 +102,8 @@ pub enum SubmitResult {
     },
     /// The line started a new conversation in place of this one.
     ConversationReplaced,
+    /// Open the recent conversation picker without sending a message.
+    ShowRecentSessions,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
@@ -377,6 +381,18 @@ impl AgentHandle {
 
         Ok(serde_json::from_value(value)?)
     }
+
+    async fn history_step(&self, step: HistoryStep) -> Result<(), CoreError> {
+        let link = Arc::clone(&self.link);
+        let params = serde_json::to_value(step)?;
+
+        let value = runtime()
+            .spawn(async move { link.call(HISTORY_METHOD, params).await })
+            .await??;
+
+        serde_json::from_value::<Result<(), String>>(value)?
+            .map_err(|message| CoreError::Failed { message })
+    }
 }
 
 #[uniffi::export]
@@ -451,6 +467,7 @@ impl AgentHandle {
 
                 SubmitResult::ConversationReplaced
             }
+            SlashRoute::Resume => SubmitResult::ShowRecentSessions,
             SlashRoute::Rename(title) => {
                 self.rename(title).await?;
 
@@ -477,6 +494,37 @@ impl AgentHandle {
 
         serde_json::from_value::<Result<(), String>>(value)?
             .map_err(|message| CoreError::Failed { message })
+    }
+
+    /// Request the host's recent conversations for this working directory.
+    /// Results and loading status arrive through the agent state updates.
+    pub async fn request_recent_sessions(&self) -> Result<(), CoreError> {
+        if !self
+            .replica
+            .lock()
+            .view
+            .as_ref()
+            .is_some_and(|view| matches!(view.slots.status.status, Status::Idle | Status::Running))
+        {
+            return Err(anyhow!("the agent is not ready to list conversations").into());
+        }
+
+        self.history_step(HistoryStep::List(SessionScope::CurrentDirectory))
+            .await
+    }
+
+    /// Resume a conversation from the host's last published history list.
+    pub async fn resume_recent_session(&self, id: String) -> Result<(), CoreError> {
+        let summary = self
+            .replica
+            .lock()
+            .view
+            .as_ref()
+            .and_then(|view| view.slots.history.iter().find(|session| session.id == id))
+            .cloned()
+            .ok_or_else(|| anyhow!("the conversation is no longer in the recent list"))?;
+
+        self.history_step(HistoryStep::Resume(summary)).await
     }
 
     /// Answer the question batch `id`, one answer per question.

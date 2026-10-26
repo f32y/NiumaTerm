@@ -127,6 +127,8 @@ pub struct StatusView {
     pub submitted_at: Since,
     pub first_output_latency: Option<Duration>,
     pub last_response_at: Since,
+    #[serde(default)]
+    pub history_loading: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

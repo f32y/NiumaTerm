@@ -1165,6 +1165,44 @@ fn a_replica_receives_the_conversations_the_host_listed_for_it() {
     assert_eq!(replica.listed_history(), [summary("c")]);
 }
 
+#[test]
+fn a_replica_distinguishes_loading_history_from_an_empty_result() {
+    let mut host = started(AgentKind::Codex, "view", Vec::new());
+    let mut replica = SessionController::new(AgentKind::Codex);
+    let mut publisher = ViewPublisher::default();
+
+    follow(&mut replica, publisher.snapshot(&host).into_ops());
+
+    host.clear_listed_history();
+
+    follow(&mut replica, through_json(publisher.changes(&host)));
+
+    assert!(replica.view_slots().status.history_loading);
+
+    apply(&mut host, Event::History(Vec::new()));
+    follow(&mut replica, through_json(publisher.changes(&host)));
+
+    assert!(!replica.view_slots().status.history_loading);
+    assert!(replica.listed_history().is_empty());
+
+    host.clear_listed_history();
+    host.list_history(Vec::new());
+
+    assert!(!host.view_slots().status.history_loading);
+
+    host.clear_listed_history();
+
+    apply(
+        &mut host,
+        Event::Error {
+            message: "history unavailable".into(),
+            fatal: false,
+        },
+    );
+
+    assert!(!host.view_slots().status.history_loading);
+}
+
 fn prompt(text: &str, images: usize) -> Prompt {
     Prompt {
         text: text.into(),

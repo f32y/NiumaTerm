@@ -555,6 +555,16 @@
         }
       }
     },
+    "Conversations from this working directory appear here.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此处显示当前工作目录的历史会话。"
+          }
+        }
+      }
+    },
     "Copy": {
       "localizations": {
         "zh-Hans": {
@@ -848,6 +858,16 @@
         }
       }
     },
+    "Loading conversations…": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在加载会话…"
+          }
+        }
+      }
+    },
     "Message %@": {
       "localizations": {
         "zh-Hans": {
@@ -994,6 +1014,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "已不再信任此手机 · 请重新配对"
+          }
+        }
+      }
+    },
+    "No recent conversations": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有最近会话"
           }
         }
       }
@@ -1218,6 +1248,16 @@
         }
       }
     },
+    "Recent conversations": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最近会话"
+          }
+        }
+      }
+    },
     "Reconnect": {
       "localizations": {
         "zh-Hans": {
@@ -1244,6 +1284,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "正在重连…"
+          }
+        }
+      }
+    },
+    "Refresh": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "刷新"
           }
         }
       }
@@ -1717,6 +1767,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "版本"
+          }
+        }
+      }
+    },
+    "Wait for the agent to finish before resuming a conversation.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请等待 Agent 完成后再恢复会话。"
           }
         }
       }

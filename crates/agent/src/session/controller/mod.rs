@@ -112,6 +112,8 @@ pub struct SessionController {
     /// The conversations last listed for a view in another process, which
     /// reach it through the published view.
     listed_history: Vec<SessionSummary>,
+
+    history_loading: bool,
 }
 
 impl SessionController {
@@ -132,6 +134,7 @@ impl SessionController {
             restore: ConversationRestore::default(),
             naming: ConversationNaming::default(),
             listed_history: Vec::new(),
+            history_loading: false,
             controls: ConversationSettings {
                 seed: SettingsSeed::Defaults,
                 ..ConversationSettings::default()
@@ -656,11 +659,14 @@ impl SessionController {
     /// listing, perhaps of another scope, would otherwise mix into it.
     pub fn clear_listed_history(&mut self) {
         self.listed_history.clear();
+
+        self.history_loading = true;
     }
 
     /// Rows the host read itself, for a harness whose history is on disk.
     pub fn list_history(&mut self, sessions: Vec<SessionSummary>) {
         self.listed_history = sessions;
+        self.history_loading = false;
     }
 
     pub fn listed_history(&self) -> &[SessionSummary] {
@@ -1314,6 +1320,8 @@ impl SessionController {
                 }
             }
             Event::History(sessions) => {
+                self.history_loading = false;
+
                 self.listed_history.extend(sessions.iter().cloned());
 
                 SessionEffect::History(sessions)
@@ -1379,6 +1387,8 @@ impl SessionController {
                 SessionEffect::Branch(self.branch.fork_checkpoints(&mut self.runtime, checkpoints))
             }
             Event::HostExited { message } => {
+                self.history_loading = false;
+
                 let failure = self.failed(&message, true);
 
                 SessionEffect::Error {
@@ -1388,6 +1398,8 @@ impl SessionController {
                 }
             }
             Event::Error { message, fatal } => {
+                self.history_loading = false;
+
                 let failure = self.failed(&message, fatal);
 
                 SessionEffect::Error {
@@ -1742,6 +1754,7 @@ impl SessionController {
                 submitted_at: Since::of(conversation.submitted_at),
                 first_output_latency: conversation.first_output_latency,
                 last_response_at: Since::of(conversation.last_response_at),
+                history_loading: self.history_loading,
             },
             usage: UsageView {
                 context_window_usage: conversation.context_window_usage,
@@ -1826,6 +1839,8 @@ impl SessionController {
     pub fn apply_slot(&mut self, slot: ViewSlot) {
         match slot {
             ViewSlot::Status(status) => {
+                self.history_loading = status.history_loading;
+
                 self.runtime
                     .mirror(status.status, status.epoch, status.start_failure);
 

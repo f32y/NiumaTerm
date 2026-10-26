@@ -6,7 +6,7 @@
 #[path = "records_tests.rs"]
 mod records_tests;
 
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use nmt_agent::chat::{Item, QuestionInput, QuestionMode};
 use nmt_agent::session::AgentKind;
@@ -378,6 +378,14 @@ pub struct ModelChoice {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct RecentSession {
+    pub id: String,
+    pub title: String,
+    pub cwd: Option<String>,
+    pub last_active: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct PendingApproval {
     pub description: String,
 
@@ -525,6 +533,8 @@ pub struct AgentState {
 
     pub commands: Vec<SlashCommandRecord>,
     pub skills: Vec<SkillRecord>,
+    pub recent_sessions: Vec<RecentSession>,
+    pub history_loading: bool,
 }
 
 pub(crate) fn agent_state(
@@ -554,6 +564,8 @@ pub(crate) fn agent_state(
             context_window: None,
             commands: Vec::new(),
             skills: Vec::new(),
+            recent_sessions: Vec::new(),
+            history_loading: false,
         };
     };
 
@@ -634,6 +646,21 @@ pub(crate) fn agent_state(
         context_window: usage.and_then(|usage| usage.max_tokens),
         commands: command_records(view),
         skills: skill_records(view),
+        recent_sessions: slots
+            .history
+            .iter()
+            .map(|session| RecentSession {
+                id: session.id.clone(),
+                title: session.title.clone(),
+                cwd: session.cwd.clone(),
+                last_active: session
+                    .last_active
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
+            })
+            .collect(),
+        history_loading: status.history_loading,
     }
 }
 

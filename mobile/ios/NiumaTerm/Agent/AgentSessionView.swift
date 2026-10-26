@@ -118,6 +118,14 @@ struct AgentSessionView: View {
                         newTitle = model.title
                         renaming = true
                     }
+
+                    if model.canResume {
+                        Button("Recent conversations", systemImage: "clock.arrow.circlepath") {
+                            composerFocused = false
+                            model.showRecentSessions = true
+                        }
+                        .disabled(model.ended != nil)
+                    }
                 } label: {
                     Image(systemName: "ellipsis")
                 }
@@ -145,6 +153,10 @@ struct AgentSessionView: View {
                 ApprovalSheet(model: model, approval: approval)
                     .presentationDetents([.medium, .large])
             }
+        }
+        .sheet(isPresented: $model.showRecentSessions) {
+            RecentSessionsSheet(model: model)
+                .presentationDetents([.medium, .large])
         }
         .sheet(item: Binding(get: { model.ended.map(EndedSheetItem.init) }, set: { _ in })) { item in
             EndedSheet(end: item.end, hostName: hostName, title: model.title,

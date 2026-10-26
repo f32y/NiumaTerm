@@ -195,6 +195,10 @@ final class AgentSessionModel {
     var draft = ""
     var showApproval = false
     var showQuestions = false
+    var showRecentSessions = false
+    private(set) var requestingRecentSessions = false
+    private(set) var resumingSession: String?
+    var historyNotice: String?
 
     /// Answers being composed, per question batch, seeded from what the host
     /// holds when the batch first arrives.
@@ -252,6 +256,13 @@ final class AgentSessionModel {
 
     var commands: [SlashCommandRecord] { state?.commands ?? [] }
     var skills: [SkillRecord] { state?.skills ?? [] }
+    var canResume: Bool { commands.contains { $0.name == "resume" } }
+    var historyLoading: Bool { requestingRecentSessions || (state?.historyLoading ?? false) }
+    var recentSessions: [RecentSession] {
+        (state?.recentSessions ?? []).sorted {
+            $0.lastActive == $1.lastActive ? $0.id < $1.id : $0.lastActive > $1.lastActive
+        }
+    }
 
     /// Commands and skills matching the draft while it is still one bare
     /// `/name` or `$name` token; names starting with the query come first.
@@ -430,6 +441,10 @@ final class AgentSessionModel {
                     conversationReplaced()
 
                     return
+                case .showRecentSessions:
+                    showRecentSessions = true
+
+                    return
                 case .notReady:
                     notice = tr("\(agentName) is still starting.")
                 case .answerPending:
@@ -471,6 +486,41 @@ final class AgentSessionModel {
     /// The host names the new conversation once it has a first message.
     private func conversationReplaced() {
         title = profile?.displayName ?? tr("Agent")
+    }
+
+    func loadRecentSessions() async {
+        guard let handle, !requestingRecentSessions else { return }
+
+        requestingRecentSessions = true
+        historyNotice = nil
+
+        defer { requestingRecentSessions = false }
+
+        do {
+            try await handle.requestRecentSessions()
+
+            viewChanged(transcriptFrom: nil)
+        } catch {
+            historyNotice = error.displayText
+        }
+    }
+
+    func resume(_ session: RecentSession) async {
+        guard let handle, resumingSession == nil, !isWorking else { return }
+
+        resumingSession = session.id
+        historyNotice = nil
+
+        defer { resumingSession = nil }
+
+        do {
+            try await handle.resumeRecentSession(id: session.id)
+
+            showRecentSessions = false
+            title = session.title
+        } catch {
+            historyNotice = error.displayText
+        }
     }
 
     func interrupt() {

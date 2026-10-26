@@ -38,8 +38,31 @@ fn the_phone_offers_only_commands_it_can_carry_out() {
     // phone does not have.
     assert_eq!(
         names(&view(AgentKind::Codex)),
-        ["new", "clear", "compact", "review", "goal"]
+        ["new", "clear", "resume", "compact", "review", "goal"]
     );
+}
+
+#[test]
+fn resume_opens_the_picker_for_each_agent_without_sending_a_prompt() {
+    for kind in [AgentKind::Codex, AgentKind::DeepSeek, AgentKind::Claude] {
+        let mut view = view(kind);
+
+        assert_eq!(
+            route_line("/resume", &view),
+            Some((SlashRoute::Resume, false))
+        );
+
+        view.slots.status.status = Status::Running;
+
+        assert_eq!(
+            route_line("/resume", &view),
+            Some((SlashRoute::Resume, true))
+        );
+        assert!(matches!(
+            route_line("/resume unexpected", &view),
+            Some((SlashRoute::Refused(SlashRefusal::NoArguments(_)), true))
+        ));
+    }
 }
 
 #[test]

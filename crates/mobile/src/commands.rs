@@ -27,11 +27,16 @@ use crate::records::{SkillRecord, SlashCommandRecord};
 
 /// The commands the phone runs itself instead of the harness.
 fn local_commands() -> Vec<SlashCommandInfo> {
-    ["new", "clear"]
+    ["new", "clear", "resume"]
         .into_iter()
         .map(|name| SlashCommandInfo {
             name: name.to_owned(),
-            description: "Start a new conversation".to_owned(),
+            description: if name == "resume" {
+                "Resume a recent conversation"
+            } else {
+                "Start a new conversation"
+            }
+            .to_owned(),
             argument_hint: None,
             source: SlashCommandSource::Local,
             arguments: SlashCommandArguments::None,
@@ -53,6 +58,7 @@ fn phone_runs(route: &SlashRoute) -> bool {
     matches!(
         route,
         SlashRoute::NewConversation
+            | SlashRoute::Resume
             | SlashRoute::Prompt
             | SlashRoute::Rename(_)
             | SlashRoute::Backend { .. }
