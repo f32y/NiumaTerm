@@ -279,11 +279,6 @@ pub(super) fn restore_session(
 
     workspaces.list_mut().activate(active_index);
 
-    // The initially visible tab spawns right away; everything else stays
-    // pending, so this window's other `active_pane` readers (activation
-    // observers, notification pumps) never see a pending active tab.
-    materialize_active_tab(&mut workspaces, next_id, window, cx);
-
     offer_restoring_agents(&workspaces, window, cx);
 
     Some(workspaces)
@@ -402,7 +397,7 @@ pub(super) fn hibernate_tab(
 /// `Live`. Returns whether a materialization happened. A saved pane layout
 /// rebuilds the split tree (one fresh shell per leaf); an unusable layout
 /// or failed spawn degrades to a single default-profile pane so the tab
-/// the user just activated never vanishes. A tab saved with an agent kind
+/// the user chose to restore never vanishes. A tab saved with an agent kind
 /// reopens as an agent tab instead, continuing its saved conversation once
 /// the new session is ready (the harness process died with the previous app
 /// instance, but the conversation itself persists on disk).
@@ -690,8 +685,8 @@ fn restore_orchestration_tab(
 }
 
 /// Rebuild a workspace's tabs as pending surfaces: the saved snapshot is
-/// kept per tab and no shell spawns here; `materialize_active_tab` turns
-/// a tab live the first time it is activated.
+/// kept per tab and no shell spawns here. Loading waits for confirmation,
+/// including the initially selected tab.
 fn restore_tabs(
     tabs: Vec<TabState>,
     active_tab: usize,

@@ -11,7 +11,7 @@ use nmt_config::system::WarnBeforeTerminatingShell;
 use crate::tabs::{TabId, TabManager};
 use crate::ui::background_tasks::BackgroundTasksView;
 use crate::ui::git_status::GitStatusModel;
-use crate::ui::persistence::session_state;
+use crate::ui::persistence::{restore_session, session_state};
 use crate::ui::remote;
 use crate::ui::right_panel::RightPanel;
 use crate::ui::settings::{AppSettings, SettingsSurface};
@@ -26,7 +26,7 @@ use crate::ui::workflows::WorkflowsView;
 use crate::ui::workspace_sidebar::Sidebar;
 use crate::workspace::{WorkspaceId, WorkspaceManager, WorkspaceRoots};
 
-fn sleeping_shell(cx: &mut VisualTestContext, saved: TabState) -> Entity<AppWindow> {
+fn sleeping_shell(cx: &mut VisualTestContext, surface: TabSurface) -> Entity<AppWindow> {
     cx.update(|window, cx| {
         gpui_component::init(cx);
 
@@ -45,11 +45,7 @@ fn sleeping_shell(cx: &mut VisualTestContext, saved: TabState) -> Entity<AppWind
         cx.new(|cx| {
             let mut tabs = TabManager::new(TabSurface::Settings, TabId(1), "Settings".into());
 
-            tabs.new_tab(
-                TabSurface::Hibernated(Box::new(saved)),
-                TabId(2),
-                "Sleeping".into(),
-            );
+            tabs.new_tab(surface, TabId(2), "Sleeping".into());
 
             let git_model = cx.new(GitStatusModel::new);
             let tasks = cx.new(|_| BackgroundTasksView::new());
@@ -126,57 +122,96 @@ fn switching_to_sleeping_tabs_keeps_the_saved_state_and_close_does_not_start_the
             ..TabState::default()
         };
 
-        let shell = sleeping_shell(cx, saved.clone());
+        for surface in [
+            TabSurface::Pending(Box::new(saved.clone())),
+            TabSurface::Hibernated(Box::new(saved.clone())),
+        ] {
+            let shell = sleeping_shell(cx, surface);
 
-        cx.update(|window, cx| {
-            shell.update(cx, |shell, cx| {
-                shell.workspaces.active_tabs_mut().list_mut().activate(0);
-                shell.show_active_tab(window, cx);
-                shell.workspaces.active_tabs_mut().list_mut().activate(1);
-                shell.show_active_tab(window, cx);
-                shell.ensure_active_tab_live(window, cx);
+            let _probe = draw_sleeping_tab(cx, &shell);
 
-                if saved.agent.is_none() {
-                    assert!(shell.focus_dir_tab(
-                        Path::new(saved.cwd.as_ref().unwrap()),
-                        window,
-                        cx
-                    ));
-                }
+            assert!(cx.debug_bounds("wake-hibernated-tab").is_some());
 
-                assert!(shell.try_active_pane().is_none());
-                assert!(shell.active_agent().is_none());
-                assert!(shell.focus.is_focused(window));
+            cx.update(|window, cx| {
+                shell.update(cx, |shell, cx| {
+                    shell.workspaces.active_tabs_mut().list_mut().activate(0);
+                    shell.show_active_tab(window, cx);
+                    shell.workspaces.active_tabs_mut().list_mut().activate(1);
+                    shell.show_active_tab(window, cx);
+                    shell.ensure_active_tab_live(window, cx);
 
-                let snapshot = session_state(&shell.workspaces, None, cx);
+                    if saved.agent.is_none() {
+                        assert!(shell.focus_dir_tab(
+                            Path::new(saved.cwd.as_ref().unwrap()),
+                            window,
+                            cx
+                        ));
+                    }
 
-                assert_eq!(snapshot.workspaces[0].tabs[1].cwd, saved.cwd);
-                assert_eq!(snapshot.workspaces[0].tabs[1].agent, saved.agent);
+                    assert!(shell.try_active_pane().is_none());
+                    assert!(shell.active_agent().is_none());
+                    assert!(shell.focus.is_focused(window));
+
+                    let snapshot = session_state(&shell.workspaces, None, cx);
+
+                    assert_eq!(snapshot.workspaces[0].tabs[1].cwd, saved.cwd);
+                    assert_eq!(snapshot.workspaces[0].tabs[1].agent, saved.agent);
+                });
             });
-        });
 
-        let _probe = draw_sleeping_tab(cx, &shell);
+            let _probe = draw_sleeping_tab(cx, &shell);
 
-        assert!(cx.debug_bounds("wake-hibernated-tab").is_some());
+            assert!(cx.debug_bounds("wake-hibernated-tab").is_some());
 
-        cx.update(|_, cx| {
-            assert!(matches!(
-                shell.read(cx).workspaces.active_tabs().active(),
-                TabSurface::Hibernated(_)
-            ));
-        });
+            cx.update(|_, cx| {
+                assert!(matches!(
+                    shell.read(cx).workspaces.active_tabs().active(),
+                    TabSurface::Pending(_) | TabSurface::Hibernated(_)
+                ));
+            });
 
-        let close = cx.debug_bounds("close-hibernated-tab").unwrap();
+            let close = cx.debug_bounds("close-hibernated-tab").unwrap();
 
-        cx.simulate_click(close.center(), Modifiers::default());
+            cx.simulate_click(close.center(), Modifiers::default());
 
-        cx.update(|_, cx| {
-            let shell = shell.read(cx);
+            cx.update(|_, cx| {
+                let shell = shell.read(cx);
 
-            assert_eq!(shell.workspaces.active_tabs().list().len(), 1);
-            assert!(shell.workspaces.active_tabs().active().is_settings());
-        });
+                assert_eq!(shell.workspaces.active_tabs().list().len(), 1);
+                assert!(shell.workspaces.active_tabs().active().is_settings());
+            });
+        }
     }
+}
+
+#[gpui::test]
+fn restoring_a_session_keeps_the_initial_tab_unloaded(cx: &mut TestAppContext) {
+    let cx = cx.add_empty_window();
+    let shell = sleeping_shell(cx, TabSurface::Pending(Box::default()));
+
+    cx.update(|window, cx| {
+        shell.update(cx, |shell, cx| {
+            let snapshot = session_state(&shell.workspaces, None, cx);
+
+            shell.workspaces =
+                restore_session(Some(snapshot), &mut shell.next_id, window, cx).unwrap();
+
+            assert!(matches!(
+                shell.workspaces.active_tabs().active(),
+                TabSurface::Pending(_)
+            ));
+
+            shell.show_active_tab(window, cx);
+
+            assert!(shell.try_active_pane().is_none());
+            assert!(shell.active_agent().is_none());
+            assert!(shell.focus.is_focused(window));
+        });
+    });
+
+    let _probe = draw_sleeping_tab(cx, &shell);
+
+    assert!(cx.debug_bounds("wake-hibernated-tab").is_some());
 }
 
 #[cfg(windows)]
@@ -188,7 +223,6 @@ fn wake_button_starts_one_terminal_and_can_hibernate_it_again(cx: &mut TestAppCo
     cx.background_executor.allow_parking();
 
     let cx = cx.add_empty_window();
-    let shell = sleeping_shell(cx, TabState::default());
 
     cx.update(|_, cx| {
         cx.set_global(TerminalSettings {
@@ -207,38 +241,44 @@ fn wake_button_starts_one_terminal_and_can_hibernate_it_again(cx: &mut TestAppCo
         });
     });
 
-    let _probe = draw_sleeping_tab(cx, &shell);
-    let wake = cx.debug_bounds("wake-hibernated-tab").unwrap();
+    for surface in [
+        TabSurface::Pending(Box::default()),
+        TabSurface::Hibernated(Box::default()),
+    ] {
+        let shell = sleeping_shell(cx, surface);
+        let _probe = draw_sleeping_tab(cx, &shell);
+        let wake = cx.debug_bounds("wake-hibernated-tab").unwrap();
 
-    cx.simulate_click(wake.center(), Modifiers::default());
+        cx.simulate_click(wake.center(), Modifiers::default());
 
-    let weak = cx.update(|window, cx| {
-        shell.update(cx, |shell, cx| {
-            let pane = shell.try_active_pane().expect("wake starts a terminal");
-            let id = pane.entity_id();
-            let weak = pane.downgrade();
+        let weak = cx.update(|window, cx| {
+            shell.update(cx, |shell, cx| {
+                let pane = shell.try_active_pane().expect("wake starts a terminal");
+                let id = pane.entity_id();
+                let weak = pane.downgrade();
 
-            drop(pane);
+                drop(pane);
 
-            shell.wake_tab(TabId(2), window, cx);
+                shell.wake_tab(TabId(2), window, cx);
 
-            assert_eq!(shell.try_active_pane().unwrap().entity_id(), id);
+                assert_eq!(shell.try_active_pane().unwrap().entity_id(), id);
 
-            shell.hibernate_tab_now(TabId(2), window, cx);
+                shell.hibernate_tab_now(TabId(2), window, cx);
 
-            assert!(shell.workspaces.active_tabs().active().is_settings());
+                assert!(shell.workspaces.active_tabs().active().is_settings());
 
-            shell.workspaces.active_tabs_mut().list_mut().activate(1);
-            shell.show_active_tab(window, cx);
+                shell.workspaces.active_tabs_mut().list_mut().activate(1);
+                shell.show_active_tab(window, cx);
 
-            assert!(matches!(
-                shell.workspaces.active_tabs().active(),
-                TabSurface::Hibernated(_)
-            ));
+                assert!(matches!(
+                    shell.workspaces.active_tabs().active(),
+                    TabSurface::Hibernated(_)
+                ));
 
-            weak
-        })
-    });
+                weak
+            })
+        });
 
-    cx.update(|_, _| assert!(weak.upgrade().is_none()));
+        cx.update(|_, _| assert!(weak.upgrade().is_none()));
+    }
 }

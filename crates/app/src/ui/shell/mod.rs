@@ -760,13 +760,11 @@ impl AppWindow {
             })
     }
 
-    /// Spawn a still-pending (lazily-restored) active tab, then register its
-    /// panes' agent routes; the startup registration sweep only saw tabs that
-    /// were live at window creation.
+    /// Reopen enabled feature tabs while saved sessions wait for confirmation.
     fn ensure_active_tab_live(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if matches!(
             self.workspaces.active_tabs().active(),
-            TabSurface::Hibernated(_)
+            TabSurface::Pending(_) | TabSurface::Hibernated(_)
         ) {
             return;
         }
@@ -801,7 +799,7 @@ impl AppWindow {
         if self.workspaces.active_tabs().list().active_id() != id
             || !matches!(
                 self.workspaces.active_tabs().active(),
-                TabSurface::Hibernated(_)
+                TabSurface::Pending(_) | TabSurface::Hibernated(_)
             )
         {
             return;
@@ -932,7 +930,7 @@ impl AppWindow {
     pub(crate) fn focus_active(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if matches!(
             self.workspaces.active_tabs().active(),
-            TabSurface::Hibernated(_)
+            TabSurface::Pending(_) | TabSurface::Hibernated(_)
         ) {
             window.focus(&self.focus, cx);
 
@@ -1426,7 +1424,7 @@ impl AppWindow {
             return;
         }
 
-        if matches!(surface, TabSurface::Hibernated(_)) {
+        if matches!(surface, TabSurface::Pending(_) | TabSurface::Hibernated(_)) {
             self.close_tab_now(id, window, cx);
 
             return;
@@ -4498,8 +4496,8 @@ struct AgentRouteLocation {
 
 impl Render for AppWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Restore lazily loaded tabs before rendering. Hibernated tabs keep
-        // their saved state until the wake button is selected.
+        // Feature tabs can reopen when enabled; saved sessions wait for
+        // confirmation before loading their content.
         self.ensure_active_tab_live(window, cx);
 
         self.window_active = Self::exact_window_active(window);
@@ -4754,7 +4752,7 @@ impl Render for AppWindow {
             .when(
                 matches!(
                     self.workspaces.active_tabs().active(),
-                    TabSurface::Hibernated(_)
+                    TabSurface::Pending(_) | TabSurface::Hibernated(_)
                 ),
                 |shell| shell.track_focus(&self.focus),
             )

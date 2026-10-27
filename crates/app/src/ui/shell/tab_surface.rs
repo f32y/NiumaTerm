@@ -30,10 +30,8 @@ pub(crate) struct GitTab {
     pub(crate) return_to: Option<TabId>,
 }
 
-/// A tab's surface. Restored tabs start `Pending` (the saved snapshot with no
-/// shell process behind it) and become `Live` (spawning their shells) the
-/// first time they are activated, so startup only pays for the visible tab.
-/// Hibernated tabs retain their saved state until the user wakes them.
+/// A tab's surface. Restored tabs start `Pending` with only a saved snapshot.
+/// Both pending and hibernated tabs wait for confirmation before loading.
 pub(crate) enum TabSurface {
     Pending(Box<TabState>),
     /// A saved surface that starts only after the user chooses to wake it.

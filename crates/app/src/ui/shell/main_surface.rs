@@ -36,7 +36,9 @@ pub(super) fn tab_surface_view(
     cx: &mut Context<AppWindow>,
 ) -> AnyElement {
     match surface {
-        TabSurface::Hibernated(_) => return hibernated_tab_view(tab_id, cx),
+        TabSurface::Pending(_) | TabSurface::Hibernated(_) => {
+            return unloaded_tab_view(tab_id, cx);
+        }
         TabSurface::Git(tab) => {
             return div()
                 .size_full()
@@ -113,9 +115,9 @@ pub(super) fn tab_surface_view(
     render_pane_node(tree.tree().root(), tree.tree().focused(), multi, cx)
 }
 
-fn hibernated_tab_view(tab_id: TabId, cx: &mut Context<AppWindow>) -> AnyElement {
+fn unloaded_tab_view(tab_id: TabId, cx: &mut Context<AppWindow>) -> AnyElement {
     div()
-        .id("hibernated-tab-overlay")
+        .id("unloaded-tab-overlay")
         .size_full()
         .occlude()
         .flex()
@@ -130,12 +132,12 @@ fn hibernated_tab_view(tab_id: TabId, cx: &mut Context<AppWindow>) -> AnyElement
                 .max_w(px(480.))
                 .gap_4()
                 .items_center()
-                .child(div().text_lg().child(t!("shell-hibernated-tab-title")))
+                .child(div().text_lg().child(t!("shell-unloaded-tab-title")))
                 .child(
                     div()
                         .text_center()
                         .text_color(cx.theme().muted_foreground)
-                        .child(t!("shell-hibernated-tab-description")),
+                        .child(t!("shell-unloaded-tab-description")),
                 )
                 .child(
                     h_flex()
@@ -144,7 +146,7 @@ fn hibernated_tab_view(tab_id: TabId, cx: &mut Context<AppWindow>) -> AnyElement
                             Button::new("wake-hibernated-tab")
                                 .debug_selector(|| "wake-hibernated-tab".into())
                                 .primary()
-                                .label(t!("shell-hibernated-tab-wake"))
+                                .label(t!("shell-unloaded-tab-restore"))
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.wake_tab(tab_id, window, cx);
                                 })),
@@ -229,6 +231,7 @@ pub(super) fn floating_surface_card(surface: &TabSurface, cx: &App) -> Div {
     let pane_fills_card = matches!(
         surface,
         TabSurface::Live(_)
+            | TabSurface::Pending(_)
             | TabSurface::Hibernated(_)
             | TabSurface::Agent(_)
             | TabSurface::Team(_)
