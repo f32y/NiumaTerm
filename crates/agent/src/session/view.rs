@@ -11,6 +11,10 @@
 //! Times are sent as durations measured on the host, so the two clocks never
 //! have to agree.
 
+#[cfg(test)]
+#[path = "view_paging_tests.rs"]
+mod paging_tests;
+
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -39,6 +43,41 @@ use crate::transcript::turns::{GenerationStats, TurnLedger};
 pub struct AgentView {
     pub transcript: Vec<ViewEntry>,
     pub slots: ViewSlots,
+}
+
+pub const TRANSCRIPT_PAGE_SIZE: usize = 20;
+
+/// Absolute transcript range and conversation version acknowledged by one view.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewCursor {
+    pub generation: u64,
+    pub revision: u64,
+    pub start: usize,
+    pub end: usize,
+    pub loaded_blocks: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PagedAgentView {
+    pub view: AgentView,
+    pub cursor: ViewCursor,
+}
+
+/// Older entries precede the current range; the existing tail is retained.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TranscriptPage {
+    pub before: ViewCursor,
+    pub cursor: ViewCursor,
+    pub entries: Vec<ViewEntry>,
+}
+
+/// Operations use offsets relative to the loaded range, never the full history.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PagedAgentUpdate {
+    pub before: ViewCursor,
+    pub cursor: ViewCursor,
+    pub ops: Vec<ViewOp>,
+    pub reset: Option<PagedAgentView>,
 }
 
 /// One transcript entry. Image bytes travel separately, by reference, so an
@@ -414,9 +453,154 @@ pub enum ViewOp {
 pub struct ViewPublisher {
     version: (u64, u64),
     slots: Option<ViewSlots>,
+    cursor: Option<ViewCursor>,
 }
 
 impl ViewPublisher {
+    /// Read the latest page without cloning entries the view has not requested.
+    pub fn snapshot_paged(&mut self, controller: &SessionController) -> PagedAgentView {
+        let conversation = controller.conversation().borrow();
+        let (generation, revision) = conversation.version();
+        let end = conversation.content.entries().len();
+        let start = end.saturating_sub(TRANSCRIPT_PAGE_SIZE);
+
+        drop(conversation);
+
+        let cursor = ViewCursor {
+            generation,
+            revision,
+            start,
+            end,
+            loaded_blocks: u32::from(end != 0),
+        };
+
+        let slots = controller.view_slots();
+
+        self.version = (generation, revision);
+        self.slots = Some(slots.clone());
+        self.cursor = Some(cursor);
+
+        PagedAgentView {
+            view: AgentView {
+                transcript: controller.transcript_view_range(start, end),
+                slots,
+            },
+            cursor,
+        }
+    }
+
+    /// Expand one view by at most one page. A stale range cannot skip entries.
+    pub fn earlier_paged(
+        &mut self,
+        controller: &SessionController,
+        requested: ViewCursor,
+    ) -> Result<TranscriptPage, &'static str> {
+        let before = self.cursor.ok_or("the agent view is not attached")?;
+
+        if requested.generation != before.generation
+            || requested.start != before.start
+            || requested.end > before.end
+            || requested.revision > before.revision
+            || requested.loaded_blocks != before.loaded_blocks
+            || controller.conversation().borrow().version() != self.version
+        {
+            return Err("the transcript range changed; retry loading earlier entries");
+        }
+
+        let start = before.start.saturating_sub(TRANSCRIPT_PAGE_SIZE);
+
+        let cursor = ViewCursor {
+            start,
+            loaded_blocks: before
+                .loaded_blocks
+                .saturating_add(u32::from(start != before.start)),
+            ..before
+        };
+
+        let entries = controller.transcript_view_range(start, before.start);
+
+        self.cursor = Some(cursor);
+
+        Ok(TranscriptPage {
+            before,
+            cursor,
+            entries,
+        })
+    }
+
+    /// Publish only the loaded range. Unknown earlier edits restart a bounded view.
+    pub fn changes_paged(&mut self, controller: &SessionController) -> Option<PagedAgentUpdate> {
+        let before = self.cursor?;
+        let conversation = controller.conversation().borrow();
+        let (generation, revision) = conversation.version();
+        let end = conversation.content.entries().len();
+        let change = conversation.changes_since_in_range(self.version, before.start);
+
+        let reset = generation != before.generation
+            || end < before.start
+            || change
+                .as_ref()
+                .is_some_and(|change| change.reset_from.is_some_and(|from| from <= before.start));
+
+        drop(conversation);
+
+        if reset {
+            let snapshot = self.snapshot_paged(controller);
+
+            return Some(PagedAgentUpdate {
+                before,
+                cursor: snapshot.cursor,
+                ops: Vec::new(),
+                reset: Some(snapshot),
+            });
+        }
+
+        let mut ops = Vec::new();
+
+        if let Some(change) = change {
+            let from = change.first.max(before.start).min(end);
+
+            if from < end || end != before.end {
+                ops.push(ViewOp::Splice {
+                    from: from - before.start,
+                    entries: controller.transcript_view_range(from, end),
+                });
+            }
+        }
+
+        let slots = controller.view_slots();
+
+        if let Some(previous) = &self.slots {
+            ops.extend(
+                slots
+                    .changed_since(previous)
+                    .into_iter()
+                    .map(|slot| ViewOp::Slot {
+                        slot: Box::new(slot),
+                    }),
+            );
+        }
+
+        let cursor = ViewCursor {
+            generation,
+            revision,
+            end,
+            loaded_blocks: before.loaded_blocks.max(u32::from(end != before.start)),
+            ..before
+        };
+
+        self.version = (generation, revision);
+        self.slots = Some(slots);
+        self.cursor = Some(cursor);
+
+        (cursor != before || !ops.is_empty()).then_some(PagedAgentUpdate {
+            before,
+            cursor,
+            ops,
+            reset: None,
+        })
+    }
+
     /// The whole view, which later [`Self::changes`] build on.
     pub fn snapshot(&mut self, controller: &SessionController) -> AgentView {
         let slots = controller.view_slots();

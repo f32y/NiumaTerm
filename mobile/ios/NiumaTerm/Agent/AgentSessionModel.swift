@@ -188,6 +188,9 @@ final class AgentSessionModel {
     private(set) var entries: [AgentEntry] = []
     private(set) var rows: [TranscriptRowModel] = []
     private(set) var state: AgentState?
+    private(set) var requestingEarlier = false
+    private(set) var earlierNotice: String?
+    @ObservationIgnored private var historyRequestGeneration: UInt64 = 0
 
     /// When the running turn started, on this phone's clock.
     private(set) var workStarted: Date?
@@ -242,6 +245,9 @@ final class AgentSessionModel {
 
     var agentName: String { profile?.shortName ?? tr("the agent") }
     var attached: Bool { state?.attached ?? false }
+    var hasEarlier: Bool { state?.olderAvailable ?? false }
+    var loadedBlocks: UInt32 { state?.loadedBlocks ?? 0 }
+    var loadingEarlier: Bool { requestingEarlier || (state?.loadingEarlier ?? false) }
     var isWorking: Bool { state?.working ?? false }
     var ended: ViewEnd? { state?.ended }
     var queue: [QueuedMessage] { state?.queue ?? [] }
@@ -345,10 +351,10 @@ final class AgentSessionModel {
     func viewChanged(transcriptFrom: UInt32?) {
         guard let handle else { return }
 
-        if let from = transcriptFrom {
-            let kept = min(Int(from), entries.count)
-
-            entries = Array(entries.prefix(kept)) + handle.entries(from: UInt32(kept))
+        if transcriptFrom != nil {
+            // A preceding page changes local offsets while each entry keeps
+            // its absolute transcript index.
+            entries = handle.entries(from: 0)
             rows = TranscriptRows.build(entries)
         }
 
@@ -485,6 +491,9 @@ final class AgentSessionModel {
 
     /// The host names the new conversation once it has a first message.
     private func conversationReplaced() {
+        historyRequestGeneration &+= 1
+        requestingEarlier = false
+        earlierNotice = nil
         title = profile?.displayName ?? tr("Agent")
     }
 
@@ -505,9 +514,39 @@ final class AgentSessionModel {
         }
     }
 
+    /// Fetch one preceding page. Scrolling and the retry button share this
+    /// request so repeated visibility updates cannot request overlapping pages.
+    func loadEarlier() async {
+        guard let handle, attached, hasEarlier, !loadingEarlier else { return }
+
+        let generation = historyRequestGeneration
+
+        requestingEarlier = true
+        earlierNotice = nil
+
+        defer {
+            if generation == historyRequestGeneration { requestingEarlier = false }
+        }
+
+        do {
+            try await handle.loadEarlier()
+
+            guard generation == historyRequestGeneration else { return }
+
+            viewChanged(transcriptFrom: 0)
+        } catch {
+            guard generation == historyRequestGeneration else { return }
+
+            earlierNotice = error.displayText
+        }
+    }
+
     func resume(_ session: RecentSession) async {
         guard let handle, resumingSession == nil, !isWorking else { return }
 
+        historyRequestGeneration &+= 1
+        requestingEarlier = false
+        earlierNotice = nil
         resumingSession = session.id
         historyNotice = nil
 
@@ -721,6 +760,8 @@ final class AgentSessionModel {
 
     /// Drop the view, which detaches from the session on the host.
     func detach() {
+        historyRequestGeneration &+= 1
+        requestingEarlier = false
         handle = nil
     }
 

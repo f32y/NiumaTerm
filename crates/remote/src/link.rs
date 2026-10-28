@@ -3,6 +3,8 @@
 //! later through the relay, so both paths share this code.
 
 use std::sync::Arc;
+#[cfg(any(feature = "host", test))]
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
@@ -13,6 +15,8 @@ use nmt_remote_core::frame::{
     CONTROL_STREAM, Frame, Message as FrameMessage, Reassembler, encode_message, kind,
 };
 use tokio::select;
+#[cfg(any(feature = "host", test))]
+use tokio::sync::Mutex;
 use tokio::sync::Notify;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::time::{Instant, sleep_until};
@@ -22,6 +26,78 @@ use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 /// behind is closed and reconnects, which replaces the backlog with a
 /// checkpoint instead of letting memory and latency grow without bound.
 pub(crate) const MAX_QUEUED: usize = 8 * 1024 * 1024;
+
+#[cfg(any(feature = "host", test))]
+const BOUNDED_QUEUED: usize = MAX_QUEUED / 2;
+
+const CONTROL_CHUNK_SIZE: usize = 128 * 1024;
+const CONTROL_CHUNK_HEADER: usize = 24;
+pub(crate) const MAX_CONTROL_TRANSFER: usize = 64 * 1024 * 1024;
+
+/// Reassemble one bounded control transfer. A new first chunk replaces an
+/// interrupted transfer; subsequent chunks must match its id and offset.
+#[derive(Default)]
+pub(crate) struct ControlChunks {
+    transfer: Option<ControlTransfer>,
+}
+
+struct ControlTransfer {
+    id: u64,
+    total: usize,
+    bytes: Vec<u8>,
+}
+
+impl ControlChunks {
+    pub(crate) fn push(&mut self, payload: &[u8]) -> Result<Option<Vec<u8>>> {
+        if payload.len() <= CONTROL_CHUNK_HEADER
+            || payload.len() > CONTROL_CHUNK_HEADER + CONTROL_CHUNK_SIZE
+        {
+            bail!("invalid control chunk length");
+        }
+
+        let id = u64::from_be_bytes(payload[..8].try_into()?);
+        let total = usize::try_from(u64::from_be_bytes(payload[8..16].try_into()?))?;
+        let offset = usize::try_from(u64::from_be_bytes(payload[16..24].try_into()?))?;
+        let bytes = &payload[CONTROL_CHUNK_HEADER..];
+
+        if total == 0 || total > MAX_CONTROL_TRANSFER || bytes.len() > total.saturating_sub(offset)
+        {
+            bail!("control transfer exceeds its declared size");
+        }
+
+        if offset == 0 {
+            if self
+                .transfer
+                .as_ref()
+                .is_some_and(|transfer| transfer.id == id)
+            {
+                bail!("control transfer repeated its first chunk");
+            }
+
+            self.transfer = Some(ControlTransfer {
+                id,
+                total,
+                bytes: Vec::with_capacity(total),
+            });
+        }
+
+        let Some(transfer) = self.transfer.as_mut() else {
+            bail!("control chunk has no first chunk");
+        };
+
+        if transfer.id != id || transfer.total != total || transfer.bytes.len() != offset {
+            bail!("control chunk is out of sequence");
+        }
+
+        transfer.bytes.extend_from_slice(bytes);
+
+        if transfer.bytes.len() == transfer.total {
+            return Ok(self.transfer.take().map(|transfer| transfer.bytes));
+        }
+
+        Ok(None)
+    }
+}
 
 /// One message to send on a channel stream.
 pub(crate) struct Outbound {
@@ -55,11 +131,17 @@ impl Outbound {
 pub(crate) struct SendQueue {
     tx: UnboundedSender<Outbound>,
     queued: Arc<AtomicUsize>,
+    drained: Arc<Notify>,
+    #[cfg(any(feature = "host", test))]
+    control_send: Arc<Mutex<()>>,
+    #[cfg(any(feature = "host", test))]
+    next_transfer: Arc<AtomicU64>,
 }
 
 pub(crate) struct QueueReceiver {
     rx: UnboundedReceiver<Outbound>,
     queued: Arc<AtomicUsize>,
+    drained: Arc<Notify>,
 }
 
 impl QueueReceiver {
@@ -70,30 +152,145 @@ impl QueueReceiver {
         self.queued
             .fetch_sub(outbound.payload.len(), Ordering::Relaxed);
 
+        self.drained.notify_waiters();
+
         Some(outbound)
     }
 }
 
 impl SendQueue {
+    #[cfg(test)]
+    pub(crate) fn queued_bytes(&self) -> usize {
+        self.queued.load(Ordering::Relaxed)
+    }
+
     pub(crate) fn new() -> (Self, QueueReceiver) {
         let (tx, rx) = mpsc::unbounded_channel();
         let queued = Arc::new(AtomicUsize::new(0));
+        let drained = Arc::new(Notify::new());
 
         (
             Self {
                 tx,
                 queued: Arc::clone(&queued),
+                drained: Arc::clone(&drained),
+                #[cfg(any(feature = "host", test))]
+                control_send: Arc::new(Mutex::new(())),
+                #[cfg(any(feature = "host", test))]
+                next_transfer: Arc::new(AtomicU64::new(1)),
             },
-            QueueReceiver { rx, queued },
+            QueueReceiver {
+                rx,
+                queued,
+                drained,
+            },
         )
     }
 
     /// Queue a message; `false` once the channel is gone.
     pub(crate) fn send(&self, outbound: Outbound) -> bool {
-        self.queued
-            .fetch_add(outbound.payload.len(), Ordering::Relaxed);
+        let len = outbound.payload.len();
 
-        self.tx.send(outbound).is_ok()
+        self.queued.fetch_add(len, Ordering::Relaxed);
+
+        if self.tx.send(outbound).is_err() {
+            self.queued.fetch_sub(len, Ordering::Relaxed);
+            self.drained.notify_waiters();
+
+            return false;
+        }
+
+        true
+    }
+
+    /// Wait for capacity before adding one bounded message. Large logical
+    /// responses must be split before admission so a slow reader cannot
+    /// accumulate the complete response in the transport queue.
+    #[cfg(any(feature = "host", test))]
+    pub(crate) async fn send_bounded(&self, outbound: Outbound) -> bool {
+        let len = outbound.payload.len();
+
+        if len > BOUNDED_QUEUED {
+            return false;
+        }
+
+        loop {
+            let drained = self.drained.notified();
+
+            tokio::pin!(drained);
+
+            // Register before checking capacity so a concurrent drain cannot
+            // complete between the check and notification registration.
+            drained.as_mut().enable();
+
+            if self.tx.is_closed() {
+                return false;
+            }
+
+            if self
+                .queued
+                .try_update(Ordering::Relaxed, Ordering::Relaxed, |queued| {
+                    queued
+                        .checked_add(len)
+                        .filter(|total| *total <= BOUNDED_QUEUED)
+                })
+                .is_ok()
+            {
+                if self.tx.send(outbound).is_err() {
+                    self.queued.fetch_sub(len, Ordering::Relaxed);
+                    self.drained.notify_waiters();
+
+                    return false;
+                }
+
+                return true;
+            }
+
+            select! {
+                () = drained => {}
+                () = self.tx.closed() => return false,
+            }
+        }
+    }
+
+    /// Serialize control responses in bounded chunks while retaining their
+    /// order. The caller uses this only after negotiating chunk support.
+    #[cfg(any(feature = "host", test))]
+    pub(crate) async fn send_chunked_control(&self, outbound: Outbound) -> bool {
+        if outbound.stream != CONTROL_STREAM
+            || outbound.kind != kind::CONTROL_JSON
+            || outbound.on_sent.is_some()
+            || outbound.payload.len() > MAX_CONTROL_TRANSFER
+        {
+            return false;
+        }
+
+        let _sending = self.control_send.lock().await;
+
+        if outbound.payload.len() <= CONTROL_CHUNK_SIZE {
+            return self.send_bounded(outbound).await;
+        }
+
+        let id = self.next_transfer.fetch_add(1, Ordering::Relaxed);
+        let total = outbound.payload.len() as u64;
+
+        for (index, bytes) in outbound.payload.chunks(CONTROL_CHUNK_SIZE).enumerate() {
+            let mut payload = Vec::with_capacity(CONTROL_CHUNK_HEADER + bytes.len());
+
+            payload.extend_from_slice(&id.to_be_bytes());
+            payload.extend_from_slice(&total.to_be_bytes());
+            payload.extend_from_slice(&((index * CONTROL_CHUNK_SIZE) as u64).to_be_bytes());
+            payload.extend_from_slice(bytes);
+
+            if !self
+                .send_bounded(Outbound::new(CONTROL_STREAM, kind::CONTROL_CHUNK, payload))
+                .await
+            {
+                return false;
+            }
+        }
+
+        true
     }
 
     #[cfg(feature = "host")]
@@ -224,6 +421,8 @@ where
                 outbound
                     .queued
                     .fetch_sub(next.payload.len(), Ordering::Relaxed);
+
+                outbound.drained.notify_waiters();
 
                 if let Some(hook) = &next.on_sent {
                     hook.sent(next.payload.len());

@@ -6,6 +6,10 @@
 //! answers only devices in the trust store. Terminals belong to the host,
 //! not to a connection: a dropped connection leaves them running.
 
+#[cfg(test)]
+#[path = "host_paging_tests.rs"]
+mod paging_tests;
+
 use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::net::{Ipv4Addr, SocketAddr, TcpListener as StdTcpListener};
@@ -39,8 +43,8 @@ use nmt_remote_core::rpc::{
 };
 use nmt_remote_core::{Error as CoreError, PROTO_MINOR};
 use parking_lot::Mutex;
-use serde::Serialize;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::UnboundedSender;
@@ -56,7 +60,7 @@ use tracing::{Instrument as _, debug, info, info_span, warn};
 use crate::direct;
 use crate::discovery::Advertiser;
 use crate::lan::lan_addresses;
-use crate::link::{Outbound, SendQueue, pump, recv_binary, send_binary};
+use crate::link::{MAX_CONTROL_TRANSFER, Outbound, SendQueue, pump, recv_binary, send_binary};
 use crate::presence::{DISCONNECT_EXPIRY, DISCONNECT_GRACE, Presence, Presences};
 use crate::push_sender::{self, Delivery};
 use crate::relay::RelaySocket;
@@ -176,6 +180,19 @@ struct State {
 type PendingAttach = (u32, String, TerminalControl, watch::Receiver<(u16, u16)>);
 
 /// Per-channel request handling.
+#[derive(Deserialize)]
+struct AgentPagedAttach {
+    session: String,
+    view_id: String,
+}
+
+#[derive(Deserialize)]
+struct AgentPageRequest {
+    session: String,
+    view_id: String,
+    cursor: Value,
+}
+
 struct Connection {
     shared: Arc<Shared>,
     queue: SendQueue,
@@ -193,6 +210,9 @@ struct Connection {
 
     /// The task forwarding each attached agent view's changes.
     agents: HashMap<String, AbortHandle>,
+
+    /// Paged view ids belong to this channel, so old requests cannot modify a replacement view.
+    paged_agents: HashMap<String, String>,
 
     /// Terminal attaches to host tabs the application has just started, by
     /// request id, to be handled again now that the session is live.
@@ -616,6 +636,8 @@ impl Connection {
                     if matches!(
                         method.as_str(),
                         rpc::AGENT_ATTACH
+                            | rpc::AGENT_ATTACH_PAGED
+                            | rpc::AGENT_PAGE
                             | rpc::AGENT_DETACH
                             | rpc::AGENT_CALL
                             | rpc::HOST_INFO
@@ -950,6 +972,8 @@ impl Connection {
             task.abort();
         }
 
+        self.paged_agents.remove(&kick.session);
+
         let notice = Control::Notification {
             method: rpc::SESSION_ENDED.into(),
             params: serde_json::json!(SessionEnded {
@@ -1184,6 +1208,202 @@ impl Connection {
                     }
                 }
             }
+            rpc::AGENT_ATTACH_PAGED => {
+                let attach = parse::<AgentPagedAttach>(params).and_then(|request| {
+                    control(&request.session).map(|control| (request, control))
+                });
+
+                let (request, control) = match attach {
+                    Ok(attach) => attach,
+                    Err(error) => return respond(&queue, id, Err(error)),
+                };
+
+                if request.view_id.is_empty() || request.view_id.len() > 128 {
+                    return respond(
+                        &queue,
+                        id,
+                        Err(RpcError::new(
+                            ErrorCode::InvalidParams,
+                            "invalid paged view id",
+                        )),
+                    );
+                }
+
+                let session = request.session;
+                let view_id = request.view_id;
+
+                let (updates, mut updates_rx) = mpsc::channel(1);
+
+                let (snapshot, view) = oneshot::channel();
+
+                if control
+                    .requests
+                    .send(AgentRequest::AttachPaged {
+                        view_id: view_id.clone(),
+                        updates,
+                        reply: snapshot,
+                    })
+                    .is_err()
+                {
+                    return respond(&queue, id, Err(RpcError::new(ErrorCode::NotFound, session)));
+                }
+
+                let forwarded = session.clone();
+                let forwarded_view = view_id.clone();
+
+                // One task sends the snapshot before processing the bounded update queue.
+                let task = tokio::spawn(async move {
+                    let outcome = match view.await {
+                        Ok(view) => reply(&AgentAttached { view }),
+                        Err(_) => Err(RpcError::new(ErrorCode::NotFound, &forwarded)),
+                    };
+
+                    let attached = outcome.is_ok();
+                    let encoded = Control::Response { id, outcome }.encode();
+
+                    if encoded.len() > MAX_CONTROL_TRANSFER {
+                        warn!(
+                            bytes = encoded.len(),
+                            "paged agent snapshot exceeds transfer limit"
+                        );
+
+                        respond(
+                            &queue,
+                            id,
+                            Err(RpcError::new(
+                                ErrorCode::InvalidParams,
+                                "The agent view exceeds the 64 MiB transfer limit. Open a smaller conversation.",
+                            )),
+                        );
+
+                        return;
+                    }
+
+                    if !queue
+                        .send_chunked_control(Outbound::new(
+                            CONTROL_STREAM,
+                            kind::CONTROL_JSON,
+                            encoded,
+                        ))
+                        .await
+                        || !attached
+                    {
+                        return;
+                    }
+
+                    while let Some(ops) = updates_rx.recv().await {
+                        let encoded = Control::Notification {
+                            method: rpc::AGENT_PAGED_OPS.into(),
+                            params: serde_json::json!(AgentOps {
+                                session: forwarded.clone(),
+                                ops
+                            }),
+                        }
+                        .encode();
+
+                        if encoded.len() > MAX_CONTROL_TRANSFER {
+                            warn!(
+                                bytes = encoded.len(),
+                                "paged agent update exceeds transfer limit"
+                            );
+
+                            let error = Control::Notification {
+                                method: rpc::AGENT_PAGED_OPS.into(),
+                                params: serde_json::json!(AgentOps {
+                                    session: forwarded.clone(),
+                                    ops: serde_json::json!({
+                                        "view_id": forwarded_view,
+                                        "type": "error",
+                                        "value": { "message": "The agent view exceeds the 64 MiB transfer limit. Open a smaller conversation." },
+                                    }),
+                                }),
+                            }.encode();
+
+                            let _ = queue
+                                .send_chunked_control(Outbound::new(
+                                    CONTROL_STREAM,
+                                    kind::CONTROL_JSON,
+                                    error,
+                                ))
+                                .await;
+
+                            break;
+                        }
+
+                        if !queue
+                            .send_chunked_control(Outbound::new(
+                                CONTROL_STREAM,
+                                kind::CONTROL_JSON,
+                                encoded,
+                            ))
+                            .await
+                        {
+                            break;
+                        }
+                    }
+                });
+
+                self.paged_agents.insert(session.clone(), view_id);
+
+                match self.agents.insert(session.clone(), task.abort_handle()) {
+                    Some(previous) => previous.abort(),
+                    None => registry.add_viewer(&session, self.viewer.clone()),
+                }
+            }
+            rpc::AGENT_PAGE => {
+                let request = parse::<AgentPageRequest>(params).and_then(|request| {
+                    control(&request.session).map(|control| (request, control))
+                });
+
+                let (request, control) = match request {
+                    Ok(request) => request,
+                    Err(error) => return respond(&queue, id, Err(error)),
+                };
+
+                if self.paged_agents.get(&request.session) != Some(&request.view_id)
+                    || !self
+                        .agents
+                        .get(&request.session)
+                        .is_some_and(|task| !task.is_finished())
+                {
+                    return respond(
+                        &queue,
+                        id,
+                        Err(RpcError::new(
+                            ErrorCode::Denied,
+                            "the paged view is no longer attached to this channel",
+                        )),
+                    );
+                }
+
+                let (reply, answer) = oneshot::channel();
+
+                if control
+                    .requests
+                    .send(AgentRequest::Page {
+                        view_id: request.view_id,
+                        cursor: request.cursor,
+                        reply,
+                    })
+                    .is_err()
+                {
+                    return respond(
+                        &queue,
+                        id,
+                        Err(RpcError::new(ErrorCode::NotFound, request.session)),
+                    );
+                }
+
+                tokio::spawn(async move {
+                    let outcome = match answer.await {
+                        Ok(Ok(value)) => Ok(value),
+                        Ok(Err(message)) => Err(RpcError::new(ErrorCode::InvalidParams, message)),
+                        Err(_) => Err(RpcError::new(ErrorCode::NotFound, "the agent view closed")),
+                    };
+
+                    respond(&queue, id, outcome);
+                });
+            }
             rpc::AGENT_ATTACH => {
                 let attach = parse::<SessionRef>(params).and_then(|SessionRef { session }| {
                     control(&session).map(|control| (session, control))
@@ -1193,6 +1413,8 @@ impl Connection {
                     Ok(attach) => attach,
                     Err(error) => return respond(&queue, id, Err(error)),
                 };
+
+                self.paged_agents.remove(&session);
 
                 let (updates, mut updates_rx) = mpsc::unbounded_channel();
 
@@ -1255,13 +1477,15 @@ impl Connection {
             }
             rpc::AGENT_DETACH => {
                 let outcome = parse::<SessionRef>(params).map(|SessionRef { session }| {
+                    self.paged_agents.remove(&session);
+
                     if let Some(task) = self.agents.remove(&session) {
                         task.abort();
 
                         registry.remove_viewer(&session, &self.viewer.key);
                     }
 
-                    Value::Null
+                    done()
                 });
 
                 respond(&queue, id, outcome);
@@ -1782,6 +2006,7 @@ where
         next_stream: 1,
         pending_attach: None,
         agents: HashMap::new(),
+        paged_agents: HashMap::new(),
         started,
     };
 

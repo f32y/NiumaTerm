@@ -26,7 +26,7 @@ use nmt_agent::session::input::{QuestionCompletion, QuestionKey};
 use nmt_agent::session::lifecycle::Status as SessionStatus;
 use nmt_agent::session::restore::{ResumeStart, SettingsSeed};
 use nmt_agent::session::view::{
-    AgentView, IMAGE_METHOD, ImageData, ImageRef, ViewOp, ViewPublisher, ViewSlot,
+    AgentView, IMAGE_METHOD, ImageData, ImageRef, ViewCursor, ViewOp, ViewPublisher, ViewSlot,
 };
 use nmt_agent::transcript::conversation::ConversationImage;
 use nmt_config::profile::AgentProfile;
@@ -37,7 +37,7 @@ use nmt_remote_core::rpc::EndReason;
 use rust_i18n::t;
 use serde_json::Value;
 use tokio::sync::mpsc::error::TryRecvError;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{Sender, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
 use tracing::warn;
 use uuid::Uuid;
@@ -53,6 +53,12 @@ use crate::agent_tab::{AgentPane, AgentPaneEvent};
 /// command's own result goes out at once.
 const PUBLISH_INTERVAL: Duration = Duration::from_millis(100);
 
+struct PagedView {
+    id: String,
+    publisher: ViewPublisher,
+    updates: Sender<Value>,
+}
+
 /// Answer paired devices' requests for one host agent tab until the tab
 /// closes or the registry lets go of it.
 pub fn serve(
@@ -63,11 +69,12 @@ pub fn serve(
     cx.spawn(async move |cx| {
         let mut publisher = ViewPublisher::default();
         let mut views: Vec<UnboundedSender<Value>> = Vec::new();
+        let mut paged_views: Vec<PagedView> = Vec::new();
 
         loop {
             // With nobody watching there is nothing to publish, so the task
             // sleeps until a device asks for something.
-            let first = if views.is_empty() {
+            let first = if views.is_empty() && paged_views.is_empty() {
                 match requests.recv().await {
                     Some(request) => Some(request),
                     None => break,
@@ -84,14 +91,29 @@ pub fn serve(
 
             let served = session.update(cx, |session, cx| {
                 if let Some(request) = first {
-                    answer(session, request, &mut publisher, &mut views, cx);
+                    answer(
+                        session,
+                        request,
+                        &mut publisher,
+                        &mut views,
+                        &mut paged_views,
+                        cx,
+                    );
                 }
 
                 while let Ok(request) = requests.try_recv() {
-                    answer(session, request, &mut publisher, &mut views, cx);
+                    answer(
+                        session,
+                        request,
+                        &mut publisher,
+                        &mut views,
+                        &mut paged_views,
+                        cx,
+                    );
                 }
 
                 publish(session, &mut publisher, &mut views);
+                publish_paged(session, &mut paged_views);
             });
 
             if served.is_err() {
@@ -106,9 +128,44 @@ fn answer(
     request: AgentRequest,
     publisher: &mut ViewPublisher,
     views: &mut Vec<UnboundedSender<Value>>,
+    paged_views: &mut Vec<PagedView>,
     cx: &mut Context<AgentSession>,
 ) {
     match request {
+        AgentRequest::AttachPaged {
+            view_id,
+            updates,
+            reply,
+        } => {
+            let mut publisher = ViewPublisher::default();
+
+            let snapshot = publisher.snapshot_paged(&session.controller.borrow());
+
+            let event = serde_json::json!({
+                "view_id": view_id,
+                "type": "snapshot",
+                "value": snapshot,
+            });
+
+            if reply.send(event).is_ok() {
+                paged_views.retain(|view| !view.updates.is_closed() && view.id != view_id);
+
+                paged_views.push(PagedView {
+                    id: view_id,
+                    publisher,
+                    updates,
+                });
+            }
+        }
+        AgentRequest::Page {
+            view_id,
+            cursor,
+            reply,
+        } => {
+            let outcome = publish_earlier_page(session, paged_views, &view_id, cursor);
+
+            let _ = reply.send(outcome);
+        }
         AgentRequest::Attach { updates, reply } => {
             // Views already attached catch up first, so the snapshot and
             // the changes after it share one baseline.
@@ -370,6 +427,72 @@ fn take_history_step(
                     Err(t!("agent-remote-resume-elsewhere", cwd = cwd).into_owned())
                 }
             }
+        }
+    }
+}
+
+fn publish_earlier_page(
+    session: &AgentSession,
+    views: &mut [PagedView],
+    view_id: &str,
+    cursor: Value,
+) -> Result<Value, String> {
+    let view = views
+        .iter_mut()
+        .find(|view| view.id == view_id)
+        .ok_or_else(|| "the transcript view is no longer attached".to_owned())?;
+
+    let permit = view
+        .updates
+        .try_reserve()
+        .map_err(|_| "the transcript view is catching up; retry loading history".to_owned())?;
+
+    let cursor = serde_json::from_value::<ViewCursor>(cursor).map_err(|error| error.to_string())?;
+
+    let controller = session.controller.borrow();
+    let catch_up = view.publisher.changes_paged(&controller);
+
+    let page = match view.publisher.earlier_paged(&controller, cursor) {
+        Ok(page) => page,
+        Err(error) => {
+            if let Some(update) = catch_up {
+                permit.send(serde_json::json!({
+                    "view_id": view_id,
+                    "type": "update",
+                    "value": update,
+                }));
+            }
+
+            return Err(error.to_owned());
+        }
+    };
+
+    permit.send(serde_json::json!({
+        "view_id": view_id,
+        "type": "page",
+        "catch_up": catch_up,
+        "value": page,
+    }));
+
+    Ok(serde_json::json!({}))
+}
+
+fn publish_paged(session: &AgentSession, views: &mut Vec<PagedView>) {
+    views.retain(|view| !view.updates.is_closed());
+
+    for view in views {
+        // A slow transfer keeps one pending update. The publisher version only
+        // advances after capacity is reserved, so later changes include it.
+        let Ok(permit) = view.updates.try_reserve() else {
+            continue;
+        };
+
+        if let Some(update) = view.publisher.changes_paged(&session.controller.borrow()) {
+            permit.send(serde_json::json!({
+                "view_id": view.id,
+                "type": "update",
+                "value": update,
+            }));
         }
     }
 }
@@ -644,6 +767,23 @@ fn follow(
                     serde_json::from_value::<AgentView>(view).map(AgentView::into_ops)
                 }
                 AgentUpdate::Ops(ops) => serde_json::from_value::<Vec<ViewOp>>(ops),
+                AgentUpdate::Paged(_) => {
+                    warn!("ignoring a paged update on a legacy agent view");
+
+                    continue;
+                }
+                AgentUpdate::Error(message) => {
+                    let _ = session.update(cx, |session, cx| {
+                        session
+                            .controller
+                            .borrow_mut()
+                            .push_item(Item::Error { text: message });
+
+                        session.publish(SessionEffect::Changed, cx);
+                    });
+
+                    break;
+                }
                 AgentUpdate::Ended => {
                     let _ = session.update(cx, |session, cx| {
                         session.controller.borrow_mut().push_item(Item::Error {

@@ -15,6 +15,10 @@
 //! also tries a direct path through both NATs, signaled over the relay link
 //! itself, and moves to that when it opens.
 
+#[cfg(test)]
+#[path = "connection_paging_tests.rs"]
+mod paging_tests;
+
 use std::collections::HashMap;
 use std::mem;
 use std::sync::Arc;
@@ -47,7 +51,7 @@ use tokio::time::{Instant, sleep, sleep_until, timeout};
 use tracing::{Instrument as _, info, info_span, warn};
 
 use crate::client::{LinkPath, PathPolicy, Refused, establish, establish_direct, establish_lan};
-use crate::link::{BoxSocket, Outbound, SendQueue, pump};
+use crate::link::{BoxSocket, ControlChunks, Outbound, SendQueue, pump};
 use crate::network_pty::NetworkPty;
 use crate::store::PairedHost;
 use crate::{direct, netwatch};
@@ -129,6 +133,9 @@ pub enum AgentUpdate {
     /// and after every reconnect.
     Snapshot(Value),
     Ops(Value),
+    /// A versioned bounded snapshot, earlier page, or live window update.
+    Paged(Value),
+    Error(String),
     /// The session is gone, or this device no longer reaches the host.
     Ended,
 }
@@ -137,11 +144,44 @@ pub enum AgentUpdate {
 pub struct AgentLink {
     host: Arc<RemoteHost>,
     session: String,
+    updates: UnboundedSender<AgentUpdate>,
 }
 
 impl AgentLink {
     pub fn session(&self) -> &str {
         &self.session
+    }
+
+    pub async fn load_earlier(&self, cursor: Value) -> Result<()> {
+        let view_id = {
+            let agents = self.host.agents.lock();
+
+            if !agents
+                .get(&self.session)
+                .is_some_and(|updates| updates.same_channel(&self.updates))
+            {
+                return Err(anyhow!("the paged view was replaced"));
+            }
+
+            self.host
+                .paged_agents
+                .lock()
+                .get(&self.session)
+                .cloned()
+                .ok_or_else(|| anyhow!("the paged view is no longer attached"))?
+        };
+
+        let _: Value = self
+            .host
+            .call(
+                rpc::AGENT_PAGE,
+                &serde_json::json!({
+                    "session": self.session, "view_id": view_id, "cursor": cursor,
+                }),
+            )
+            .await?;
+
+        Ok(())
     }
 
     /// Run a command against the session and return its outcome.
@@ -161,7 +201,7 @@ impl AgentLink {
 
 impl Drop for AgentLink {
     fn drop(&mut self) {
-        self.host.detach_agent(&self.session);
+        self.host.detach_agent(&self.session, &self.updates);
     }
 }
 
@@ -189,6 +229,7 @@ pub struct RemoteHost {
     link: Mutex<Option<Link>>,
     views: Mutex<HashMap<String, View>>,
     agents: Mutex<HashMap<String, UnboundedSender<AgentUpdate>>>,
+    paged_agents: Mutex<HashMap<String, String>>,
     status: watch::Sender<Status>,
 
     /// Bumped when the host reports its session list changed.
@@ -252,6 +293,7 @@ struct Link {
     queue: SendQueue,
     calls: Arc<Mutex<HashMap<u64, PendingCall>>>,
     streams: Arc<Mutex<HashMap<u32, String>>>,
+    chunks: Arc<Mutex<ControlChunks>>,
 }
 
 struct PendingCall {
@@ -266,6 +308,7 @@ struct PendingCall {
 enum Attach {
     Terminal(String),
     Agent(String),
+    PagedAgent(String, String),
 }
 
 struct View {
@@ -296,7 +339,22 @@ impl RemoteHost {
         retry: Retry,
         on_record: impl Fn(PairedHost) + Send + Sync + 'static,
     ) -> Arc<Self> {
-        let host = Arc::new(Self {
+        let host = Self::unstarted(record, key, app_version, retry, on_record);
+        let task = runtime().spawn(Arc::clone(&host).supervise());
+
+        *host.supervisor.lock() = Some(task.abort_handle());
+
+        host
+    }
+
+    fn unstarted(
+        record: PairedHost,
+        key: Arc<DeviceKey>,
+        app_version: String,
+        retry: Retry,
+        on_record: impl Fn(PairedHost) + Send + Sync + 'static,
+    ) -> Arc<Self> {
+        Arc::new(Self {
             id: record.id.clone(),
             key,
             app_version,
@@ -306,6 +364,7 @@ impl RemoteHost {
             link: Mutex::new(None),
             views: Mutex::new(HashMap::new()),
             agents: Mutex::new(HashMap::new()),
+            paged_agents: Mutex::new(HashMap::new()),
             status: watch::channel(Status::Idle).0,
             sessions: watch::channel(0).0,
             ended: Mutex::new(HashMap::new()),
@@ -317,13 +376,7 @@ impl RemoteHost {
             path: Mutex::new(None),
             policy: watch::channel(PathPolicy::Auto).0,
             stun_servers: Mutex::new(Vec::new()),
-        });
-
-        let task = runtime().spawn(Arc::clone(&host).supervise());
-
-        *host.supervisor.lock() = Some(task.abort_handle());
-
-        host
+        })
     }
 
     pub fn id(&self) -> &DeviceId {
@@ -402,7 +455,9 @@ impl RemoteHost {
             self.attach(&link, session.to_owned());
         }
 
-        if self.agents.lock().contains_key(session) {
+        let has_agent = self.agents.lock().contains_key(session);
+
+        if has_agent {
             self.attach_agent(&link, session.to_owned());
         }
     }
@@ -464,11 +519,32 @@ impl RemoteHost {
         self: &Arc<Self>,
         session: String,
     ) -> (AgentLink, UnboundedReceiver<AgentUpdate>) {
+        self.agent_view_with_mode(session, false)
+    }
+
+    fn agent_view_with_mode(
+        self: &Arc<Self>,
+        session: String,
+        paged: bool,
+    ) -> (AgentLink, UnboundedReceiver<AgentUpdate>) {
         let (updates, updates_rx) = mpsc::unbounded_channel();
 
-        self.agents.lock().insert(session.clone(), updates);
+        {
+            let mut agents = self.agents.lock();
+            let mut paged_agents = self.paged_agents.lock();
 
-        if let Some(link) = self.link.lock().clone() {
+            agents.insert(session.clone(), updates.clone());
+
+            if paged {
+                paged_agents.insert(session.clone(), String::new());
+            } else {
+                paged_agents.remove(&session);
+            }
+        }
+
+        let current_link = self.link.lock().clone();
+
+        if let Some(link) = current_link {
             self.attach_agent(&link, session.clone());
         } else {
             self.wake.notify_one();
@@ -477,16 +553,42 @@ impl RemoteHost {
         let link = AgentLink {
             host: Arc::clone(self),
             session,
+            updates,
         };
 
         (link, updates_rx)
     }
 
-    fn detach_agent(&self, session: &str) {
-        self.ended.lock().remove(session);
+    /// Attach a bounded transcript view, requiring paging support on the host.
+    pub fn agent_view_paged(
+        self: &Arc<Self>,
+        session: String,
+    ) -> (AgentLink, UnboundedReceiver<AgentUpdate>) {
+        self.agent_view_with_mode(session, true)
+    }
 
-        if self.agents.lock().remove(session).is_some() {
-            self.notify(
+    fn detach_agent(&self, session: &str, updates: &UnboundedSender<AgentUpdate>) {
+        let link = self.link.lock().clone();
+
+        let mut agents = self.agents.lock();
+
+        if !agents
+            .get(session)
+            .is_some_and(|current| current.same_channel(updates))
+        {
+            return;
+        }
+
+        self.ended.lock().remove(session);
+        self.paged_agents.lock().remove(session);
+        agents.remove(session);
+
+        if let Some(link) = link {
+            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+
+            let _ = send_request(
+                &link,
+                id,
                 rpc::AGENT_DETACH,
                 &SessionRef {
                     session: session.to_owned(),
@@ -498,6 +600,27 @@ impl RemoteHost {
     fn attach_agent(self: &Arc<Self>, link: &Link, session: String) {
         let host = Arc::clone(self);
         let link = link.clone();
+        let paged = self.paged_agents.lock().contains_key(&session);
+
+        let mut view_nonce = [0_u8; 16];
+
+        if let Err(error) = fill(&mut view_nonce) {
+            if let Some(agent) = self.agents.lock().get(&session) {
+                let _ = agent.send(AgentUpdate::Error(format!(
+                    "Cannot create an agent view identifier: {error}"
+                )));
+            }
+
+            return;
+        }
+
+        let view_id = format!("{:032x}", u128::from_le_bytes(view_nonce));
+
+        if paged {
+            self.paged_agents
+                .lock()
+                .insert(session.clone(), view_id.clone());
+        }
 
         runtime().spawn(async move {
             let (reply, response) = oneshot::channel();
@@ -507,25 +630,45 @@ impl RemoteHost {
                 id,
                 PendingCall {
                     reply,
-                    attach: Some(Attach::Agent(session.clone())),
+                    attach: Some(if paged {
+                        Attach::PagedAgent(session.clone(), view_id.clone())
+                    } else {
+                        Attach::Agent(session.clone())
+                    }),
                 },
             );
 
-            let request = SessionRef {
-                session: session.clone(),
+            let request = serde_json::json!({ "session": session, "view_id": view_id });
+
+            let method = if paged {
+                rpc::AGENT_ATTACH_PAGED
+            } else {
+                rpc::AGENT_ATTACH
             };
 
-            if send_request(&link, id, rpc::AGENT_ATTACH, &request).is_err() {
+            if send_request(&link, id, method, &request).is_err() {
                 return;
             }
 
             // A session that ended while this view was away is over; the
             // view stays open to say so.
-            if let Ok(Err(error)) = response.await
-                && error.code == ErrorCode::NotFound
-                && host.agents.lock().contains_key(&session)
-            {
-                host.end_view(&session, EndReason::Closed);
+            if let Ok(Err(error)) = response.await {
+                let current_view = host.paged_agents.lock().get(&session).cloned();
+
+                if error.code == ErrorCode::NotFound && host.agents.lock().contains_key(&session) {
+                    host.end_view(&session, EndReason::Closed);
+                } else if paged
+                    && current_view.as_ref() == Some(&view_id)
+                    && let Some(agent) = host.agents.lock().get(&session)
+                {
+                    let message = if error.code == ErrorCode::Unsupported {
+                        "Update NiumaTerm on the computer to load paged conversations.".to_owned()
+                    } else {
+                        error.message.clone()
+                    };
+
+                    let _ = agent.send(AgentUpdate::Error(message));
+                }
             }
         });
     }
@@ -1000,6 +1143,7 @@ impl RemoteHost {
                 queue,
                 calls: Arc::default(),
                 streams: Arc::default(),
+                chunks: Arc::default(),
             };
 
             let probe = Arc::new(Notify::new());
@@ -1391,6 +1535,25 @@ impl RemoteHost {
     }
 
     fn route(&self, link: &Link, message: FrameMessage) {
+        if message.stream == CONTROL_STREAM && message.kind == kind::CONTROL_CHUNK {
+            let result = link.chunks.lock().push(&message.payload);
+
+            match result {
+                Ok(Some(payload)) => self.route(
+                    link,
+                    FrameMessage {
+                        stream: CONTROL_STREAM,
+                        kind: kind::CONTROL_JSON,
+                        payload,
+                    },
+                ),
+                Ok(None) => {}
+                Err(error) => warn!(%error, "invalid paged control fragments"),
+            }
+
+            return;
+        }
+
         match (message.stream, message.kind) {
             (CONTROL_STREAM, kind::CONTROL_JSON) => match Control::decode(&message.payload) {
                 Ok(Control::Response { id, outcome }) => {
@@ -1404,6 +1567,20 @@ impl RemoteHost {
                         && let Some(agent) = self.agents.lock().get(session)
                     {
                         let _ = agent.send(AgentUpdate::Snapshot(view));
+                    }
+
+                    if let (Ok(result), Some(Attach::PagedAgent(session, view_id))) =
+                        (&outcome, &call.attach)
+                    {
+                        let agents = self.agents.lock();
+
+                        if self.paged_agents.lock().get(session) == Some(view_id)
+                            && let Ok(AgentAttached { view }) =
+                                serde_json::from_value::<AgentAttached>(result.clone())
+                            && let Some(agent) = agents.get(session)
+                        {
+                            let _ = agent.send(AgentUpdate::Paged(view));
+                        }
                     }
 
                     if let (Ok(result), Some(Attach::Terminal(session))) = (&outcome, &call.attach)
@@ -1453,6 +1630,18 @@ impl RemoteHost {
                         && let Some(agent) = self.agents.lock().get(&session)
                     {
                         let _ = agent.send(AgentUpdate::Ops(ops));
+                    }
+                }
+                Ok(Control::Notification { method, params }) if method == rpc::AGENT_PAGED_OPS => {
+                    if let Ok(AgentOps { session, ops }) = serde_json::from_value(params) {
+                        let agents = self.agents.lock();
+
+                        if ops.get("view_id").and_then(Value::as_str)
+                            == self.paged_agents.lock().get(&session).map(String::as_str)
+                            && let Some(agent) = agents.get(&session)
+                        {
+                            let _ = agent.send(AgentUpdate::Paged(ops));
+                        }
                     }
                 }
                 _ => {}

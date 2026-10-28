@@ -12,13 +12,28 @@ struct AgentSessionView: View {
     @State private var renaming = false
     @State private var newTitle = ""
     @State private var confirmingNew = false
+    @State private var scrollPosition = ScrollPosition()
+    @State private var scrollMetrics = TranscriptScrollMetrics()
+    @State private var transcriptLayout = TranscriptLayoutSnapshot()
+    @State private var userIsScrolling = false
+    @State private var historyAnchor: TranscriptHistoryAnchor?
 
     private var linkText: String? { app.host(model.route.hostID)?.linkText }
 
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 14) {
-                if !model.attached && app.host(model.route.hostID)?.status == .unreachable {
+                if model.attached && (model.hasEarlier || model.loadingEarlier) {
+                    historyPlaceholder
+                }
+
+                if !model.attached, let message = model.state?.historyError {
+                    Text(message)
+                        .font(.system(size: 15))
+                        .foregroundStyle(Theme.attention)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 120)
+                } else if !model.attached && app.host(model.route.hostID)?.status == .unreachable {
                     VStack(spacing: 10) {
                         Text("Could not connect to \(hostName).").foregroundStyle(Theme.attention)
 
@@ -77,7 +92,7 @@ struct AgentSessionView: View {
                     WorkingRow(started: started, tokens: model.tokensText)
                 }
 
-                if let notice = model.notice {
+                if let notice = (model.attached ? model.state?.historyError : nil) ?? model.notice {
                     Text(notice)
                         .font(Theme.mono(12.5))
                         .foregroundStyle(Theme.attention)
@@ -86,9 +101,55 @@ struct AgentSessionView: View {
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 12)
+            .background {
+                GeometryReader { geometry in
+                    Color.clear.preference(key: TranscriptLayoutKey.self,
+                                           value: TranscriptLayoutSnapshot(height: geometry.size.height,
+                                                                           firstIndex: model.entries.first?.index,
+                                                                           loading: model.loadingEarlier))
+                }
+            }
         }
         .defaultScrollAnchor(.bottom, for: .initialOffset)
         .defaultScrollAnchor(.top, for: .sizeChanges)
+        .scrollPosition($scrollPosition)
+        .onScrollPhaseChange { _, phase in
+            userIsScrolling = phase == .interacting || phase == .decelerating
+        }
+        .onScrollGeometryChange(for: TranscriptScrollMetrics.self) { geometry in
+            TranscriptScrollMetrics(height: geometry.contentSize.height,
+                                    offset: geometry.contentOffset.y,
+                                    topInset: geometry.contentInsets.top)
+        } action: { previous, current in
+            scrollMetrics = current
+
+            if userIsScrolling, current.height == previous.height, var anchor = historyAnchor {
+                anchor.offset += current.offset - previous.offset
+                historyAnchor = anchor
+            }
+
+            if userIsScrolling,
+               current.offset < previous.offset,
+               current.offset + current.topInset < 120,
+               model.earlierNotice == nil,
+               model.state?.historyError == nil {
+                requestEarlier()
+            }
+        }
+        .onPreferenceChange(TranscriptLayoutKey.self) { layout in
+            transcriptLayout = layout
+
+            restoreHistoryAnchor(using: layout)
+        }
+        .onChange(of: model.loadedBlocks) { previous, current in
+            if current < previous { historyAnchor = nil }
+        }
+        .onChange(of: model.entries.first?.index) { previous, current in
+            if let previous, let current, current > previous { historyAnchor = nil }
+        }
+        .onChange(of: model.attached) { _, attached in
+            if !attached { historyAnchor = nil }
+        }
         .scrollDismissesKeyboard(.interactively)
         .background(Theme.transcriptBackground)
         .safeAreaInset(edge: .bottom) {
@@ -171,6 +232,83 @@ struct AgentSessionView: View {
                 .presentationDetents([.height(400)])
                 .interactiveDismissDisabled()
         }
+    }
+
+    private var historyPlaceholder: some View {
+        VStack(spacing: 8) {
+            if model.loadingEarlier {
+                ProgressView()
+                    .accessibilityLabel(Text("Loading earlier messages"))
+            } else {
+                Button("Load earlier messages") { requestEarlier() }
+                    .font(.system(size: 13))
+            }
+
+            if let notice = model.earlierNotice {
+                Text(notice)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.attention)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 44)
+    }
+
+    private func requestEarlier() {
+        guard model.attached, model.hasEarlier, !model.loadingEarlier,
+              historyAnchor == nil, let first = model.entries.first?.index else { return }
+
+        historyAnchor = TranscriptHistoryAnchor(height: transcriptLayout.height,
+                                               offset: scrollMetrics.offset, firstIndex: first)
+
+        Task {
+            await model.loadEarlier()
+        }
+    }
+
+    /// Keep the same content offset after prepending, including when a work
+    /// row joins the preceding page and its first-entry identifier changes.
+    private func restoreHistoryAnchor(using layout: TranscriptLayoutSnapshot) {
+        guard let anchor = historyAnchor,
+              !layout.loading else { return }
+
+        historyAnchor = nil
+
+        // Errors and range resets can finish a request without a prepend.
+        guard let first = layout.firstIndex, first < anchor.firstIndex else { return }
+
+        var transaction = Transaction()
+
+        transaction.disablesAnimations = true
+
+        withTransaction(transaction) {
+            scrollPosition.scrollTo(y: anchor.offset + layout.height - anchor.height)
+        }
+    }
+}
+
+private struct TranscriptScrollMetrics: Equatable {
+    var height: CGFloat = 0
+    var offset: CGFloat = 0
+    var topInset: CGFloat = 0
+}
+
+private struct TranscriptHistoryAnchor {
+    let height: CGFloat
+    var offset: CGFloat
+    let firstIndex: UInt32
+}
+
+private struct TranscriptLayoutSnapshot: Equatable {
+    var height: CGFloat = 0
+    var firstIndex: UInt32?
+    var loading = false
+}
+
+private struct TranscriptLayoutKey: PreferenceKey {
+    static let defaultValue = TranscriptLayoutSnapshot()
+
+    static func reduce(value: inout TranscriptLayoutSnapshot, nextValue: () -> TranscriptLayoutSnapshot) {
+        value = nextValue()
     }
 }
 

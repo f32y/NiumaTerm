@@ -21,6 +21,12 @@ pub const SESSIONS_CHANGED: &str = "sessions.changed";
 /// `agent.ops` notifications follow until the view detaches.
 pub const AGENT_ATTACH: &str = "agent.attach";
 
+/// Paged views require these methods; clients never retry with a full snapshot.
+pub const AGENT_ATTACH_PAGED: &str = "agent.attach.paged";
+
+pub const AGENT_PAGE: &str = "agent.page";
+pub const AGENT_PAGED_OPS: &str = "agent.paged_ops";
+
 pub const AGENT_DETACH: &str = "agent.detach";
 
 /// Run a command against an agent session and return its outcome.

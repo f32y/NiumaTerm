@@ -535,6 +535,10 @@ pub struct AgentState {
     pub skills: Vec<SkillRecord>,
     pub recent_sessions: Vec<RecentSession>,
     pub history_loading: bool,
+    pub older_available: bool,
+    pub loaded_blocks: u32,
+    pub loading_earlier: bool,
+    pub history_error: Option<String>,
 }
 
 pub(crate) fn agent_state(
@@ -566,6 +570,10 @@ pub(crate) fn agent_state(
             skills: Vec::new(),
             recent_sessions: Vec::new(),
             history_loading: false,
+            older_available: false,
+            loaded_blocks: 0,
+            loading_earlier: false,
+            history_error: None,
         };
     };
 
@@ -661,6 +669,10 @@ pub(crate) fn agent_state(
             })
             .collect(),
         history_loading: status.history_loading,
+        older_available: false,
+        loaded_blocks: 0,
+        loading_earlier: false,
+        history_error: None,
     }
 }
 

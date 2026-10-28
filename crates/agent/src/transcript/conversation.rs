@@ -169,6 +169,42 @@ impl ConversationState {
         Some(change)
     }
 
+    /// Ignore known in-place edits before a view's loaded range. Unknown
+    /// earlier mutations retain their reset position because indices may change.
+    pub(crate) fn changes_since_in_range(
+        &self,
+        version: (u64, u64),
+        from: usize,
+    ) -> Option<ContentChange> {
+        let mut change = self.changes_since(version)?;
+
+        if change.reset_from.is_some_and(|reset| reset < from) || version.0 != self.generation {
+            return Some(change);
+        }
+
+        change.first = self.content.entries().len();
+
+        for next in self
+            .changes
+            .iter()
+            .filter(|change| change.revision > version.1)
+        {
+            if next.first >= from || next.reset_from.is_some() {
+                change.first = change.first.min(next.first);
+            } else {
+                for &(index, _) in &next.entries {
+                    if index >= from {
+                        change.first = change.first.min(index);
+                    }
+                }
+            }
+        }
+
+        change.entries.retain(|(index, _)| *index >= from);
+
+        Some(change)
+    }
+
     pub fn changed(&mut self, first: usize, reply: Option<(usize, usize)>) {
         self.record_change(first, reply, SmallVec::new(), Some(first));
     }

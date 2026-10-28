@@ -16,7 +16,7 @@ use nmt_terminal::session::TerminalSessionConfig;
 use nmt_terminal::termio::{SessionOptions, SessionWorker, start_session};
 use parking_lot::Mutex;
 use serde_json::Value;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{Sender, UnboundedSender};
 use tokio::sync::{oneshot, watch};
 use tracing::info;
 
@@ -46,6 +46,18 @@ pub enum AgentRequest {
     Attach {
         updates: UnboundedSender<Value>,
         reply: oneshot::Sender<Value>,
+    },
+    /// Open a bounded transcript view with independent history position.
+    AttachPaged {
+        view_id: String,
+        updates: Sender<Value>,
+        reply: oneshot::Sender<Value>,
+    },
+    /// Prepend one history page to the identified view.
+    Page {
+        view_id: String,
+        cursor: Value,
+        reply: oneshot::Sender<Result<Value, String>>,
     },
     Call {
         method: String,

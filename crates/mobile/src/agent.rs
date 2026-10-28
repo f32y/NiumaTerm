@@ -3,7 +3,7 @@
 mod agent_tests;
 
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
 use nmt_agent::catalog::{SlashRefusal, SlashRoute};
@@ -25,13 +25,17 @@ use nmt_agent::session::input::{
     ApprovalOutcome, QuestionAction, QuestionDraft, QuestionStatus, Submission,
 };
 use nmt_agent::session::lifecycle::{InterruptOutcome, Status};
-use nmt_agent::session::view::{AgentView, DraftAnswers, ViewOp, ViewSlot};
+use nmt_agent::session::view::{
+    AgentView, DraftAnswers, PagedAgentUpdate, PagedAgentView, TRANSCRIPT_PAGE_SIZE,
+    TranscriptPage, ViewCursor, ViewOp, ViewSlot,
+};
 use nmt_platform::runtime;
 use nmt_remote::connection::{AgentLink, AgentUpdate, RemoteHost};
 use parking_lot::Mutex;
 use serde_json::Value;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::task::AbortHandle;
+use tokio::time::{sleep, timeout};
 use tracing::warn;
 
 use crate::commands::{bound_skill, refusal_text, route_line};
@@ -136,11 +140,17 @@ pub struct AgentHandle {
     link: Arc<AgentLink>,
     replica: Arc<Mutex<Replica>>,
     tasks: Vec<AbortHandle>,
+    observer: Arc<dyn AgentObserver>,
 }
 
 #[derive(Default)]
 struct Replica {
     view: Option<AgentView>,
+    cursor: Option<ViewCursor>,
+    view_id: Option<String>,
+    loading_earlier: bool,
+    load_epoch: u64,
+    history_error: Option<String>,
 
     /// When the running turn started, on this device's clock.
     turn_started: Option<Instant>,
@@ -150,9 +160,197 @@ struct Replica {
 }
 
 impl Replica {
+    fn begin_earlier(&mut self) -> Option<(u64, usize)> {
+        let cursor = self.cursor.filter(|cursor| cursor.start != 0)?;
+
+        if self.loading_earlier {
+            return None;
+        }
+
+        self.loading_earlier = true;
+        self.history_error = None;
+        self.load_epoch = self.load_epoch.wrapping_add(1);
+
+        Some((self.load_epoch, cursor.start))
+    }
+
+    fn finish_earlier(&mut self, epoch: u64, result: anyhow::Result<()>) -> anyhow::Result<()> {
+        if self.load_epoch != epoch || !self.loading_earlier {
+            return Ok(());
+        }
+
+        self.loading_earlier = false;
+
+        if let Err(error) = &result {
+            self.history_error = Some(error.to_string());
+        }
+
+        result
+    }
+
+    fn replace_paged(&mut self, snapshot: PagedAgentView) -> Option<usize> {
+        let count = snapshot.cursor.end.checked_sub(snapshot.cursor.start)?;
+
+        if count != snapshot.view.transcript.len() || count > TRANSCRIPT_PAGE_SIZE {
+            self.history_error = Some("The computer returned an invalid transcript page.".into());
+
+            return None;
+        }
+
+        self.turn_started = snapshot.view.slots.status.live.started.instant();
+        self.view = Some(snapshot.view);
+        self.cursor = Some(snapshot.cursor);
+        self.loading_earlier = false;
+        self.load_epoch = self.load_epoch.wrapping_add(1);
+        self.history_error = None;
+
+        Some(0)
+    }
+
+    fn apply_paged(&mut self, event: Value) -> Option<usize> {
+        let view_id = event.get("view_id")?.as_str()?;
+        let kind = event.get("type")?.as_str()?;
+        let value = event.get("value")?.clone();
+
+        if kind == "error" {
+            if self.view_id.is_some() && self.view_id.as_deref() != Some(view_id) {
+                return None;
+            }
+
+            let message = value.get("message")?.as_str()?;
+
+            self.view_id = Some(view_id.to_owned());
+            self.history_error = Some(message.to_owned());
+            self.loading_earlier = false;
+            self.load_epoch = self.load_epoch.wrapping_add(1);
+
+            return None;
+        }
+
+        if kind == "snapshot" {
+            let snapshot = serde_json::from_value::<PagedAgentView>(value).ok()?;
+            let changed = self.replace_paged(snapshot);
+
+            if changed.is_some() {
+                self.view_id = Some(view_id.to_owned());
+            }
+
+            return changed;
+        }
+
+        if self.view_id.as_deref() != Some(view_id) {
+            return None;
+        }
+
+        if kind == "page"
+            && let Some(catch_up) = event.get("catch_up").filter(|value| !value.is_null())
+        {
+            self.apply_paged(serde_json::json!({
+                "view_id": view_id, "type": "update", "value": catch_up,
+            }));
+        }
+
+        match kind {
+            "update" => {
+                let update = serde_json::from_value::<PagedAgentUpdate>(value).ok()?;
+
+                if self.cursor != Some(update.before) {
+                    return None;
+                }
+
+                if let Some(reset) = update.reset {
+                    return self.replace_paged(reset);
+                }
+
+                if update.cursor.generation != update.before.generation
+                    || update.cursor.start != update.before.start
+                    || update.cursor.revision < update.before.revision
+                    || update.cursor.loaded_blocks != update.before.loaded_blocks
+                {
+                    return None;
+                }
+
+                let view = self.view.as_mut()?;
+
+                let mut length = view.transcript.len();
+
+                for op in &update.ops {
+                    if let ViewOp::Splice { from, entries } = op {
+                        if *from > length {
+                            return None;
+                        }
+
+                        length = from.checked_add(entries.len())?;
+                    }
+                }
+
+                if update.cursor.end.checked_sub(update.cursor.start) != Some(length) {
+                    return None;
+                }
+
+                let mut from = None;
+
+                for op in update.ops {
+                    match &op {
+                        ViewOp::Splice { from: at, .. } => {
+                            from = Some(from.map_or(*at, |known: usize| known.min(*at)));
+                        }
+                        ViewOp::Slot { slot } => {
+                            if let ViewSlot::Status(status) = slot.as_ref() {
+                                self.turn_started = status.live.started.instant();
+                            }
+                        }
+                    }
+
+                    view.apply(op);
+                }
+
+                self.cursor = Some(update.cursor);
+
+                from
+            }
+            "page" => {
+                let page = serde_json::from_value::<TranscriptPage>(value).ok()?;
+
+                if self.cursor != Some(page.before)
+                    || page.cursor.generation != page.before.generation
+                    || page.cursor.revision != page.before.revision
+                    || page.cursor.end != page.before.end
+                    || page.cursor.start > page.before.start
+                    || page.before.start - page.cursor.start != page.entries.len()
+                    || page.entries.len() > TRANSCRIPT_PAGE_SIZE
+                {
+                    return None;
+                }
+
+                let view = self.view.as_mut()?;
+
+                let mut entries = page.entries;
+
+                entries.append(&mut view.transcript);
+
+                view.transcript = entries;
+                self.cursor = Some(page.cursor);
+                self.loading_earlier = false;
+                self.history_error = None;
+
+                Some(0)
+            }
+            _ => None,
+        }
+    }
+
     /// Apply one update and return the first transcript entry it changed.
     fn apply(&mut self, update: AgentUpdate) -> Option<usize> {
         match update {
+            AgentUpdate::Paged(value) => self.apply_paged(value),
+            AgentUpdate::Error(message) => {
+                self.history_error = Some(message);
+                self.loading_earlier = false;
+                self.load_epoch = self.load_epoch.wrapping_add(1);
+
+                None
+            }
             AgentUpdate::Snapshot(value) => match serde_json::from_value::<AgentView>(value) {
                 Ok(view) => {
                     self.turn_started = view.slots.status.live.started.instant();
@@ -201,6 +399,8 @@ impl Replica {
             }
             AgentUpdate::Ended => {
                 self.unreachable = true;
+                self.loading_earlier = false;
+                self.load_epoch = self.load_epoch.wrapping_add(1);
 
                 None
             }
@@ -214,7 +414,7 @@ impl AgentHandle {
         session: String,
         observer: Arc<dyn AgentObserver>,
     ) -> Arc<Self> {
-        let (link, updates) = host.agent_view(session.clone());
+        let (link, updates) = host.agent_view_paged(session.clone());
         let replica = Arc::new(Mutex::new(Replica::default()));
 
         let follow = runtime()
@@ -222,7 +422,7 @@ impl AgentHandle {
             .abort_handle();
 
         let ended = runtime()
-            .spawn(watch_ended(Arc::clone(&host), observer))
+            .spawn(watch_ended(Arc::clone(&host), Arc::clone(&observer)))
             .abort_handle();
 
         Arc::new(Self {
@@ -230,6 +430,7 @@ impl AgentHandle {
             link: Arc::new(link),
             replica,
             tasks: vec![follow, ended],
+            observer,
         })
     }
 
@@ -413,7 +614,12 @@ impl AgentHandle {
             .iter()
             .enumerate()
             .skip(from as usize)
-            .map(|(index, entry)| agent_entry(index, entry))
+            .map(|(index, entry)| {
+                agent_entry(
+                    replica.cursor.map_or(0, |cursor| cursor.start) + index,
+                    entry,
+                )
+            })
             .collect()
     }
 
@@ -425,7 +631,105 @@ impl AgentHandle {
             (false, reason) => reason.map(ViewEnd::from),
         };
 
-        agent_state(replica.view.as_ref(), replica.turn_started, ended)
+        let mut state = agent_state(replica.view.as_ref(), replica.turn_started, ended);
+
+        state.older_available = replica.cursor.is_some_and(|cursor| cursor.start != 0);
+        state.loaded_blocks = replica.cursor.map_or(0, |cursor| cursor.loaded_blocks);
+        state.loading_earlier = replica.loading_earlier;
+        state.history_error = replica.history_error.clone();
+
+        state
+    }
+
+    /// Fetch one earlier transcript page while retaining the current viewport.
+    pub async fn load_earlier(&self) -> Result<(), CoreError> {
+        let Some(request) = self.replica.lock().begin_earlier() else {
+            return Ok(());
+        };
+
+        self.observer.changed(None);
+
+        let replica = Arc::clone(&self.replica);
+        let link = Arc::clone(&self.link);
+        let observer = Arc::clone(&self.observer);
+
+        runtime()
+            .spawn(async move {
+                let deadline = Instant::now() + Duration::from_secs(30);
+
+                let mut attempts = 0;
+
+                let result = loop {
+                    let cursor = {
+                        let replica = replica.lock();
+
+                        if replica.load_epoch != request.0 || !replica.loading_earlier {
+                            break Ok(());
+                        }
+
+                        match replica.cursor {
+                            Some(cursor) if cursor.start == request.1 => cursor,
+                            _ => break Ok(()),
+                        }
+                    };
+
+                    attempts += 1;
+
+                    let remaining = deadline.saturating_duration_since(Instant::now());
+
+                    let sent =
+                        timeout(remaining, link.load_earlier(serde_json::to_value(cursor)?)).await;
+
+                    match sent {
+                        Ok(Ok(())) => break Ok(()),
+                        Ok(Err(error))
+                            if attempts < 3
+                                && (error.to_string().contains("catching up")
+                                    || error.to_string().contains("range changed")) =>
+                        {
+                            sleep(Duration::from_millis(200)).await;
+                        }
+                        Ok(Err(error)) => break Err(error),
+                        Err(_) => {
+                            break Err(anyhow!(
+                                "Loading earlier messages timed out. Please retry."
+                            ));
+                        }
+                    }
+                };
+
+                let result = match result {
+                    Ok(()) => loop {
+                        let pending = {
+                            let replica = replica.lock();
+
+                            replica.load_epoch == request.0 && replica.loading_earlier
+                        };
+
+                        if !pending {
+                            break Ok(());
+                        }
+
+                        if Instant::now() >= deadline {
+                            break Err(anyhow!(
+                                "Loading earlier messages timed out. Please retry."
+                            ));
+                        }
+
+                        sleep(Duration::from_millis(25)).await;
+                    },
+                    error => error,
+                };
+
+                let result = replica.lock().finish_earlier(request.0, result);
+
+                observer.changed(None);
+
+                result
+            })
+            .await??;
+
+        Ok(())
     }
 
     /// Take the session back after the person at the host took it.

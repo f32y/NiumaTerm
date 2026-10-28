@@ -20,6 +20,10 @@ pub mod kind {
     pub const PING: u8 = 0x02;
 
     pub const PONG: u8 = 0x03;
+
+    /// Bounded fragments of a paged agent control response or update.
+    pub const CONTROL_CHUNK: u8 = 0x04;
+
     pub const CHECKPOINT: u8 = 0x10;
     pub const OUTPUT: u8 = 0x11;
     pub const INPUT: u8 = 0x12;

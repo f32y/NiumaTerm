@@ -1797,12 +1797,17 @@ impl SessionController {
 
     /// The transcript from entry `from` on, with images by reference.
     pub(crate) fn transcript_view(&self, from: usize) -> Vec<ViewEntry> {
+        self.transcript_view_range(from, usize::MAX)
+    }
+
+    /// Project a bounded transcript range without loading earlier entries.
+    pub(crate) fn transcript_view_range(&self, from: usize, end: usize) -> Vec<ViewEntry> {
         let conversation = self.conversation.borrow();
 
         conversation
             .content
             .entries()
-            .get(from..)
+            .get(from..end.min(conversation.content.entries().len()))
             .unwrap_or_default()
             .iter()
             .map(|entry| ViewEntry {

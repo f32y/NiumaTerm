@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::env;
 use std::future::poll_fn;
 use std::sync::Arc;
@@ -12,10 +13,10 @@ use nmt_remote_core::identity::DeviceKey;
 use nmt_remote_core::messages::{DeviceInfo, DeviceKind, RelayAccess};
 use nmt_remote_core::pairing::PairingCode;
 use nmt_remote_core::push::{PushEnvironment, PushKind, PushRegistration};
-use nmt_remote_core::rpc::{EndReason, Origin, SessionInfo, SessionKind};
+use nmt_remote_core::rpc::{self, EndReason, Origin, SessionInfo, SessionKind};
 use nmt_terminal::event::VoidListener;
 use nmt_terminal::termio::{SessionHandles, SessionOptions, start_session};
-use serde_json::json;
+use serde_json::{Value, json};
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 use tokio::time::{Instant, sleep, timeout};
 
@@ -23,6 +24,7 @@ use crate::client::{LinkPath, PathPolicy, pair};
 use crate::connection::{AgentUpdate, RemoteHost, Retry, Status};
 use crate::host::{HostConfig, HostService};
 use crate::lan::lan_addresses;
+use crate::link::MAX_CONTROL_TRANSFER;
 use crate::local_view;
 use crate::netwatch::notify_changed as notify_network_changed;
 use crate::network_pty::NetworkPty;
@@ -815,6 +817,12 @@ fn fake_agent(registry: &SessionRegistry) -> String {
                     let _ = reply.send(json!({ "snapshot": attached }));
                     let _ = updates.send(json!({ "change": attached }));
                 }
+                AgentRequest::AttachPaged { reply, .. } => {
+                    drop(reply);
+                }
+                AgentRequest::Page { reply, .. } => {
+                    let _ = reply.send(Err("this test agent does not support paged views".into()));
+                }
                 AgentRequest::Call {
                     method,
                     params,
@@ -843,6 +851,270 @@ async fn next_update(updates: &mut UnboundedReceiver<AgentUpdate>) -> AgentUpdat
         .await
         .expect("an agent update arrives")
         .expect("the agent view stays open")
+}
+
+/// Synthetic payloads exercise the real encrypted transport without reading conversations.
+fn fake_paged_agent(
+    registry: &SessionRegistry,
+    snapshot_bytes: usize,
+    update_bytes: usize,
+) -> String {
+    let (requests, mut requests_rx) = mpsc::unbounded_channel();
+
+    runtime().spawn(async move {
+        let mut attached = 0;
+        let mut views = HashMap::new();
+
+        while let Some(request) = requests_rx.recv().await {
+            match request {
+                AgentRequest::AttachPaged { view_id, updates, reply } => {
+                    attached += 1;
+
+                    let _ = reply.send(json!({
+                        "view_id": view_id, "type": "snapshot",
+                        "value": { "attach": attached, "body": "x".repeat(snapshot_bytes) },
+                    }));
+
+                    let _ = updates.send(json!({
+                        "view_id": view_id, "type": "update",
+                        "value": { "sequence": 1, "body": "y".repeat(update_bytes) },
+                    })).await;
+
+                    views.insert(view_id, updates);
+                }
+                AgentRequest::Page { view_id, cursor, reply } => {
+                    let outcome = if let Some(updates) = views.get(&view_id) {
+                        updates.send(json!({
+                            "view_id": view_id, "type": "page",
+                            "value": { "requested": cursor, "entries": ["earlier synthetic entry"] },
+                        })).await.map(|()| json!({})).map_err(|_| "view closed".to_owned())
+                    } else {
+                        Err("view not attached".to_owned())
+                    };
+
+                    let _ = reply.send(outcome);
+                }
+                AgentRequest::Attach { reply, .. } => drop(reply),
+                AgentRequest::Call { reply, .. } => {
+                    let _ = reply.send(Ok(json!({})));
+                }
+            }
+        }
+    });
+
+    let session = "a-paged-test".to_owned();
+
+    registry.register_agent(
+        session.clone(),
+        "Paged agent".into(),
+        "Test".into(),
+        AgentControl { requests },
+    );
+
+    session
+}
+
+async fn next_paged_update(updates: &mut UnboundedReceiver<AgentUpdate>) -> Value {
+    match next_update(updates).await {
+        AgentUpdate::Paged(value) => value,
+        _ => panic!("expected a paged event"),
+    }
+}
+
+#[test]
+fn paged_agent_large_snapshot_and_update_keep_order_and_load_an_earlier_page() {
+    let host_dir = tempfile::tempdir().unwrap();
+    let registry = SessionRegistry::new();
+    let host = start_host(&host_dir, Arc::clone(&registry));
+    let bytes = 9 * 1024 * 1024;
+    let session = fake_paged_agent(&registry, bytes, bytes);
+
+    runtime().block_on(async {
+        let (paired, key) = paired_client(&host).await;
+        let remote = remote(paired, key);
+
+        let (link, mut updates) = remote.agent_view_paged(session.clone());
+
+        let snapshot = next_paged_update(&mut updates).await;
+
+        assert_eq!(snapshot["type"], "snapshot");
+        assert_eq!(snapshot["value"]["body"].as_str().unwrap().len(), bytes);
+
+        let view_id = snapshot["view_id"].as_str().unwrap().to_owned();
+
+        drop(snapshot);
+
+        let update = next_paged_update(&mut updates).await;
+
+        assert_eq!(update["type"], "update");
+        assert_eq!(update["value"]["body"].as_str().unwrap().len(), bytes);
+
+        drop(update);
+
+        let cursor = json!({ "start": 40, "revision": 2 });
+
+        link.load_earlier(cursor.clone()).await.unwrap();
+
+        let page = next_paged_update(&mut updates).await;
+
+        assert_eq!(page["type"], "page");
+        assert_eq!(page["view_id"], view_id);
+        assert_eq!(page["value"]["requested"], cursor);
+        assert_eq!(page["value"]["entries"].as_array().unwrap().len(), 1);
+        assert!(
+            remote
+                .list_sessions()
+                .await
+                .unwrap()
+                .iter()
+                .any(|entry| entry.session == session)
+        );
+
+        let error = remote
+            .call::<Value>(
+                rpc::AGENT_PAGE,
+                &json!({
+                    "session": session, "view_id": "stale-view", "cursor": {},
+                }),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("no longer attached"));
+
+        drop(link);
+    });
+}
+
+#[test]
+fn paged_agent_reattaches_with_fresh_view_ids_after_a_drop_and_detach() {
+    let host_dir = tempfile::tempdir().unwrap();
+    let registry = SessionRegistry::new();
+    let host = start_host(&host_dir, Arc::clone(&registry));
+    let session = fake_paged_agent(&registry, 1, 1);
+
+    runtime().block_on(async {
+        let (paired, key) = paired_client(&host).await;
+        let remote = remote(paired, key);
+
+        let (link, mut updates) = remote.agent_view_paged(session.clone());
+
+        let first = next_paged_update(&mut updates).await;
+        let first_id = first["view_id"].as_str().unwrap().to_owned();
+
+        assert_eq!(first["type"], "snapshot");
+        assert_eq!(next_paged_update(&mut updates).await["type"], "update");
+
+        host.drop_connections();
+
+        let second = next_paged_update(&mut updates).await;
+        let second_id = second["view_id"].as_str().unwrap().to_owned();
+
+        assert_eq!(second["type"], "snapshot");
+        assert_ne!(first_id, second_id);
+        assert_eq!(second["value"]["attach"], 2);
+        assert_eq!(next_paged_update(&mut updates).await["type"], "update");
+
+        let error = remote
+            .call::<Value>(
+                rpc::AGENT_PAGE,
+                &json!({
+                    "session": session, "view_id": first_id, "cursor": {},
+                }),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("no longer attached"));
+
+        drop(link);
+
+        timeout(WAIT, async {
+            while !registry.viewers(&session).is_empty() {
+                sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap();
+
+        let (reopened, mut reopened_updates) = remote.agent_view_paged(session.clone());
+
+        let third = next_paged_update(&mut reopened_updates).await;
+
+        assert_eq!(third["type"], "snapshot");
+        assert_ne!(third["view_id"].as_str().unwrap(), second_id);
+        assert_eq!(third["value"]["attach"], 3);
+
+        drop(reopened);
+    });
+}
+
+#[test]
+fn paged_agent_oversized_snapshot_is_an_explicit_error_without_closing_the_host_link() {
+    let host_dir = tempfile::tempdir().unwrap();
+    let registry = SessionRegistry::new();
+    let host = start_host(&host_dir, Arc::clone(&registry));
+    let session = fake_paged_agent(&registry, MAX_CONTROL_TRANSFER, 0);
+
+    runtime().block_on(async {
+        let (paired, key) = paired_client(&host).await;
+        let remote = remote(paired, key);
+
+        let (link, mut updates) = remote.agent_view_paged(session.clone());
+
+        match next_update(&mut updates).await {
+            AgentUpdate::Error(message) => assert!(message.contains("64 MiB")),
+            _ => panic!("expected an explicit oversized snapshot error"),
+        }
+
+        assert!(
+            remote
+                .list_sessions()
+                .await
+                .unwrap()
+                .iter()
+                .any(|entry| entry.session == session)
+        );
+
+        drop(link);
+    });
+}
+
+#[test]
+fn paged_agent_oversized_live_update_is_an_explicit_error_without_closing_the_host_link() {
+    let host_dir = tempfile::tempdir().unwrap();
+    let registry = SessionRegistry::new();
+    let host = start_host(&host_dir, Arc::clone(&registry));
+    let session = fake_paged_agent(&registry, 1, MAX_CONTROL_TRANSFER);
+
+    runtime().block_on(async {
+        let (paired, key) = paired_client(&host).await;
+        let remote = remote(paired, key);
+
+        let (link, mut updates) = remote.agent_view_paged(session.clone());
+
+        assert_eq!(next_paged_update(&mut updates).await["type"], "snapshot");
+
+        let error = next_paged_update(&mut updates).await;
+
+        assert_eq!(error["type"], "error");
+        assert!(
+            error["value"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("64 MiB")
+        );
+        assert!(
+            remote
+                .list_sessions()
+                .await
+                .unwrap()
+                .iter()
+                .any(|entry| entry.session == session)
+        );
+
+        drop(link);
+    });
 }
 
 #[test]
