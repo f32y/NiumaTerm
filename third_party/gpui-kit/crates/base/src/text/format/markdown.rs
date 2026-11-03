@@ -35,6 +35,7 @@ fn parse_table_row(table: &mut Table, node: &mdast::TableRow, cx: &mut NodeConte
 
 fn parse_table_cell(row: &mut node::TableRow, node: &mdast::TableCell, cx: &mut NodeContext) {
     let mut paragraph = Paragraph::default();
+    paragraph.span = new_span(node.position.clone(), cx);
     node.children.iter().for_each(|c| {
         parse_paragraph(&mut paragraph, c, cx);
     });

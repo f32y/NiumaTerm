@@ -1326,19 +1326,26 @@ impl CodeBlock {
                     .text_size(cx.theme().tokens.typography.mono_md.size)
                     .relative()
                     .refine_style(&style.code_block())
-                    .child(Inline::new(
-                        "code",
-                        self.state.clone(),
-                        vec![],
-                        self.external_highlights().unwrap_or_else(|| {
-                            node_cx
-                                .code_block_highlighter
-                                .as_ref()
-                                .map(|highlighter| self.highlighted_styles(highlighter))
-                                .unwrap_or_default()
-                        }),
-                        node_cx.link_click_handler.clone(),
-                    ))
+                    .child(
+                        Inline::new(
+                            "code",
+                            self.state.clone(),
+                            vec![],
+                            self.external_highlights().unwrap_or_else(|| {
+                                node_cx
+                                    .code_block_highlighter
+                                    .as_ref()
+                                    .map(|highlighter| self.highlighted_styles(highlighter))
+                                    .unwrap_or_default()
+                            }),
+                            node_cx.link_click_handler.clone(),
+                        )
+                        .search(
+                            node_cx.search.clone(),
+                            self.span.map_or(0, |span| span.start),
+                            0,
+                        ),
+                    )
                     .when_some(node_cx.code_block_actions.clone(), |this, actions| {
                         this.child(
                             div()
@@ -1359,6 +1366,7 @@ impl CodeBlock {
 /// A context for rendering nodes, contains link references.
 #[derive(Default, Clone)]
 pub(crate) struct NodeContext {
+    pub(crate) search: Option<crate::text::search::TextSearch>,
     /// The byte offset of the node in the original markdown text.
     /// Used for incremental updates.
     pub(crate) offset: usize,
@@ -1416,6 +1424,7 @@ impl Paragraph {
                 node_cx.link_click_handler.clone(),
             )
             .with_link_icons(node_cx.link_icon_resolver.as_deref(), node_cx.style.link())
+            .search(node_cx.search.clone(), span.map_or(0, |span| span.start))
             .into_any_element();
         }
 
@@ -1444,6 +1453,7 @@ impl Paragraph {
                             highlights.clone(),
                             node_cx.link_click_handler.clone(),
                         )
+                        .search(node_cx.search.clone(), span.map_or(0, |span| span.start), 0)
                         .into_any_element(),
                     );
                 }
@@ -1555,6 +1565,7 @@ impl Paragraph {
                     highlights,
                     node_cx.link_click_handler.clone(),
                 )
+                .search(node_cx.search.clone(), span.map_or(0, |span| span.start), 0)
                 .into_any_element(),
             );
         }

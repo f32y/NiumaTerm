@@ -14,6 +14,7 @@ mod inline;
 mod inline_flow;
 mod markdown_ext;
 mod node;
+pub mod search;
 mod selection_adapter;
 mod state;
 mod style;

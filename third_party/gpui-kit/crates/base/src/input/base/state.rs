@@ -1172,6 +1172,11 @@ impl<M: InputModeKind> InputBaseState<M> {
         SharedString::new(self.text.to_string())
     }
 
+    /// Whether an input method is editing text that has not been committed.
+    pub fn is_composing(&self) -> bool {
+        self.ime_marked_range.is_some()
+    }
+
     /// Return the portion of the value within the input field that
     /// is selected by the user, as an owned string.
     ///

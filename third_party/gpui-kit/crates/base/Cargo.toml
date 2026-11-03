@@ -45,6 +45,7 @@ sum-tree.workspace = true
 tracing.workspace = true
 unicode-segmentation = "1.13.3"
 web-time = "1"
+parking_lot.workspace = true
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 smol.workspace = true

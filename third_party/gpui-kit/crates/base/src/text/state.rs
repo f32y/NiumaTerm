@@ -96,6 +96,7 @@ pub(super) struct LineSpan {
 
 /// The state of a TextView.
 pub struct TextViewState {
+    pub(super) search: Option<crate::text::search::TextSearch>,
     fragment: Option<FragmentView>,
     fragment_group: Option<Rc<RefCell<FragmentSelection>>>,
     pub(super) focus_handle: FocusHandle,
@@ -313,6 +314,7 @@ impl TextViewState {
             list_state: ListState::new(0, gpui::ListAlignment::Top, px(1000.)).measure_all(),
             text_view_style: TextViewStyle::default(),
             code_block_actions: None,
+            search: None,
             code_block_highlighter: None,
             table_actions: None,
             link_click_handler: None,
@@ -901,6 +903,7 @@ impl Render for TextViewState {
         node_cx.link_icon_resolver = self.link_icon_resolver.clone();
         node_cx.markdown_extensions = self.markdown_extensions.clone();
         node_cx.style = self.text_view_style.clone();
+        node_cx.search = self.search.clone();
 
         v_flex()
             .w_full()

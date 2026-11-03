@@ -30,6 +30,7 @@ const IMAGE_LEN: usize = 1;
 mod link_icon_tests;
 
 pub(super) struct InlineFlow {
+    search: Option<(crate::text::search::TextSearch, usize)>,
     id: ElementId,
     items: Vec<InlineFlowItem>,
     link_click_handler: Option<Arc<LinkClickHandlerFn>>,
@@ -117,6 +118,15 @@ enum LineFragmentKind {
 }
 
 impl InlineFlow {
+    pub(super) fn search(
+        mut self,
+        search: Option<crate::text::search::TextSearch>,
+        anchor: usize,
+    ) -> Self {
+        self.search = search.map(|search| (search, anchor));
+        self
+    }
+
     pub(super) fn with_link_icons(
         mut self,
         resolver: Option<&LinkIconResolverFn>,
@@ -135,6 +145,7 @@ impl InlineFlow {
     ) -> Self {
         Self {
             id: id.into(),
+            search: None,
             items,
             link_click_handler,
         }
@@ -369,6 +380,18 @@ impl Element for InlineFlow {
                         self.link_click_handler.clone(),
                     )
                     .source_fragment(text, source_offset + source_range.start)
+                    .search(
+                        self.search.as_ref().map(|(search, _)| search.clone()),
+                        self.search.as_ref().map_or(0, |(_, anchor)| *anchor),
+                        self.items[..item_ix]
+                            .iter()
+                            .map(|item| match item {
+                                InlineFlowItem::Text { text, .. } => text.len(),
+                                _ => 0,
+                            })
+                            .sum::<usize>()
+                            + source_range.start,
+                    )
                     .into_any_element();
                     element.prepaint_as_root(
                         bounds.origin + origin,

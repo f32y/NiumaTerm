@@ -144,6 +144,7 @@ pub(crate) fn handle_link_click(
 /// See also [`MarkdownElement`], [`HtmlElement`]
 #[derive(Clone)]
 pub struct TextView {
+    search: Option<crate::text::search::TextSearch>,
     id: ElementId,
     format: Option<TextViewFormat>,
     text: Option<SharedString>,
@@ -186,6 +187,11 @@ impl Styled for TextView {
 }
 
 impl TextView {
+    pub fn search(mut self, search: Option<crate::text::search::TextSearch>) -> Self {
+        self.search = search;
+        self
+    }
+
     /// Create new TextView with managed state.
     pub fn new(state: &Entity<TextViewState>) -> Self {
         Self {
@@ -199,6 +205,7 @@ impl TextView {
             selection_format: SelectionFormat::default(),
             scrollable: false,
             max_lines: None,
+            search: None,
             code_block_actions: None,
             code_block_highlighter: None,
             table_actions: None,
@@ -221,6 +228,7 @@ impl TextView {
             selection_format: SelectionFormat::default(),
             scrollable: false,
             max_lines: None,
+            search: None,
             code_block_actions: None,
             code_block_highlighter: None,
             table_actions: None,
@@ -243,6 +251,7 @@ impl TextView {
             selection_format: SelectionFormat::default(),
             scrollable: false,
             max_lines: None,
+            search: None,
             code_block_actions: None,
             code_block_highlighter: None,
             table_actions: None,
@@ -265,6 +274,7 @@ impl TextView {
             selection_format: SelectionFormat::default(),
             scrollable: false,
             max_lines: None,
+            search: None,
             code_block_actions: None,
             code_block_highlighter: None,
             table_actions: None,
@@ -623,6 +633,7 @@ impl Element for TextView {
             .or(defaults.code_block_highlighter);
 
         state.update(cx, |state, cx| {
+            state.search = self.search.clone();
             state.code_block_actions = self.code_block_actions.clone();
             state.code_block_highlighter = code_block_highlighter.clone();
             state.table_actions = self.table_actions.clone();

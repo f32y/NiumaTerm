@@ -11,6 +11,7 @@ use crate::text::{
     TableData, TextViewState, TextViewStyle,
 };
 use gpui_base::text::CodeBlock;
+use gpui_base::text::search::TextSearch;
 
 /// The component-level rich text element.
 ///
@@ -32,6 +33,10 @@ impl Styled for TextView {
 }
 
 impl TextView {
+    pub fn search(mut self, search: Option<TextSearch>) -> Self {
+        self.inner = self.inner.search(search);
+        self
+    }
     /// Creates a text view rendering an existing [`TextViewState`].
     pub fn new(state: &Entity<TextViewState>) -> Self {
         Self {

@@ -85,6 +85,7 @@ pub(super) struct Inline {
     styled_text: StyledText,
     link_click_handler: Option<Arc<LinkClickHandlerFn>>,
     source_offset: Option<usize>,
+    search: Option<(crate::text::search::TextSearch, usize, usize)>,
 
     state: Arc<Mutex<InlineState>>,
 }
@@ -122,6 +123,16 @@ impl InlineState {
 }
 
 impl Inline {
+    pub(super) fn search(
+        mut self,
+        search: Option<crate::text::search::TextSearch>,
+        anchor: usize,
+        offset: usize,
+    ) -> Self {
+        self.search = search.map(|search| (search, anchor, offset));
+        self
+    }
+
     pub(super) fn new(
         id: impl Into<ElementId>,
         state: Arc<Mutex<InlineState>>,
@@ -142,6 +153,7 @@ impl Inline {
             styled_text: StyledText::new(text),
             link_click_handler,
             source_offset: None,
+            search: None,
             state,
         }
     }
@@ -513,6 +525,21 @@ impl Element for Inline {
         self.styled_text
             .prepaint(id, inspector_id, bounds, &mut (), window, cx);
 
+        if let Some((search, anchor, offset)) = &self.search {
+            let layout = self.styled_text.layout();
+            if let Some(found) = search.active.and_then(|index| search.matches.get(index))
+                && found.source.start == *anchor
+                && (*offset..offset + self.text.len()).contains(&found.range.start)
+                && let Some(local) = found.range.start.checked_sub(*offset)
+                && let Some(ch) = self.text[local..].chars().next()
+                && let Some((position, width)) = char_cell(layout, local, ch, layout.line_height())
+            {
+                *search.active_bounds.lock() = Some(Bounds::from_corners(
+                    position,
+                    point(position.x + width, position.y + layout.line_height()),
+                ));
+            }
+        }
         // Report this element's laid-out extent so an ancestor TextView with
         // `max_lines` can snap its clip to a whole-line boundary. The state
         // stack only holds an entry during prepaint when that view set
@@ -547,6 +574,21 @@ impl Element for Inline {
         let current_view = window.current_view();
         let hitbox = prepaint;
         let text_layout = self.styled_text.layout().clone();
+        if let Some((search, anchor, offset)) = &self.search {
+            for (range, active) in search.inline_ranges(*anchor, *offset, self.text.len()) {
+                self.paint_selection(
+                    &range.clone().into(),
+                    &text_layout,
+                    &bounds,
+                    window,
+                    if active {
+                        search.active_background
+                    } else {
+                        search.background
+                    },
+                );
+            }
+        }
         self.styled_text
             .paint(global_id, None, bounds, &mut (), &mut (), window, cx);
 
