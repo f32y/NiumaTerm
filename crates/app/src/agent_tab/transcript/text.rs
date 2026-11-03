@@ -5,6 +5,7 @@ use gpui::{AppContext as _, Context, Entity, Subscription};
 use gpui_component::text::{TextView, TextViewState};
 
 use crate::agent_tab::transcript::TranscriptView;
+use crate::agent_tab::transcript::mermaid::MermaidCache;
 use crate::agent_tab::transcript::rows::RowSpec;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -25,6 +26,7 @@ pub(super) enum TextPart {
 pub(super) struct TranscriptTextCache {
     entries: HashMap<(usize, TextPart), CachedText>,
     entry_count: usize,
+    mermaid: Option<Entity<MermaidCache>>,
 }
 
 struct CachedText {
@@ -78,11 +80,25 @@ impl TranscriptTextCache {
             }
         };
 
-        TextView::new(&cached.state)
+        let view = TextView::new(&cached.state);
+
+        if matches!(part, TextPart::Prompt | TextPart::Annotation(_)) {
+            return view;
+        }
+
+        let owner = cx.entity().downgrade();
+
+        let mermaid = self
+            .mermaid
+            .get_or_insert_with(|| cx.new(|_| MermaidCache::new(owner)));
+
+        MermaidCache::extend(view, mermaid.downgrade(), index, part)
     }
 
     pub(super) fn clear(&mut self) {
         self.entries.clear();
+
+        self.mermaid = None;
 
         self.entry_count = 0;
     }
@@ -90,6 +106,8 @@ impl TranscriptTextCache {
     pub(super) fn sync_entry_count(&mut self, len: usize) {
         if len < self.entry_count {
             self.entries.retain(|(index, _), _| *index < len);
+
+            self.mermaid = None;
         }
 
         self.entry_count = len;
