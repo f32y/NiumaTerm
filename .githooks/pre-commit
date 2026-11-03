@@ -121,6 +121,13 @@ check_no_ai_slop_marker() {
             # A hunk break ends the run of lines a wrapped phrase may span.
             /^@@/ { print "@@"; next }
             !vendored && !license_file && !word_list && /^\+/ {
+                # Cargo lock package and dependency names use upstream metadata.
+                if (file ~ /(^|\/)Cargo[.]lock$/ && \
+                    ($0 ~ /^\+name = "[^"]+"[[:space:]]*$/ || \
+                     $0 ~ /^\+[[:space:]]+"[^"]+",?[[:space:]]*$/)) {
+                    print "@@"
+                    next
+                }
                 print file ": " $0
             }
         ')
