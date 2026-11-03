@@ -90,6 +90,7 @@ pub(crate) fn is_run_row(spec: &RowSpec) -> bool {
 /// that owns the transcript's geometry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RowGap {
+    Block,
     /// Inside one block: between the steps of a run of work, and under the
     /// disclosure that heads them.
     Step,
@@ -112,6 +113,24 @@ pub(crate) enum RowGap {
 pub(crate) struct TranscriptRow {
     pub(crate) spec: RowSpec,
     pub(crate) gap: RowGap,
+    pub(crate) block: Option<MessageBlock>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct MessageBlock {
+    pub(crate) index: usize,
+    pub(crate) key: (usize, usize, usize, bool),
+}
+
+impl TranscriptRow {
+    pub(super) fn is_same_row(&self, other: &Self) -> bool {
+        self.spec.is_same_row(&other.spec)
+            && match (&self.block, &other.block) {
+                (Some(a), Some(b)) => a.key.0 == b.key.0,
+                (Some(block), None) | (None, Some(block)) => block.index == 0,
+                (None, None) => true,
+            }
+    }
 }
 
 /// Whether a row reports on how the turn was worked instead of on what it
@@ -164,6 +183,7 @@ pub(super) fn spaced_rows(items: &[Entry], specs: &[RowSpec], rows: &mut Vec<Tra
     rows.clear();
 
     rows.extend(specs.iter().enumerate().map(|(ix, spec)| TranscriptRow {
+        block: None,
         spec: spec.clone(),
         gap: row_gap(items, spec, specs.get(ix + 1)),
     }));

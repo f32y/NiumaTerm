@@ -2,10 +2,10 @@
 #[path = "view_tests.rs"]
 mod tests;
 
-use std::time::Duration;
+use std::sync::Arc;
 
 use gpui::prelude::*;
-use gpui::{ClipboardItem, Context, ObjectFit, Render, Task, Window, div, img, px};
+use gpui::{ClipboardItem, Context, EventEmitter, ObjectFit, Render, Task, Window, div, img, px};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::spinner::Spinner;
 use gpui_component::text::TextView;
@@ -15,13 +15,14 @@ use rust_i18n::t;
 
 use crate::agent_tab::settings::{AgentSettings, UI_RADIUS};
 use crate::agent_tab::transcript::mermaid::preview::DiagramPreview;
-use crate::agent_tab::transcript::mermaid::render::{
-    DiagramTheme, RenderedDiagram, rasterize, render,
-};
+use crate::agent_tab::transcript::mermaid::render::{DiagramTheme, RenderedDiagram, rasterize};
+use crate::agent_tab::transcript::mermaid::store::DiagramStore;
 use crate::copy_toast::show_text_copied;
 
 pub(super) struct DiagramView {
-    source: String,
+    source: Arc<str>,
+    store: Arc<DiagramStore>,
+    known_size: Option<(f32, f32)>,
     theme: Option<DiagramTheme>,
     scale: f32,
     rendered: Option<RenderedDiagram>,
@@ -32,8 +33,35 @@ pub(super) struct DiagramView {
     revision: u64,
 }
 
+pub(super) struct DiagramUpdate {
+    pub(super) layout_changed: bool,
+}
+
+impl EventEmitter<DiagramUpdate> for DiagramView {}
+
 impl DiagramView {
+    fn image_height(&self) -> Option<f32> {
+        if self.show_source || self.error.is_some() {
+            return None;
+        }
+
+        self.rendered
+            .as_ref()
+            .map(|rendered| rendered.size)
+            .or(self.known_size)
+            .map(|size| (size.1 * 1.25).clamp(180., 640.))
+    }
+
+    #[cfg(test)]
     pub(super) fn new(source: String, cx: &mut Context<Self>) -> Self {
+        Self::with_store(source, Arc::new(DiagramStore::default()), cx)
+    }
+
+    pub(super) fn with_store(
+        source: String,
+        store: Arc<DiagramStore>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         cx.on_release(|view, cx| {
             view.control.cancel();
 
@@ -44,7 +72,9 @@ impl DiagramView {
         .detach();
 
         Self {
-            source,
+            source: source.into(),
+            store,
+            known_size: None,
             theme: None,
             scale: 0.,
             rendered: None,
@@ -78,34 +108,48 @@ impl DiagramView {
 
         self.control.cancel();
 
-        let control = OperationControl::new().with_deadline(Duration::from_secs(5));
+        let control = OperationControl::new();
         let worker_control = control.clone();
         let source = self.source.clone();
         let renderer = cx.svg_renderer();
         let worker_theme = theme.clone();
 
+        let preparation = if cached.is_none() {
+            self.known_size = self.store.size(&source, &theme);
+
+            Some(
+                self.store
+                    .request(source, worker_theme, renderer.clone(), cx),
+            )
+        } else {
+            None
+        };
+
         self.theme = Some(theme);
         self.scale = scale;
         self.control = control;
-        self.error = None;
         self.revision += 1;
 
         let revision = self.revision;
 
         self.task = Some(cx.spawn(async move |view, cx| {
+            let prepared = match preparation {
+                Some(preparation) => match preparation.await {
+                    Ok(prepared) => Some(Ok((prepared.svg.clone(), prepared.size))),
+                    Err(error) => Some(Err(error.to_string())),
+                },
+                None => cached.map(Ok),
+            };
+
             let result = cx
                 .background_spawn(async move {
-                    match cached {
-                        Some((svg, size)) => rasterize(svg, size, &renderer, scale),
-                        None => render(
-                            &source,
-                            &worker_theme,
-                            worker_control.clone(),
-                            &renderer,
-                            scale,
-                        ),
-                    }
-                    .map_err(|error| format!("{error:#}"))
+                    let (svg, size) = prepared.expect("render request has prepared input")?;
+
+                    worker_control
+                        .checkpoint()
+                        .map_err(|error| error.to_string())?;
+
+                    rasterize(svg, size, &renderer, scale).map_err(|error| format!("{error:#}"))
                 })
                 .await;
 
@@ -116,14 +160,23 @@ impl DiagramView {
 
                 view.task = None;
 
+                let previous_height = view.image_height();
+
                 if let Some(old) = view.rendered.take() {
                     cx.drop_image(old.image, None);
                 }
 
                 match result {
-                    Ok(rendered) => view.rendered = Some(rendered),
+                    Ok(rendered) => {
+                        view.rendered = Some(rendered);
+                        view.error = None;
+                    }
                     Err(error) => view.error = Some(error),
                 }
+
+                cx.emit(DiagramUpdate {
+                    layout_changed: previous_height != view.image_height() || view.error.is_some(),
+                });
 
                 cx.notify();
             });
@@ -166,7 +219,7 @@ impl Render for DiagramView {
                     .label(t!("agent-transcript-copy"))
                     .on_click(cx.listener(|view, _, window, cx| {
                         cx.stop_propagation();
-                        cx.write_to_clipboard(ClipboardItem::new_string(view.source.clone()));
+                        cx.write_to_clipboard(ClipboardItem::new_string(view.source.to_string()));
 
                         show_text_copied(window, cx);
                     })),
@@ -186,6 +239,10 @@ impl Render for DiagramView {
                                 cx.stop_propagation();
 
                                 view.show_source = !view.show_source;
+
+                                cx.emit(DiagramUpdate {
+                                    layout_changed: true,
+                                });
 
                                 cx.notify();
                             })),
@@ -213,7 +270,10 @@ impl Render for DiagramView {
                 .overflow_y_scroll()
                 .font(settings.transcript_font())
                 .text_size(px(settings.transcript_font_size))
-                .child(TextView::plain("mermaid-source-text", self.source.clone()).selectable(true))
+                .child(
+                    TextView::plain("mermaid-source-text", self.source.to_string())
+                        .selectable(true),
+                )
                 .into_any_element()
         } else if let Some(rendered) = &self.rendered {
             div()
@@ -239,7 +299,9 @@ impl Render for DiagramView {
                 .into_any_element()
         } else {
             div()
-                .h(px(100.))
+                .h(px(self
+                    .known_size
+                    .map_or(100., |size| (size.1 * 1.25).clamp(180., 640.))))
                 .flex()
                 .items_center()
                 .justify_center()

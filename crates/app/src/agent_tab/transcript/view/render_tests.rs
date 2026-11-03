@@ -9,7 +9,7 @@ use nmt_config::agent::CollapseRows;
 use crate::agent_tab::profile::AgentKind;
 use crate::agent_tab::settings::AgentSettings;
 use crate::agent_tab::transcript::reveal::RevealKey;
-use crate::agent_tab::transcript::{RowSpec, TranscriptView};
+use crate::agent_tab::transcript::{Entry, RowSpec, TranscriptView};
 
 struct TranscriptRoot {
     transcript: Entity<TranscriptView>,
@@ -140,7 +140,15 @@ fn streaming_while_revisiting_long_reply_preserves_height_and_position(cx: &mut 
 
     let original = cx.debug_bounds("transcript-agent-0").unwrap();
 
-    assert!(original.size.height > px(1000.));
+    transcript.read_with(cx, |view, _| {
+        assert_eq!(view.text_views.fragments(0).len(), 100);
+        assert!(
+            view.rows
+                .iter()
+                .filter(|row| matches!(row.spec, RowSpec::Entry { index: 0, .. }))
+                .all(|row| row.block.is_some())
+        );
+    });
 
     transcript.update(cx, |view, cx| {
         view.scroll_to_bottom();
@@ -219,8 +227,8 @@ fn appending_to_a_visible_reply_preserves_the_reading_position(cx: &mut TestAppC
 
     transcript.update(cx, |view, cx| {
         view.transcript_list.scroll_to(ListOffset {
-            item_ix: 0,
-            offset_in_item: px(500.),
+            item_ix: 60,
+            offset_in_item: px(5.),
         });
 
         cx.notify();
@@ -231,6 +239,8 @@ fn appending_to_a_visible_reply_preserves_the_reading_position(cx: &mut TestAppC
     draw(cx);
 
     let original = cx.debug_bounds("transcript-agent-0").unwrap();
+
+    let original_blocks = transcript.read_with(cx, |view, _| view.text_views.fragments(0).len());
 
     for _ in 0..8 {
         transcript.update(cx, |view, cx| {
@@ -248,8 +258,8 @@ fn appending_to_a_visible_reply_preserves_the_reading_position(cx: &mut TestAppC
 
             let position = view.transcript_list.logical_scroll_top();
 
-            assert_eq!(position.item_ix, 0);
-            assert_eq!(position.offset_in_item, px(500.));
+            assert_eq!(position.item_ix, 60);
+            assert_eq!(position.offset_in_item, px(5.));
         });
 
         assert_eq!(
@@ -258,7 +268,262 @@ fn appending_to_a_visible_reply_preserves_the_reading_position(cx: &mut TestAppC
         );
     }
 
-    assert!(cx.debug_bounds("transcript-agent-0").unwrap().size.height > original.size.height);
+    transcript.read_with(cx, |view, _| {
+        assert_eq!(view.text_views.fragments(0).len(), original_blocks + 8);
+    });
+}
+
+#[gpui::test]
+fn thousand_block_reply_only_constructs_visible_views(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+
+        cx.set_global(AgentSettings {
+            reduce_motion: true,
+            ..AgentSettings::default()
+        });
+    });
+
+    let (root, cx) = cx.add_window_view(|_, cx| TranscriptRoot {
+        transcript: cx.new(|cx| {
+            let mut view = TranscriptView::new(AgentKind::Codex, None);
+
+            view.push(
+                1,
+                Item::AgentMessage {
+                    id: "long".into(),
+                    text: Some("A paragraph with enough text to measure.\n\n".repeat(1000)),
+                    questions: None,
+                },
+                Vec::new(),
+                cx,
+            );
+
+            view
+        }),
+    });
+
+    let cx: &mut VisualTestContext = cx;
+    let transcript = root.read_with(cx, |root, _| root.transcript.clone());
+
+    cx.run_until_parked();
+
+    draw(cx);
+    draw(cx);
+
+    let original = transcript.read_with(cx, |view, _| {
+        assert_eq!(view.text_views.fragments(0).len(), 1000);
+
+        let ids = view.text_views.fragment_ids(0);
+
+        assert!(!ids.is_empty());
+        assert!(ids.len() <= 64, "{}", ids.len());
+        assert!(view.text_views.fragment_creations(0) <= 64);
+
+        ids
+    });
+
+    draw(cx);
+    draw(cx);
+
+    transcript.read_with(cx, |view, _| {
+        assert_eq!(view.text_views.fragment_ids(0), original)
+    });
+
+    for index in [0, 250, 500, 750, 999, 0] {
+        transcript.update(cx, |view, cx| {
+            view.transcript_list.scroll_to(ListOffset {
+                item_ix: index,
+                offset_in_item: px(0.),
+            });
+
+            cx.notify();
+        });
+
+        draw(cx);
+        draw(cx);
+
+        transcript.read_with(cx, |view, _| {
+            assert!(view.text_views.fragment_ids(0).len() <= 64)
+        });
+    }
+
+    transcript.read_with(cx, |view, _| {
+        assert!(view.text_views.fragment_creations(0) < 400)
+    });
+
+    transcript.update(cx, |view, cx| {
+        view.push_stamped(
+            2,
+            Item::AgentMessage {
+                id: "temporary".into(),
+                text: Some("A temporary reply.".into()),
+                questions: None,
+            },
+        );
+
+        cx.notify();
+    });
+
+    draw(cx);
+
+    transcript.update(cx, |view, cx| {
+        let item = view.conversation.borrow().content.entries()[0].item.clone();
+
+        let entries = vec![Entry {
+            turn: 1,
+            item,
+            metadata: Default::default(),
+        }];
+
+        view.show_attributed_entries(entries, Default::default(), 1, cx);
+    });
+
+    draw(cx);
+
+    transcript.read_with(cx, |view, _| {
+        assert_eq!(view.text_views.fragments(0).len(), 1000)
+    });
+}
+
+#[gpui::test]
+fn appending_a_second_block_preserves_the_reading_position(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+
+        cx.set_global(AgentSettings {
+            reduce_motion: true,
+            ..AgentSettings::default()
+        });
+    });
+
+    let (root, cx) = cx.add_window_view(|_, cx| TranscriptRoot {
+        transcript: cx.new(|cx| {
+            let mut view = TranscriptView::new(AgentKind::Codex, None);
+
+            view.push(
+                1,
+                Item::AgentMessage {
+                    id: "threshold".into(),
+                    text: Some(format!("{}\n\n", "An existing paragraph. ".repeat(100))),
+                    questions: None,
+                },
+                Vec::new(),
+                cx,
+            );
+
+            view
+        }),
+    });
+
+    let cx: &mut VisualTestContext = cx;
+    let transcript = root.read_with(cx, |root, _| root.transcript.clone());
+
+    cx.run_until_parked();
+
+    draw(cx);
+
+    transcript.update(cx, |view, cx| {
+        assert_eq!(view.text_views.fragments(0).len(), 1);
+
+        view.transcript_list.scroll_to(ListOffset {
+            item_ix: 0,
+            offset_in_item: px(100.),
+        });
+
+        cx.notify();
+    });
+
+    draw(cx);
+
+    let top = transcript.read_with(cx, |view, _| {
+        view.transcript_list.bounds_for_item(0).unwrap().top()
+    });
+
+    transcript.update(cx, |view, cx| {
+        view.append_delta("threshold", "An appended paragraph.\n\n", TextField::Reply);
+
+        cx.notify();
+    });
+
+    cx.run_until_parked();
+
+    draw(cx);
+    draw(cx);
+
+    transcript.read_with(cx, |view, _| {
+        assert_eq!(view.text_views.fragments(0).len(), 2);
+        assert_eq!(view.transcript_list.logical_scroll_top().item_ix, 0);
+        assert_eq!(
+            view.transcript_list.logical_scroll_top().offset_in_item,
+            px(100.)
+        );
+        assert_eq!(view.transcript_list.bounds_for_item(0).unwrap().top(), top);
+    });
+}
+
+#[gpui::test]
+fn mermaid_extension_is_configured_before_reply_fragmentation(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+
+        cx.set_global(AgentSettings {
+            reduce_motion: true,
+            ..AgentSettings::default()
+        });
+    });
+
+    let (root, cx) = cx.add_window_view(|_, cx| TranscriptRoot {
+        transcript: cx.new(|cx| {
+            let mut view = TranscriptView::new(AgentKind::Codex, None);
+
+            let text = format!(
+                "```mermaid\nflowchart TD\nA --> B\n```\n\n{}",
+                "Another paragraph.\n\n".repeat(16)
+            );
+
+            view.push(
+                1,
+                Item::AgentMessage {
+                    id: "diagram".into(),
+                    text: Some(text),
+                    questions: None,
+                },
+                Vec::new(),
+                cx,
+            );
+
+            view
+        }),
+    });
+
+    let cx: &mut VisualTestContext = cx;
+    let transcript = root.read_with(cx, |root, _| root.transcript.clone());
+
+    cx.run_until_parked();
+
+    draw(cx);
+
+    transcript.update(cx, |view, cx| {
+        view.transcript_list.scroll_to(ListOffset {
+            item_ix: 0,
+            offset_in_item: px(0.),
+        });
+
+        cx.notify();
+    });
+
+    for _ in 0..3 {
+        cx.run_until_parked();
+
+        draw(cx);
+    }
+
+    transcript.read_with(cx, |view, _| {
+        assert_eq!(view.text_views.fragments(0).len(), 17)
+    });
+
+    assert!(cx.debug_bounds("mermaid-preview").is_some());
 }
 
 #[gpui::test]

@@ -101,6 +101,7 @@ const TRANSCRIPT_STEP_GAP: f32 = 8.0;
 /// How many pixels a rank of space spans.
 pub(super) fn gap_px(gap: RowGap) -> f32 {
     match gap {
+        RowGap::Block => 0.,
         RowGap::Step => TRANSCRIPT_STEP_GAP,
         RowGap::Work => TRANSCRIPT_WORK_TEXT_GAP,
         RowGap::Group => TRANSCRIPT_GROUP_GAP,

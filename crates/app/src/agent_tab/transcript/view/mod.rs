@@ -33,6 +33,7 @@ use crate::agent_tab::profile::AgentKind;
 use crate::agent_tab::settings::{AgentSettings, UI_RADIUS};
 use crate::agent_tab::transcript::code::is_code_item;
 use crate::agent_tab::transcript::incremental::RowCache;
+use crate::agent_tab::transcript::measurement::Measurements;
 use crate::agent_tab::transcript::render::image_preview::{ImagePreview, ImagePreviewLayer};
 use crate::agent_tab::transcript::render::menus::{copy_entry_menu, prompt_row_menu};
 use crate::agent_tab::transcript::render::message_rows::{
@@ -49,7 +50,7 @@ use crate::agent_tab::transcript::render::{
 use crate::agent_tab::transcript::reveal::{Disclosures, RevealKey, revealed_block, revealed_part};
 use crate::agent_tab::transcript::row_structure::{RowGeometry, RowSource};
 use crate::agent_tab::transcript::rows::{
-    PickerReservation, RowGap, TranscriptRow, folds_turns, is_run_row, spaced_rows,
+    MessageBlock, PickerReservation, RowGap, TranscriptRow, folds_turns, is_run_row, spaced_rows,
     turn_opening_prompts,
 };
 use crate::agent_tab::transcript::text::{TextPart, TranscriptTextCache};
@@ -69,6 +70,9 @@ use crate::agent_tab::transcript::{
 /// own conversation and a child agent's conversation render through here, so
 /// their presentation cannot drift apart.
 pub struct TranscriptView {
+    pub(super) measurements: Measurements,
+    logical_rows: Vec<TranscriptRow>,
+    logical_starts: Vec<usize>,
     pub(crate) conversation: Rc<RefCell<ConversationState>>,
     pub(crate) image_previews: RefCell<HashMap<(usize, usize), Arc<Image>>>,
     pub(super) row_cache: RowCache,
@@ -136,6 +140,9 @@ impl TranscriptView {
         let collapse_mode = CollapseRows::default();
 
         Self {
+            measurements: Default::default(),
+            logical_rows: Vec::new(),
+            logical_starts: Vec::new(),
             conversation: Rc::new(RefCell::new(ConversationState::default())),
             image_previews: Default::default(),
             row_cache: RowCache::default(),
@@ -396,7 +403,7 @@ impl TranscriptView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(TranscriptRow { spec, gap }) = self.rows.get(ix).cloned() else {
+        let Some(TranscriptRow { spec, gap, block }) = self.rows.get(ix).cloned() else {
             return div().into_any_element();
         };
 
@@ -417,7 +424,10 @@ impl TranscriptView {
         let now = Instant::now();
 
         let row = match spec {
-            RowSpec::Entry { index, .. } => self.render_entry_row(index, window, cx),
+            RowSpec::Entry { index, .. } => match block {
+                Some(block) => self.render_agent_fragment(index, block, cx),
+                None => self.render_entry_row(index, window, cx),
+            },
             RowSpec::Work { index, .. } => self.render_work_row(index, window, cx),
             RowSpec::TurnFold {
                 turn,
@@ -636,6 +646,29 @@ impl TranscriptView {
         )
     }
 
+    fn render_agent_fragment(
+        &mut self,
+        index: usize,
+        block: MessageBlock,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let conversation = self.conversation.borrow();
+        let entry = &conversation.content.entries()[index];
+        let attribution = entry.item.id().and_then(|id| self.attribution.get(id));
+        let cwd = attribution.map_or_else(|| self.cwd.clone(), |author| author.cwd.clone());
+
+        agent_reply_row(
+            index,
+            self.text_views.fragment_view(index, block.index, cx),
+            cwd,
+            (block.index == 0)
+                .then(|| attribution.map(|author| author.name.clone()))
+                .flatten(),
+            block.key.3.then_some(entry.metadata.at).flatten(),
+            cx,
+        )
+    }
+
     /// Thumbnails of the images entry `index` included, decoded once and kept
     /// for as long as the conversation is on screen.
     fn entry_thumbnails(&self, index: usize) -> Vec<Arc<Image>> {
@@ -768,7 +801,7 @@ impl TranscriptView {
         if row_start > 0 {
             row_start -= 1;
 
-            specs.push(self.rows[row_start].spec.clone());
+            specs.push(self.logical_rows[row_start].spec.clone());
         }
 
         while start < items.len() {
@@ -1014,6 +1047,76 @@ impl TranscriptView {
             &mut new,
         );
 
+        let physical_start = if start == 0 {
+            0
+        } else {
+            self.logical_starts
+                .get(start)
+                .copied()
+                .unwrap_or(self.rows.len())
+        };
+
+        self.logical_rows.truncate(start);
+        self.logical_rows.extend(new.iter().cloned());
+        self.logical_starts.truncate(start);
+
+        let logical = mem::take(&mut new);
+
+        let mut physical_index = physical_start;
+
+        for row in logical {
+            self.logical_starts.push(physical_index);
+
+            let blocks = match row.spec {
+                RowSpec::Entry { index, .. }
+                    if matches!(
+                        self.conversation
+                            .borrow()
+                            .content
+                            .entries()
+                            .get(index)
+                            .map(|entry| &entry.item),
+                        Some(SessionItem::AgentMessage {
+                            questions: None,
+                            ..
+                        })
+                    ) =>
+                {
+                    self.text_views.fragments(index)
+                }
+                _ => &[],
+            };
+
+            if blocks.is_empty() {
+                new.push(row);
+
+                physical_index += 1;
+            } else {
+                for (block_index, fragment) in blocks.iter().enumerate() {
+                    let mut block_row = row.clone();
+
+                    if let RowSpec::Entry { fingerprint, .. } = &mut block_row.spec {
+                        *fingerprint = 0;
+                    }
+
+                    block_row.block = Some(MessageBlock {
+                        index: block_index,
+                        key: fragment.key(),
+                    });
+
+                    if block_index + 1 != blocks.len() {
+                        block_row.gap = RowGap::Block;
+                    }
+
+                    new.push(block_row);
+
+                    physical_index += 1;
+                }
+            }
+        }
+
+        let start = physical_start;
+
         if self.rows[start..] == new {
             new.clear();
 
@@ -1047,8 +1150,7 @@ impl TranscriptView {
             // scrollbar's total until it is next laid out and reset a reading
             // position inside it to its top, so only the rows that really
             // came or went are spliced.
-            let same_row =
-                |(old, new): &(&TranscriptRow, &TranscriptRow)| old.spec.is_same_row(&new.spec);
+            let same_row = |(old, new): &(&TranscriptRow, &TranscriptRow)| old.is_same_row(new);
 
             let kept_above = self.rows[old_mid.clone()]
                 .iter()
@@ -1078,6 +1180,8 @@ impl TranscriptView {
         self.rows.truncate(start);
 
         self.rows.append(&mut new);
+
+        self.measurements.sync_tail(start, &self.rows);
 
         self.row_cache.scratch_rows = new;
     }
@@ -1260,7 +1364,33 @@ impl Render for TranscriptView {
         // tagged with a monotonic turn id, so turns are contiguous slices).
         // Only the visible slice becomes elements; the spec diff tells the
         // list which rows changed shape.
+        if let Some(first) = self.row_cache.dirty_from {
+            let conversation = self.conversation.borrow();
+
+            for (index, entry) in conversation
+                .content
+                .entries()
+                .iter()
+                .enumerate()
+                .skip(first)
+            {
+                if let SessionItem::AgentMessage {
+                    text: Some(text), ..
+                } = &entry.item
+                    && let Some(state) = self.text_views.reply_state(index)
+                {
+                    let shown = self.shown_reply(index, text);
+
+                    state.update(cx, |state, cx| state.set_text(shown, cx));
+                }
+            }
+        }
+
         self.refresh_rows(collapse_tool_calls);
+
+        for range in self.measurements.take_ranges() {
+            self.transcript_list.remeasure_items(range);
+        }
 
         if self.transcript_font != font {
             self.transcript_font = font;

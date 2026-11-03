@@ -1,7 +1,81 @@
-use gpui::{TestAppContext, px};
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::sync::Arc;
+
+use gpui::{AppContext as _, TestAppContext, px};
 
 use crate::agent_tab::settings::AgentSettings;
-use crate::agent_tab::transcript::mermaid::view::DiagramView;
+use crate::agent_tab::transcript::mermaid::render::DiagramTheme;
+use crate::agent_tab::transcript::mermaid::store::DiagramStore;
+use crate::agent_tab::transcript::mermaid::view::{DiagramUpdate, DiagramView};
+
+#[gpui::test]
+async fn recreated_views_reuse_preparation_and_same_height_rasters_do_not_remeasure(
+    cx: &mut TestAppContext,
+) {
+    cx.update(gpui_component::init);
+    cx.set_global(AgentSettings::default());
+
+    let store = Arc::new(DiagramStore::default());
+    let source = "flowchart TD\nA --> B";
+    let first = cx.new(|cx| DiagramView::with_store(source.into(), store.clone(), cx));
+
+    first.update(cx, |view, cx| {
+        view.start_render(DiagramTheme::current(cx), 1., cx)
+    });
+
+    cx.condition(&first, |view, _| {
+        view.rendered.is_some() || view.error.is_some()
+    })
+    .await;
+
+    let original_svg = first.read_with(cx, |view, _| view.rendered.as_ref().unwrap().svg.clone());
+    let weak = first.downgrade();
+
+    drop(first);
+
+    cx.run_until_parked();
+
+    assert!(weak.upgrade().is_none());
+
+    let second = cx.new(|cx| DiagramView::with_store(source.into(), store.clone(), cx));
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let observed = events.clone();
+
+    let _subscription = cx.update(|cx| {
+        cx.subscribe(&second, move |_, event: &DiagramUpdate, _| {
+            observed.borrow_mut().push(event.layout_changed)
+        })
+    });
+
+    second.update(cx, |view, cx| {
+        view.start_render(DiagramTheme::current(cx), 1., cx)
+    });
+
+    cx.condition(&second, |view, _| {
+        view.rendered.is_some() || view.error.is_some()
+    })
+    .await;
+
+    second.read_with(cx, |view, _| {
+        assert!(Arc::ptr_eq(
+            &view.rendered.as_ref().unwrap().svg,
+            &original_svg
+        ))
+    });
+
+    assert_eq!(store.preparations(), 1);
+    assert_eq!(*events.borrow(), vec![false]);
+
+    second.update(cx, |view, cx| {
+        view.start_render(DiagramTheme::current(cx), 2., cx)
+    });
+
+    cx.condition(&second, |view, _| view.task.is_none()).await;
+
+    assert_eq!(store.preparations(), 1);
+    assert_eq!(*events.borrow(), vec![false, false]);
+}
 
 #[gpui::test]
 async fn completed_diagram_can_switch_to_source_and_back(cx: &mut TestAppContext) {

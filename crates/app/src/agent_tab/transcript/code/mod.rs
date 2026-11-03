@@ -47,7 +47,6 @@ use crate::agent_tab::transcript::render::TRANSCRIPT_LINE_HEIGHT;
 use crate::agent_tab::transcript::render::text_style::{
     transcript_highlight_theme, transcript_text_style,
 };
-use crate::agent_tab::transcript::rows::RowSpec;
 
 pub(crate) fn is_code_item(item: &Item) -> bool {
     match item {
@@ -103,13 +102,7 @@ impl CodeTranscriptCache {
         let view = cx.new(|cx| CodeView::new(source, cx));
 
         let observation = cx.observe(&view, move |transcript, _, cx| {
-            // Asynchronous normalization can alter row height. Remeasure the
-            // corresponding visible work row when its prepared text arrives.
-            if let Some(row) = transcript.rows.iter().position(
-                |row| matches!(row.spec, RowSpec::Work { index: item, .. } if item == index),
-            ) {
-                transcript.transcript_list.remeasure_items(row..row + 1);
-            }
+            transcript.measurements.invalidate(index);
 
             cx.notify();
         });

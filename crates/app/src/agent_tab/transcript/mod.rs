@@ -20,6 +20,7 @@ mod code;
 mod disclosure_row;
 mod format;
 mod incremental;
+mod measurement;
 mod mermaid;
 mod render;
 mod reveal;

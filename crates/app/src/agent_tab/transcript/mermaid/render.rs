@@ -25,7 +25,7 @@ const MAX_SVG_BYTES: usize = 8 * 1024 * 1024;
 const MAX_RASTER_EDGE: f32 = 2048.;
 const MAX_RASTER_PIXELS: f32 = 2_000_000.;
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub(super) struct DiagramTheme {
     dark: bool,
     font: String,
@@ -67,6 +67,12 @@ pub(super) struct RenderedDiagram {
     pub(super) svg: Arc<ParsedSvg>,
     pub(super) size: (f32, f32),
     pub(super) image: Arc<RenderImage>,
+}
+
+pub(super) struct PreparedDiagram {
+    pub(super) svg: Arc<ParsedSvg>,
+    pub(super) size: (f32, f32),
+    pub(super) bytes: usize,
 }
 
 pub(super) fn render_svg(
@@ -121,6 +127,7 @@ pub(super) fn render_svg(
     Ok(svg)
 }
 
+#[cfg(test)]
 pub(super) fn render(
     source: &str,
     theme: &DiagramTheme,
@@ -128,6 +135,17 @@ pub(super) fn render(
     renderer: &SvgRenderer,
     scale: f32,
 ) -> Result<RenderedDiagram> {
+    let prepared = prepare(source, theme, control, renderer)?;
+
+    rasterize(prepared.svg, prepared.size, renderer, scale)
+}
+
+pub(super) fn prepare(
+    source: &str,
+    theme: &DiagramTheme,
+    control: OperationControl,
+    renderer: &SvgRenderer,
+) -> Result<PreparedDiagram> {
     let svg = render_svg(source, theme, control.clone())?;
 
     control.checkpoint()?;
@@ -137,7 +155,11 @@ pub(super) fn render(
 
     control.checkpoint()?;
 
-    rasterize(parsed, size, renderer, scale)
+    Ok(PreparedDiagram {
+        svg: parsed,
+        size,
+        bytes: svg.len() + source.len(),
+    })
 }
 
 pub(super) fn rasterize(
