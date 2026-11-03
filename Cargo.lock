@@ -274,7 +274,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "app"
-version = "1.8.2"
+version = "1.8.3"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3900,7 +3900,7 @@ checksum = "ce5d3ddc6d3fa000eb1536d85e147bfe31aacaba692ed6a876f95cb7c855be78"
 
 [[package]]
 name = "libghostty-vt-sys"
-version = "1.8.2"
+version = "1.8.3"
 dependencies = [
  "bindgen",
  "heck",
@@ -4486,7 +4486,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_agent"
-version = "1.8.2"
+version = "1.8.3"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -4519,7 +4519,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_agent_hook_cli"
-version = "1.8.2"
+version = "1.8.3"
 dependencies = [
  "nmt_agent",
  "nmt_platform",
@@ -4530,7 +4530,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_config"
-version = "1.8.2"
+version = "1.8.3"
 dependencies = [
  "dirs",
  "nmt_platform",
@@ -4544,7 +4544,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_input"
-version = "1.8.2"
+version = "1.8.3"
 dependencies = [
  "bitflags 2.13.2",
  "smol_str",
@@ -4552,7 +4552,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_mobile"
-version = "1.8.2"
+version = "1.8.3"
 dependencies = [
  "anyhow",
  "nmt_agent",
@@ -4573,7 +4573,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_net"
-version = "1.8.2"
+version = "1.8.3"
 dependencies = [
  "anyhow",
  "hyper-util",
@@ -4588,7 +4588,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_platform"
-version = "1.8.2"
+version = "1.8.3"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -4615,7 +4615,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_profile"
-version = "1.8.2"
+version = "1.8.3"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
@@ -4626,7 +4626,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_profiling"
-version = "1.8.2"
+version = "1.8.3"
 dependencies = [
  "log",
  "parking_lot",
@@ -4636,7 +4636,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_remote"
-version = "1.8.2"
+version = "1.8.3"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -4669,7 +4669,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_remote_core"
-version = "1.8.2"
+version = "1.8.3"
 dependencies = [
  "base64 0.22.1",
  "chacha20poly1305",
@@ -4685,7 +4685,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_shell_extension"
-version = "1.8.2"
+version = "1.8.3"
 dependencies = [
  "nmt_version",
  "percent-encoding",
@@ -4696,7 +4696,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_terminal"
-version = "1.8.2"
+version = "1.8.3"
 dependencies = [
  "base64 0.22.1",
  "bitflags 2.13.2",
@@ -4716,7 +4716,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_tree_sitter_bundle"
-version = "1.8.2"
+version = "1.8.3"
 dependencies = [
  "nmt_version",
  "tree-sitter",
@@ -4760,7 +4760,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_updater"
-version = "1.8.2"
+version = "1.8.3"
 dependencies = [
  "nmt_config",
  "nmt_net",
@@ -4782,7 +4782,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_version"
-version = "1.8.2"
+version = "1.8.3"
 
 [[package]]
 name = "nohash-hasher"
