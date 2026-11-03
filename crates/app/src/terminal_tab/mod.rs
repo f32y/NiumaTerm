@@ -27,6 +27,7 @@ mod layout;
 mod paint;
 mod pane_model;
 mod scrollbar;
+mod search;
 mod terminal_view;
 mod theme;
 mod wake;

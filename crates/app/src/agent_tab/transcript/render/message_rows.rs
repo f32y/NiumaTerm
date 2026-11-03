@@ -187,7 +187,7 @@ pub(crate) fn agent_reply_row(
 /// An error the harness reported, at entry `index`.
 pub(crate) fn error_row(
     index: usize,
-    text: String,
+    text: TextView,
     cx: &mut Context<TranscriptView>,
 ) -> AnyElement {
     h_flex()

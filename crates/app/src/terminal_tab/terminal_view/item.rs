@@ -13,9 +13,10 @@ use crate::terminal_tab::frame::{TerminalColor, TerminalFrame};
 use crate::terminal_tab::frame_source::ItemViewport;
 use crate::terminal_tab::layout::frame_content_rows;
 use crate::terminal_tab::metrics::CellMetrics;
-use crate::terminal_tab::paint::frame::{paint_frame, paint_frozen_images, shape_frame};
+use crate::terminal_tab::paint::frame::{RowPaint, paint_frame, paint_frozen_images, shape_frame};
 use crate::terminal_tab::paint::text::{paint_glyph_rows, paint_line_backgrounds_at, shape_lines};
 use crate::terminal_tab::pane_model::frame_record::FrameRecord;
+use crate::terminal_tab::search::{frame_highlights, frozen_highlights, paint_highlights};
 use crate::terminal_tab::view::TerminalPane;
 use crate::terminal_tab::{block_list, metrics};
 
@@ -235,17 +236,32 @@ impl Element for BlockListItem {
 
         match (self, prepaint) {
             (
-                BlockListItem::Frozen { cell, .. },
+                BlockListItem::Frozen { cell, pane, .. },
                 BlockListItemPrepaint::Frozen { view, shaped },
             ) => {
                 paint_frozen_images(bounds, view, *cell, window, false);
 
-                paint_frozen(bounds, view, shaped, *cell, selection_bg, window, cx);
+                let highlights = frozen_highlights(pane.read(cx), view, cx);
+
+                paint_frozen(
+                    bounds,
+                    view,
+                    RowPaint {
+                        text: shaped,
+                        highlights: &highlights,
+                    },
+                    *cell,
+                    selection_bg,
+                    window,
+                    cx,
+                );
 
                 paint_frozen_images(bounds, view, *cell, window, true);
             }
             (
-                BlockListItem::Live { frame, cell, .. },
+                BlockListItem::Live {
+                    frame, cell, pane, ..
+                },
                 BlockListItemPrepaint::Live {
                     tail_view,
                     tail_shaped,
@@ -253,20 +269,30 @@ impl Element for BlockListItem {
                     active_bounds,
                 },
             ) => {
+                let highlights = frozen_highlights(pane.read(cx), tail_view, cx);
+
                 paint_frozen(
                     bounds,
                     tail_view,
-                    tail_shaped,
+                    RowPaint {
+                        text: tail_shaped,
+                        highlights: &highlights,
+                    },
                     *cell,
                     selection_bg,
                     window,
                     cx,
                 );
 
+                let highlights = frame_highlights(pane.read(cx), frame, *cell, 0., cx);
+
                 paint_frame(
                     *active_bounds,
                     frame,
-                    active_shaped.as_slice(),
+                    RowPaint {
+                        text: active_shaped.as_slice(),
+                        highlights: &highlights,
+                    },
                     *cell,
                     0.0,
                     window,
@@ -311,12 +337,17 @@ fn shape_frozen_rows(rows: &[FrozenRow], cell_w: f32, window: &mut Window) -> Ve
 fn paint_frozen(
     bounds: Bounds<Pixels>,
     view: &FrozenView,
-    shaped: &[ShapedLine],
+    rows: RowPaint<'_>,
     cell: CellMetrics,
     selection_bg: TerminalColor,
     window: &mut Window,
     cx: &mut App,
 ) {
+    let RowPaint {
+        text: shaped,
+        highlights,
+    } = rows;
+
     for row in &view.rows {
         paint_line_backgrounds_at(bounds, &row.line, row.y, cell, window);
     }
@@ -339,6 +370,8 @@ fn paint_frozen(
             rgb(selection_bg.into()),
         ));
     }
+
+    paint_highlights(bounds, cell, highlights, window);
 
     paint_glyph_rows(
         bounds,

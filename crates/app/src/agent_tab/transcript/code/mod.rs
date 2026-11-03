@@ -25,9 +25,11 @@ use std::time::Duration;
 
 use gpui::prelude::*;
 use gpui::{
-    AsyncApp, Context, Entity, ListHorizontalSizingBehavior, Render, ScrollHandle, StyledText,
-    Subscription, Task, UniformListScrollHandle, WeakEntity, Window, div, px, uniform_list,
+    AsyncApp, Context, Entity, ListHorizontalSizingBehavior, Render, ScrollHandle, ScrollStrategy,
+    StyledText, Subscription, Task, UniformListScrollHandle, WeakEntity, Window, div, point, px,
+    uniform_list,
 };
+use gpui_base::text::search::{TextSearch, highlighted_text};
 use gpui_component::ActiveTheme as _;
 use gpui_component::scroll::Scrollbar;
 use gpui_component::spinner::Spinner;
@@ -36,7 +38,6 @@ use nmt_agent::chat::Item;
 use nmt_agent::transcript::conversation::{ContentChange, EntryChange};
 
 use crate::agent_tab::settings::{AgentSettings, UI_RADIUS};
-use crate::agent_tab::transcript::TranscriptView;
 use crate::agent_tab::transcript::code::parser::CodeParser;
 use crate::agent_tab::transcript::code::prepared::PreparedCode;
 use crate::agent_tab::transcript::code::render_cache::CodeRenderCache;
@@ -47,6 +48,7 @@ use crate::agent_tab::transcript::render::TRANSCRIPT_LINE_HEIGHT;
 use crate::agent_tab::transcript::render::text_style::{
     transcript_highlight_theme, transcript_text_style,
 };
+use crate::agent_tab::transcript::{TranscriptView, strip_read_gutter};
 
 pub(crate) fn is_code_item(item: &Item) -> bool {
     match item {
@@ -60,9 +62,28 @@ pub(crate) fn clean_output(text: &str) -> String {
     ansi::AnsiText::parse(text).text
 }
 
+pub(super) fn search_text(item: &Item) -> Option<String> {
+    let source = CodeSource::from_item(item)?;
+
+    let output = if source.strip_gutter {
+        strip_read_gutter(&source.output).unwrap_or(source.output)
+    } else {
+        source.output
+    };
+
+    let output = clean_output(&output);
+
+    Some(match source.command {
+        Some(command) if !output.is_empty() => format!("$ {command}\n\n{output}"),
+        Some(command) => format!("$ {command}"),
+        None => output,
+    })
+}
+
 #[derive(Default)]
 pub(crate) struct CodeTranscriptCache {
     entries: HashMap<usize, CachedCode>,
+    search: HashMap<usize, TextSearch>,
 }
 
 struct CachedCode {
@@ -72,6 +93,20 @@ struct CachedCode {
 }
 
 impl CodeTranscriptCache {
+    pub(super) fn set_search(
+        &mut self,
+        search: HashMap<usize, TextSearch>,
+        cx: &mut Context<TranscriptView>,
+    ) {
+        for (index, cached) in &self.entries {
+            cached.view.update(cx, |view, cx| {
+                view.set_search(search.get(index).cloned(), cx)
+            });
+        }
+
+        self.search = search;
+    }
+
     pub(crate) fn ensure(
         &mut self,
         index: usize,
@@ -100,6 +135,10 @@ impl CodeTranscriptCache {
 
         let source = CodeSource::from_item(item).expect("code transcript item");
         let view = cx.new(|cx| CodeView::new(source, cx));
+
+        view.update(cx, |view, cx| {
+            view.set_search(self.search.get(&index).cloned(), cx)
+        });
 
         let observation = cx.observe(&view, move |transcript, _, cx| {
             transcript.measurements.invalidate(index);
@@ -162,6 +201,8 @@ impl CodeTranscriptCache {
 }
 
 pub(crate) struct CodeView {
+    search: Option<TextSearch>,
+    reveal_search: bool,
     output_bytes: usize,
     generation: u64,
     revision: u64,
@@ -181,6 +222,25 @@ enum CodeUpdate {
 }
 
 impl CodeView {
+    fn set_search(&mut self, search: Option<TextSearch>, cx: &mut Context<Self>) {
+        let old = self
+            .search
+            .as_ref()
+            .and_then(|search| search.active.and_then(|index| search.matches.get(index)));
+
+        let new = search
+            .as_ref()
+            .and_then(|search| search.active.and_then(|index| search.matches.get(index)));
+
+        self.reveal_search |= new.is_some()
+            && old.map(|hit| (&hit.source.start, &hit.range))
+                != new.map(|hit| (&hit.source.start, &hit.range));
+
+        self.search = search;
+
+        cx.notify();
+    }
+
     fn new(source: CodeSource, cx: &mut Context<Self>) -> Self {
         let size = source.output.len() + source.command.as_ref().map_or(0, String::len);
 
@@ -199,6 +259,8 @@ impl CodeView {
             .map(|parser| Arc::new(parser.prepared.clone()));
 
         let mut view = Self {
+            search: None,
+            reveal_search: false,
             output_bytes,
             generation: 0,
             revision: 0,
@@ -326,7 +388,7 @@ impl CodeView {
 }
 
 impl Render for CodeView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(prepared) = self.prepared.clone() else {
             return div()
                 .w_full()
@@ -340,6 +402,62 @@ impl Render for CodeView {
         let foreground = cx.theme().foreground;
         let background = *cx.theme().tokens.muted;
 
+        if self.reveal_search
+            && let Some(found) = self
+                .search
+                .as_ref()
+                .and_then(|search| search.active.and_then(|index| search.matches.get(index)))
+        {
+            let row = prepared.segments.row_at_byte(found.range.start);
+
+            if prepared.virtualized {
+                self.virtual_scroll
+                    .scroll_to_item_strict(row, ScrollStrategy::Center);
+            }
+
+            let scroll = if prepared.virtualized {
+                self.virtual_scroll.0.borrow().base_handle.clone()
+            } else {
+                self.scroll.clone()
+            };
+
+            let search = self.search.clone().expect("active search");
+            let this = cx.entity().downgrade();
+
+            window.on_next_frame(move |_, cx| {
+                let Some(bounds) = *search.active_bounds.lock() else {
+                    return;
+                };
+
+                let viewport = scroll.bounds();
+                let old = scroll.offset();
+
+                let x = if bounds.left() < viewport.left() {
+                    bounds.left() - viewport.left()
+                } else if bounds.right() > viewport.right() {
+                    bounds.right() - viewport.right()
+                } else {
+                    px(0.)
+                };
+
+                let y = if bounds.top() < viewport.top() {
+                    bounds.top() - viewport.top()
+                } else if bounds.bottom() > viewport.bottom() {
+                    bounds.bottom() - viewport.bottom()
+                } else {
+                    px(0.)
+                };
+
+                scroll.set_offset(point(old.x - x, old.y - y));
+
+                let _ = this.update(cx, |view, cx| {
+                    view.reveal_search = false;
+
+                    cx.notify();
+                });
+            });
+        }
+
         self.render_cache
             .borrow_mut()
             .update(&prepared, &theme, foreground, background);
@@ -350,6 +468,7 @@ impl Render for CodeView {
             let line_height = font_size * TRANSCRIPT_LINE_HEIGHT;
             let source = prepared.clone();
             let cache = self.render_cache.clone();
+            let search = self.search.clone();
 
             return div()
                 .id("code-output")
@@ -375,10 +494,19 @@ impl Render for CodeView {
                                     .flex_none()
                                     .line_height(line_height)
                                     .whitespace_nowrap()
-                                    .child(
-                                        StyledText::new(segment.text.clone())
-                                            .with_highlights(styles),
-                                    ),
+                                    .child(match &search {
+                                        Some(search) => highlighted_text(
+                                            row,
+                                            segment.text.clone(),
+                                            styles,
+                                            search.clone(),
+                                            segment.range.start,
+                                        )
+                                        .into_any_element(),
+                                        None => StyledText::new(segment.text.clone())
+                                            .with_highlights(styles)
+                                            .into_any_element(),
+                                    }),
                             )
                         })
                         .collect::<Vec<_>>()
@@ -433,6 +561,7 @@ impl Render for CodeView {
                     .text_color(foreground)
                     .child(
                         TextView::new(&self.text_view)
+                            .search(self.search.clone())
                             .style(transcript_text_style(cx))
                             .selectable(true),
                     ),

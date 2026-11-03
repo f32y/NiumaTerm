@@ -8,6 +8,7 @@
 //! one modifier for the other would produce Cmd-Shift-T for a new tab, which is
 //! not what any macOS application does.
 
+use app::find;
 use app::terminal_tab::view::{NextBlock, PreviousBlock, SendShiftTab, SendTab};
 use gpui::{App, KeyBinding};
 
@@ -25,6 +26,8 @@ use crate::ui::{
 /// displays, and the key equivalent the platform then reserves for it, from the
 /// binding already registered for its action.
 pub(crate) fn bind(cx: &mut App) {
+    find::bind_keys(cx);
+
     cx.bind_keys(window_bindings());
 
     cx.bind_keys(terminal_bindings());

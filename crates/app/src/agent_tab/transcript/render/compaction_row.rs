@@ -138,6 +138,10 @@ fn render_compaction_detail(
         .read(cx)
         .clone();
 
+    text_views
+        .search_scrolls
+        .insert((index, TextPart::Summary), summary_scroll.clone());
+
     let block = v_flex()
         .w_full()
         .border_t_1()

@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use gpui::SharedString;
 use ropey::Rope;
-use sum_tree::{Bias, ContextLessSummary, Dimension, Item, SumTree};
+use sum_tree::{Bias, ContextLessSummary, Dimension, Dimensions, Item, SumTree};
 
 use crate::agent_tab::transcript::code::ansi::AnsiStyle;
 use crate::agent_tab::transcript::code::prepared::transcript_segments;
@@ -85,6 +85,14 @@ pub(super) struct CodeRows {
 }
 
 impl CodeRows {
+    pub(super) fn row_at_byte(&self, offset: usize) -> usize {
+        let mut cursor = self.tree.cursor::<Dimensions<ByteEnd, RowCount>>(());
+
+        cursor.seek(&ByteEnd(offset.saturating_add(1)), Bias::Left);
+
+        cursor.start().1.0.min(self.len().saturating_sub(1))
+    }
+
     pub(super) fn len(&self) -> usize {
         self.tree.summary().count
     }

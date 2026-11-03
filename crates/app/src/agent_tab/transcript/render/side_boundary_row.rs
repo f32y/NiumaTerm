@@ -99,6 +99,14 @@ fn render_side_boundary_detail(
         .read(cx)
         .clone();
 
+    text_views
+        .search_scrolls
+        .insert((index, TextPart::Instructions), scroll.clone());
+
+    text_views
+        .search_scrolls
+        .insert((index, TextPart::Message), scroll.clone());
+
     let mut section = |part: TextPart, heading: SharedString, text: String| {
         v_flex()
             .w_full()

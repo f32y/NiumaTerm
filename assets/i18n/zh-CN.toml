@@ -1377,3 +1377,8 @@ git-toggle-files = "显示/隐藏文件树"
 "agent-mermaid-zoom-in" = "放大"
 "agent-mermaid-zoom-out" = "缩小"
 "agent-mermaid-zoom-fit" = "适应窗口"
+
+"find-placeholder" = "搜索..."
+"find-previous" = "上一处 (Shift+Enter)"
+"find-next" = "下一处 (Enter)"
+"find-close" = "关闭搜索 (Esc)"

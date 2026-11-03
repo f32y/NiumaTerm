@@ -1378,3 +1378,8 @@ git-toggle-files = "Toggle file tree"
 "agent-mermaid-zoom-in" = "Zoom in"
 "agent-mermaid-zoom-out" = "Zoom out"
 "agent-mermaid-zoom-fit" = "Fit diagram"
+
+"find-placeholder" = "Find..."
+"find-previous" = "Previous match (Shift+Enter)"
+"find-next" = "Next match (Enter)"
+"find-close" = "Close search (Esc)"

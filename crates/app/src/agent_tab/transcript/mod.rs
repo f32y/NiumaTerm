@@ -26,6 +26,7 @@ mod render;
 mod reveal;
 mod row_structure;
 mod rows;
+mod search;
 mod text;
 mod typewriter;
 mod view;

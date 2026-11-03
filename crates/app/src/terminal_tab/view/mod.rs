@@ -34,6 +34,7 @@ use rust_i18n::t;
 use tracing::warn;
 
 use crate::copy_toast::show_text_copied;
+use crate::find::OpenFind;
 use crate::remote_control::{CloseTab, ControlSheet, HostControl};
 use crate::terminal_tab::block_list::live::LiveItemState;
 use crate::terminal_tab::frame::TerminalFrame;
@@ -46,6 +47,7 @@ use crate::terminal_tab::pane_model::{
 };
 use crate::terminal_tab::scrollbar::geometry::SCROLLBAR_AUTO_HIDE_DELAY;
 use crate::terminal_tab::scrollbar::scrollbar_element;
+use crate::terminal_tab::search::{self, SearchState};
 use crate::terminal_tab::settings::{TerminalSettings, duration_labels};
 use crate::terminal_tab::terminal_view::{BlockListItem, BlockListView, TerminalView};
 use crate::terminal_tab::view::key::{is_window_system_key, modifiers_state, terminal_key};
@@ -112,6 +114,7 @@ pub struct HostShare {
 }
 
 pub struct TerminalPane {
+    pub(super) search: SearchState,
     pub focus: FocusHandle,
     identity: PaneIdentity,
     pub(super) model: PaneController,
@@ -327,6 +330,7 @@ impl TerminalPane {
 
         Self {
             focus: cx.focus_handle(),
+            search: SearchState::default(),
             identity,
             model: PaneController::new(
                 surface,
@@ -867,6 +871,7 @@ impl TerminalPane {
 
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         if event.prefer_character_input
+            || !self.focus.is_focused(window)
             || self.sheet_shown
             || is_window_system_key(&event.keystroke)
         {
@@ -897,8 +902,11 @@ impl TerminalPane {
         }
     }
 
-    fn on_key_up(&mut self, event: &KeyUpEvent, _: &mut Window, cx: &mut Context<Self>) {
-        if self.sheet_shown || is_window_system_key(&event.keystroke) {
+    fn on_key_up(&mut self, event: &KeyUpEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.focus.is_focused(window)
+            || self.sheet_shown
+            || is_window_system_key(&event.keystroke)
+        {
             return;
         }
 
@@ -956,7 +964,9 @@ impl TerminalPane {
     /// dispatch before the pane's `on_key_down` listener. These actions are
     /// bound in the deeper `Terminal` context, which wins over `Root`.
     fn on_send_tab(&mut self, _: &SendTab, window: &mut Window, cx: &mut Context<Self>) {
-        if self.sheet_shown {
+        if self.sheet_shown || !self.focus.is_focused(window) {
+            cx.propagate();
+
             return;
         }
 
@@ -972,7 +982,9 @@ impl TerminalPane {
     }
 
     fn on_send_shift_tab(&mut self, _: &SendShiftTab, window: &mut Window, cx: &mut Context<Self>) {
-        if self.sheet_shown {
+        if self.sheet_shown || !self.focus.is_focused(window) {
+            cx.propagate();
+
             return;
         }
 
@@ -1312,6 +1324,8 @@ impl Render for TerminalPane {
 
         let frame = self.model.begin_frame();
 
+        search::refresh(self, cx);
+
         let show_block_chrome = self.model.settings.command_blocks;
 
         self.block_list
@@ -1363,6 +1377,7 @@ impl Render for TerminalPane {
             .overflow_hidden()
             .track_focus(&self.focus)
             .key_context("Terminal")
+            .on_action(cx.listener(|pane, _: &OpenFind, window, cx| search::open(pane, window, cx)))
             .on_action(cx.listener(Self::on_send_tab))
             .on_action(cx.listener(Self::on_send_shift_tab))
             .on_action(cx.listener(Self::on_previous_block))
@@ -1400,6 +1415,7 @@ impl Render for TerminalPane {
                 TerminalView::new(frame, cell, self.focus.clone(), cx.entity()).into_any_element()
             })
             .children(scrollbar)
+            .children(self.search.bar.clone().filter(|bar| bar.read(cx).visible))
             .children(sheet)
             // Ctrl-hover link underline. Rects are content-origin-relative;
             // absolute children position from the padding box, so shift by

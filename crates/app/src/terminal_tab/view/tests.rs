@@ -10,8 +10,11 @@ use nmt_config::local_state::TabState;
 
 use crate::terminal_tab::metrics::CellMetrics;
 use crate::terminal_tab::pane_model::test_session::{assert_input, controller};
+use crate::terminal_tab::search;
 use crate::terminal_tab::view::list_state::BlockListState;
-use crate::terminal_tab::view::{AgentInterrupted, PaneIdentity, TerminalPane};
+use crate::terminal_tab::view::{
+    AgentInterrupted, PaneIdentity, SendShiftTab, SendTab, TerminalPane,
+};
 use crate::terminal_tab::wake::wake_channel;
 
 fn pane(cx: &mut VisualTestContext) -> Entity<TerminalPane> {
@@ -19,6 +22,7 @@ fn pane(cx: &mut VisualTestContext) -> Entity<TerminalPane> {
 
     cx.new(|cx| TerminalPane {
         focus: cx.focus_handle(),
+        search: Default::default(),
         identity: PaneIdentity {
             id: 1,
             profile_name: "Test".into(),
@@ -168,6 +172,8 @@ fn keyboard_events_and_native_text_use_the_requested_reporting_mode(cx: &mut Tes
         pane.update(cx, |pane, cx| {
             pane.model = model;
 
+            window.focus(&pane.focus, cx);
+
             let mut event = KeyDownEvent {
                 keystroke: Keystroke {
                     modifiers: Modifiers::none(),
@@ -207,12 +213,81 @@ fn keyboard_events_and_native_text_use_the_requested_reporting_mode(cx: &mut Tes
 }
 
 #[gpui::test]
+fn find_input_does_not_send_terminal_keys_and_close_restores_input(cx: &mut TestAppContext) {
+    cx.update(gpui_component::init);
+
+    let cx = cx.add_empty_window();
+    let pane = pane(cx);
+    let (model, input) = controller(b"\x1b[>27u", false);
+
+    cx.update(|window, cx| {
+        pane.update(cx, |pane, cx| {
+            pane.model = model;
+
+            window.focus(&pane.focus, cx);
+
+            search::open(pane, window, cx);
+
+            let key = Keystroke {
+                modifiers: Modifiers::none(),
+                key: "a".into(),
+                key_char: Some("a".into()),
+            };
+
+            pane.on_key_down(
+                &KeyDownEvent {
+                    keystroke: key.clone(),
+                    is_held: false,
+                    prefer_character_input: false,
+                },
+                window,
+                cx,
+            );
+
+            pane.on_key_up(
+                &KeyUpEvent {
+                    keystroke: key.clone(),
+                },
+                window,
+                cx,
+            );
+
+            pane.on_send_tab(&SendTab, window, cx);
+            pane.on_send_shift_tab(&SendShiftTab, window, cx);
+
+            pane.search
+                .bar
+                .clone()
+                .unwrap()
+                .update(cx, |bar, cx| bar.close(window, cx));
+
+            assert!(pane.focus.is_focused(window));
+
+            pane.on_key_down(
+                &KeyDownEvent {
+                    keystroke: key,
+                    is_held: false,
+                    prefer_character_input: false,
+                },
+                window,
+                cx,
+            );
+        })
+    });
+
+    assert_input(&input, b"\x1b[97;1;97u");
+}
+
+#[gpui::test]
 fn accepted_plain_escape_emits_interrupt_but_modified_or_rejected_escape_does_not(
     cx: &mut TestAppContext,
 ) {
     let cx = cx.add_empty_window();
     let pane = pane(cx);
     let interrupts = Rc::new(Cell::new(0));
+
+    cx.update(|window, cx| pane.update(cx, |pane, cx| window.focus(&pane.focus, cx)));
+
     let observed = interrupts.clone();
 
     let _subscription = cx.update(|_, cx| {
@@ -264,6 +339,8 @@ fn accepted_plain_escape_emits_interrupt_but_modified_or_rejected_escape_does_no
 fn typing_respects_scroll_setting_for_key_and_ime_input(cx: &mut TestAppContext) {
     let cx = cx.add_empty_window();
     let pane = pane(cx);
+
+    cx.update(|window, cx| pane.update(cx, |pane, cx| window.focus(&pane.focus, cx)));
 
     for scroll_when_typing in [false, true] {
         for ime in [false, true] {

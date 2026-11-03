@@ -9,7 +9,13 @@ use tracing::error;
 
 use crate::terminal_tab::frame::{TerminalCursor, TerminalFrame};
 use crate::terminal_tab::paint::text::{paint_glyph_rows, paint_line_backgrounds_at, shape_lines};
+use crate::terminal_tab::search::{RowHighlight, paint_highlights};
 use crate::terminal_tab::{block_list, frame, graphics, metrics};
+
+pub(crate) struct RowPaint<'a> {
+    pub(crate) text: &'a [ShapedLine],
+    pub(crate) highlights: &'a [RowHighlight],
+}
 
 pub(crate) fn shape_frame(
     bounds: Bounds<Pixels>,
@@ -34,13 +40,18 @@ pub(crate) fn shape_frame(
 pub(crate) fn paint_frame(
     bounds: Bounds<Pixels>,
     frame: &TerminalFrame,
-    lines: &[ShapedLine],
+    rows: RowPaint<'_>,
     cell: metrics::CellMetrics,
     slack: f32,
     window: &mut Window,
     cx: &mut App,
 ) {
     use crate::terminal_tab::frame::ZLayer;
+
+    let RowPaint {
+        text: lines,
+        highlights,
+    } = rows;
 
     // Kitty images below cell backgrounds (z < i32::MIN/2).
     paint_frame_images(bounds, frame, ZLayer::BelowBackground, cell, slack, window);
@@ -59,6 +70,7 @@ pub(crate) fn paint_frame(
     paint_frame_images(bounds, frame, ZLayer::BelowText, cell, slack, window);
 
     paint_cursor(bounds, frame.cursor(), cell, slack, window);
+    paint_highlights(bounds, cell, highlights, window);
 
     paint_glyph_rows(
         bounds,

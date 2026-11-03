@@ -8,6 +8,7 @@ pub mod agent_tab;
 pub mod assets;
 pub mod copy_toast;
 pub mod design;
+pub mod find;
 pub mod platform_style;
 pub mod remote_control;
 pub mod syntax;

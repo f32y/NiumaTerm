@@ -53,6 +53,7 @@ use crate::agent_tab::transcript::rows::{
     MessageBlock, PickerReservation, RowGap, TranscriptRow, folds_turns, is_run_row, spaced_rows,
     turn_opening_prompts,
 };
+use crate::agent_tab::transcript::search::{self, SearchState};
 use crate::agent_tab::transcript::text::{TextPart, TranscriptTextCache};
 use crate::agent_tab::transcript::typewriter::ReplyTyping;
 use crate::agent_tab::transcript::{
@@ -70,6 +71,7 @@ use crate::agent_tab::transcript::{
 /// own conversation and a child agent's conversation render through here, so
 /// their presentation cannot drift apart.
 pub struct TranscriptView {
+    pub(super) search: SearchState,
     pub(super) measurements: Measurements,
     logical_rows: Vec<TranscriptRow>,
     logical_starts: Vec<usize>,
@@ -136,6 +138,10 @@ pub(crate) struct TranscriptAttribution {
 }
 
 impl TranscriptView {
+    pub(crate) fn open_find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        search::open(self, window, cx);
+    }
+
     pub fn new(kind: AgentKind, cwd: Option<String>) -> Self {
         let collapse_mode = CollapseRows::default();
 
@@ -163,6 +169,7 @@ impl TranscriptView {
                 state
             },
             rows: Vec::new(),
+            search: SearchState::default(),
             transcript_font: Default::default(),
             preview: ImagePreviewLayer::default(),
             picker: PickerReservation::default(),
@@ -289,6 +296,8 @@ impl TranscriptView {
     }
 
     pub(crate) fn reset_presentation(&mut self) {
+        search::reset(self);
+
         self.preview.image_preview = ImagePreview::Closed;
 
         self.image_previews.borrow_mut().clear();
@@ -570,7 +579,11 @@ impl TranscriptView {
             SessionItem::AgentMessage {
                 text: Some(text), ..
             } => self.render_agent_row(index, self.shown_reply(index, text), cx),
-            SessionItem::Error { text } => error_row(index, text.clone(), cx),
+            SessionItem::Error { text } => error_row(
+                index,
+                self.text_views.view(index, TextPart::Error, text, cx),
+                cx,
+            ),
             SessionItem::TaskList { tasks, .. } => {
                 task_list_row::render_task_list_row(index, tasks, cx)
             }
@@ -736,6 +749,10 @@ impl TranscriptView {
                 .read(cx)
                 .clone();
 
+            self.text_views
+                .search_scrolls
+                .insert((index, TextPart::Work), detail_scroll.clone());
+
             bounded_scroll(
                 &detail_scroll,
                 ("wl-scrollbar", index),
@@ -842,6 +859,8 @@ impl TranscriptView {
     /// User prompt text is replaced as a whole, so retaining its expanded
     /// state for an exit would delay the visible response to a click.
     pub(super) fn toggle_user_prompt(&mut self, index: usize, cx: &mut Context<Self>) {
+        self.search.automatic.remove(&RevealKey::Row(index));
+
         let key = RevealKey::Row(index);
 
         if !self.transcript_list.is_following_tail() {
@@ -873,6 +892,7 @@ impl TranscriptView {
     /// [`Self::settle_shut_disclosures`] takes the content down once there is
     /// no exit left to run.
     pub(crate) fn toggle_disclosure(&mut self, key: RevealKey, cx: &mut Context<Self>) {
+        self.search.automatic.remove(&key);
         self.invalidate_disclosure_rows(key);
 
         if !self.transcript_list.is_following_tail() {
@@ -1291,6 +1311,8 @@ impl Render for TranscriptView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_content();
 
+        search::refresh(self, cx);
+
         // Content whose exit has finished leaves the transcript before the
         // rows are built, so the removal and the specs it changes land in one
         // pass instead of a frame apart.
@@ -1387,6 +1409,8 @@ impl Render for TranscriptView {
         }
 
         self.refresh_rows(collapse_tool_calls);
+
+        search::after_rows(self, window, cx);
 
         for range in self.measurements.take_ranges() {
             self.transcript_list.remeasure_items(range);
@@ -1524,6 +1548,7 @@ impl Render for TranscriptView {
                         ),
                 )
             })
+            .children(self.search.bar.clone().filter(|bar| bar.read(cx).visible))
             .children(self.preview.render_zoomed_image(now, window, cx))
     }
 }

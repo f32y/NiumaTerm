@@ -4,8 +4,9 @@ use std::sync::Arc;
 
 #[cfg(test)]
 use gpui::EntityId;
-use gpui::{AppContext as _, Context, Entity, Subscription};
+use gpui::{AppContext as _, Context, Entity, ScrollHandle, Subscription};
 use gpui_base::text::TextFragment;
+use gpui_base::text::search::TextSearch;
 use gpui_component::text::{TextView, TextViewState};
 
 use crate::agent_tab::transcript::TranscriptView;
@@ -20,6 +21,7 @@ pub(super) enum TextPart {
     Message,
     Prompt,
     Annotation(usize),
+    Error,
 }
 
 /// Parsed text must outlast the elements a virtual list creates for each
@@ -27,6 +29,8 @@ pub(super) enum TextPart {
 /// in place of a previously visible reply.
 #[derive(Default)]
 pub(super) struct TranscriptTextCache {
+    pub(super) search: HashMap<(usize, TextPart), TextSearch>,
+    pub(super) search_scrolls: HashMap<(usize, TextPart), ScrollHandle>,
     entries: HashMap<(usize, TextPart), CachedText>,
     entry_count: usize,
     mermaid: Option<Entity<MermaidCache>>,
@@ -139,7 +143,12 @@ impl TranscriptTextCache {
             cached.fragments.remove(&oldest);
         }
 
-        MermaidCache::extend(TextView::new(&state), mermaid, index, TextPart::Reply)
+        MermaidCache::extend(
+            TextView::new(&state).search(self.search.get(&(index, TextPart::Reply)).cloned()),
+            mermaid,
+            index,
+            TextPart::Reply,
+        )
     }
 
     pub(super) fn view(
@@ -149,7 +158,10 @@ impl TranscriptTextCache {
         text: &str,
         cx: &mut Context<TranscriptView>,
     ) -> TextView {
-        let mermaid = if matches!(part, TextPart::Prompt | TextPart::Annotation(_)) {
+        let mermaid = if matches!(
+            part,
+            TextPart::Prompt | TextPart::Annotation(_) | TextPart::Error
+        ) {
             None
         } else {
             let owner = cx.entity().downgrade();
@@ -173,7 +185,9 @@ impl TranscriptTextCache {
             }
             Entry::Vacant(entry) => {
                 let state = cx.new(|cx| match part {
-                    TextPart::Prompt | TextPart::Annotation(_) => TextViewState::plain(text, cx),
+                    TextPart::Prompt | TextPart::Annotation(_) | TextPart::Error => {
+                        TextViewState::plain(text, cx)
+                    }
                     _ => TextViewState::markdown(text, cx),
                 });
 
@@ -222,14 +236,17 @@ impl TranscriptTextCache {
             }
         };
 
-        let view = TextView::new(&cached.state);
+        let view = TextView::new(&cached.state).search(self.search.get(&(index, part)).cloned());
         let initialize_blocks = part == TextPart::Reply && cached.clock == 0;
 
         if initialize_blocks {
             cached.clock = 1;
         }
 
-        if matches!(part, TextPart::Prompt | TextPart::Annotation(_)) {
+        if matches!(
+            part,
+            TextPart::Prompt | TextPart::Annotation(_) | TextPart::Error
+        ) {
             return view;
         }
 
@@ -260,6 +277,8 @@ impl TranscriptTextCache {
 
     pub(super) fn clear(&mut self) {
         self.entries.clear();
+        self.search.clear();
+        self.search_scrolls.clear();
 
         self.mermaid = None;
 

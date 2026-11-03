@@ -13,7 +13,8 @@ use gpui::{
 use crate::terminal_tab::block_list::FrozenItemChrome;
 use crate::terminal_tab::frame::TerminalFrame;
 use crate::terminal_tab::metrics;
-use crate::terminal_tab::paint::frame::{paint_frame, shape_frame};
+use crate::terminal_tab::paint::frame::{RowPaint, paint_frame, shape_frame};
+use crate::terminal_tab::search::frame_highlights;
 use crate::terminal_tab::theme::{BLOCK_GUTTER_GAP, BLOCK_GUTTER_WIDTH, SEPARATOR_COLOR};
 use crate::terminal_tab::view::TerminalPane;
 
@@ -121,10 +122,21 @@ impl Element for TerminalView {
         window: &mut Window,
         cx: &mut App,
     ) {
+        let highlights = frame_highlights(
+            self.pane.read(cx),
+            &self.frame,
+            self.cell,
+            prepaint.bottom_slack,
+            cx,
+        );
+
         paint_frame(
             bounds,
             &self.frame,
-            prepaint.shaped.as_slice(),
+            RowPaint {
+                text: prepaint.shaped.as_slice(),
+                highlights: &highlights,
+            },
             self.cell,
             prepaint.bottom_slack,
             window,

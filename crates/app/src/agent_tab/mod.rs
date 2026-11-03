@@ -155,6 +155,7 @@ use crate::agent_tab::view::recent_sessions::{ListControl, RecentSessionsMode, S
 use crate::agent_tab::view::selection_menu::show_selected_text_menu;
 use crate::agent_tab::view::side_questions::{SideChatWindow, SideThread, side_chat_window};
 use crate::agent_tab::workflows::WorkflowUi;
+use crate::find::OpenFind;
 use crate::remote_control::{CloseTab, ControlSheet, HostControl};
 
 #[derive(Clone)]
@@ -5210,6 +5211,10 @@ impl Render for AgentPane {
 
             return v_flex()
                 .id("agent-pane")
+            .key_context("AgentPane")
+            .on_action(cx.listener(|pane, _: &OpenFind, window, cx| {
+                pane.transcript.update(cx, |view, cx| view.open_find(window, cx));
+            }))
                 .role(Role::Pane)
                 .size_full()
                 .min_h_0()
@@ -5438,6 +5443,11 @@ impl Render for AgentPane {
             // it needs its own node so screen readers announce it instead of
             // the whole window.
             .id("agent-pane")
+            .key_context("AgentPane")
+            .on_action(cx.listener(|pane, _: &OpenFind, window, cx| {
+                pane.transcript
+                    .update(cx, |view, cx| view.open_find(window, cx));
+            }))
             .role(Role::Pane)
             .size_full()
             .relative()
