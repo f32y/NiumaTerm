@@ -1,12 +1,13 @@
 use std::{cell::RefCell, ops::RangeInclusive, rc::Rc};
 
+use gpui::{App, Bounds, EntityId, Hitbox, Pixels, Point, WeakEntity, Window};
+
+use crate::text::TextViewState;
+use crate::text::fragment::FragmentSelection;
 use crate::{
     TextSelectionContentKey, TextSelectionCoverage, TextSelectionEndpoint, TextSelectionEvent,
     TextSelectionHandle, TextSelectionRegistration, TextSelectionSnapshot,
 };
-use gpui::{App, Bounds, EntityId, Hitbox, Pixels, Point, WeakEntity, Window};
-
-use super::TextViewState;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct CachedBlockEndpoint {
@@ -75,9 +76,63 @@ pub(super) struct TextViewSelectionAdapter {
     text_bounds: Vec<Bounds<Pixels>>,
     multi_click_bounds: Vec<Bounds<Pixels>>,
     layout_revision: Option<usize>,
+    virtual_group: Option<(EntityId, usize)>,
 }
 
 impl TextViewSelectionAdapter {
+    pub(crate) fn attach_fragment(
+        &mut self,
+        group: Rc<RefCell<FragmentSelection>>,
+        index: usize,
+        view: WeakEntity<TextViewState>,
+        cx: &mut App,
+    ) -> EntityId {
+        let id = self.selection.entity_id();
+
+        {
+            let mut group = group.borrow_mut();
+
+            let group_id = *group.id.get_or_insert(id);
+
+            group.members.insert(id, (index, view));
+
+            self.virtual_group = Some((group_id, index));
+        }
+
+        let events = group.clone();
+
+        self.selection
+            .subscribe(
+                move |event, _| {
+                    let mut group = events.borrow_mut();
+
+                    match event {
+                        TextSelectionEvent::SelectionChanged(Some(snapshot)) => {
+                            group.snapshots.insert(id, *snapshot);
+                        }
+                        TextSelectionEvent::SelectionChanged(None)
+                        | TextSelectionEvent::Cleared => {
+                            group.snapshots.remove(&id);
+                        }
+                        _ => {}
+                    }
+                },
+                cx,
+            )
+            .detach();
+
+        self.selection.copy_with(
+            move |cx| {
+                let group = group.borrow();
+
+                group.copy(id, cx)
+            },
+            cx,
+        );
+
+        id
+    }
+
     pub(super) fn new(view: WeakEntity<TextViewState>, cx: &mut App) -> Self {
         let selection = TextSelectionHandle::new("", cx);
         let selection_id = selection.entity_id();
@@ -188,6 +243,7 @@ impl TextViewSelectionAdapter {
             text_bounds: Vec::new(),
             multi_click_bounds: Vec::new(),
             layout_revision: None,
+            virtual_group: None,
         }
     }
 
@@ -223,14 +279,16 @@ impl TextViewSelectionAdapter {
         window: &mut Window,
         cx: &mut App,
     ) {
-        self.selection.register(
-            TextSelectionRegistration::new(hitbox, bounds)
-                .with_scroll_offset(scroll_offset)
-                .with_document_order(document_order)
-                .with_text_bounds(self.text_bounds.clone()),
-            window,
-            cx,
-        );
+        let mut registration = TextSelectionRegistration::new(hitbox, bounds)
+            .with_scroll_offset(scroll_offset)
+            .with_document_order(document_order)
+            .with_text_bounds(self.text_bounds.clone());
+
+        if let Some((group, index)) = self.virtual_group {
+            registration = registration.with_virtual_group(group, index);
+        }
+
+        self.selection.register(registration, window, cx);
     }
 
     pub(super) fn selection_points(&self, cx: &App) -> Option<(Point<Pixels>, Point<Pixels>)> {

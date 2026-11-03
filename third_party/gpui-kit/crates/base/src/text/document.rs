@@ -1,9 +1,9 @@
+use std::{ops::RangeInclusive, sync::Arc};
+
 use gpui::{
     App, InteractiveElement as _, IntoElement, ListState, ParentElement as _, SharedString,
     Styled as _, Window, div,
 };
-
-use std::{ops::RangeInclusive, sync::Arc};
 
 use crate::text::{
     SelectionFormat,
@@ -177,6 +177,7 @@ impl ParsedDocument {
 
     pub(super) fn render_root(
         &self,
+        final_block: bool,
         list_state: Option<ListState>,
         node_cx: &NodeContext,
         window: &mut Window,
@@ -187,7 +188,8 @@ impl ParsedDocument {
             return div()
                 .id("document")
                 .children(self.blocks.iter().enumerate().map(move |(ix, node)| {
-                    let is_last = ix + 1 == blocks_len;
+                    let is_last = final_block && ix + 1 == blocks_len;
+
                     node.render_block(
                         NodeRenderOptions {
                             ix,
@@ -216,7 +218,8 @@ impl ParsedDocument {
                 let node_cx = node_cx.clone();
                 let blocks = blocks.clone();
                 move |ix, window, cx| {
-                    let is_last = ix + 1 == blocks.len();
+                    let is_last = final_block && ix + 1 == blocks.len();
+
                     blocks[ix]
                         .render_block(
                             NodeRenderOptions {

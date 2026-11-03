@@ -1,5 +1,9 @@
+#[cfg(test)]
+#[path = "text_selection_bounds_tests.rs"]
+mod bounds_tests;
+
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     ops::Range,
     rc::Rc,
     sync::atomic::{AtomicU64, Ordering},
@@ -15,10 +19,6 @@ use gpui::{
 
 use crate::text_boundary::{line_range_at, word_range_at};
 use crate::{AutoScroll, GlobalState};
-
-#[cfg(test)]
-#[path = "text_selection_bounds_tests.rs"]
-mod bounds_tests;
 
 /// An opaque selection layer identifier.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -212,6 +212,7 @@ pub struct TextSelectionRegistration {
     scope: TextSelectionScopeId,
     document_order: u64,
     text_bounds: Vec<Bounds<Pixels>>,
+    virtual_group: Option<(EntityId, usize)>,
 }
 
 impl TextSelectionRegistration {
@@ -224,6 +225,7 @@ impl TextSelectionRegistration {
             scope: TextSelectionScopeId::default(),
             document_order: 0,
             text_bounds: Vec::new(),
+            virtual_group: None,
         }
     }
 
@@ -243,6 +245,24 @@ impl TextSelectionRegistration {
     pub fn with_document_order(mut self, document_order: u64) -> Self {
         self.document_order = document_order;
         self
+    }
+
+    /// Keeps selected endpoints available while other blocks of the same
+    /// virtual document are visible. The index orders blocks within that document.
+    pub fn with_virtual_group(mut self, group: EntityId, index: usize) -> Self {
+        self.virtual_group = Some((group, index));
+
+        self
+    }
+
+    fn position(&self, groups: &HashMap<EntityId, u64>) -> (u64, usize) {
+        self.virtual_group
+            .map_or((self.document_order, 0), |(group, index)| {
+                (
+                    groups.get(&group).copied().unwrap_or(self.document_order),
+                    index,
+                )
+            })
     }
 
     /// Sets the glyph-bearing bounds used to reject blank-only gestures.
@@ -823,6 +843,7 @@ struct ParticipantRegistration {
     participant: WeakEntity<SelectableTextState>,
     registration: Rc<TextSelectionRegistration>,
     generation: u64,
+    visible: bool,
 }
 
 #[derive(Clone)]
@@ -1004,11 +1025,36 @@ impl WindowSelectionState {
     /// whether a participant or the lifecycle element paints first.
     pub fn finish_frame(&mut self, cx: &mut App) -> Vec<ClearHandler> {
         self.finish_frame_scheduled = false;
+
+        let live_groups = self
+            .participants
+            .values()
+            .filter(|entry| entry.generation == self.frame_generation)
+            .filter_map(|entry| entry.registration.virtual_group.map(|(group, _)| group))
+            .collect::<HashSet<_>>();
+
+        let anchor = self.anchor.as_ref().and_then(SelectionEndpoint::entity_id);
+        let cursor = self.cursor.as_ref().and_then(SelectionEndpoint::entity_id);
+        let generation = self.frame_generation;
+
         let stale = self
             .participants
-            .iter()
+            .iter_mut()
             .filter_map(|(id, registration)| {
-                (registration.generation != self.frame_generation)
+                registration.visible = registration.generation == generation;
+
+                let retain_endpoint = registration
+                    .registration
+                    .virtual_group
+                    .is_some_and(|(group, _)| live_groups.contains(&group))
+                    && (anchor == Some(*id)
+                        || cursor == Some(*id)
+                        || registration
+                            .participant
+                            .upgrade()
+                            .is_some_and(|participant| participant.read(cx).local_selection));
+
+                (!registration.visible && !retain_endpoint)
                     .then(|| (*id, registration.participant.clone()))
             })
             .collect::<Vec<_>>();
@@ -1048,6 +1094,7 @@ impl WindowSelectionState {
                 participant: selection.downgrade(),
                 registration: Rc::new(registration),
                 generation: self.frame_generation,
+                visible: true,
             },
         );
         self.publish_snapshots(cx);
@@ -1102,13 +1149,15 @@ impl WindowSelectionState {
     }
 
     fn copy_items(&self, cx: &App) -> Vec<CopyItem> {
+        let groups = self.group_orders();
+
         self.participants
             .values()
             .filter_map(|registration| {
                 let participant = registration.participant.upgrade()?;
                 participant
                     .read(cx)
-                    .copy_item(registration.registration.document_order)
+                    .copy_item(registration.registration.position(&groups).0)
             })
             .collect()
     }
@@ -1138,7 +1187,20 @@ impl WindowSelectionState {
         let cursor_endpoint = self.cursor.as_ref()?;
         let anchor = anchor_endpoint.resolve(&self.participants)?;
         let cursor = cursor_endpoint.resolve(&self.participants)?;
-        (anchor != cursor).then(|| {
+
+        let distinct_blocks = anchor_endpoint
+            .entity_id()
+            .zip(cursor_endpoint.entity_id())
+            .and_then(|(anchor, cursor)| {
+                self.participants
+                    .get(&anchor)?
+                    .registration
+                    .virtual_group
+                    .zip(self.participants.get(&cursor)?.registration.virtual_group)
+            })
+            .is_some_and(|((a, ai), (b, bi))| a == b && ai != bi);
+
+        (anchor != cursor || distinct_blocks).then(|| {
             TextSelectionSnapshot::new(anchor_endpoint.snapshot(), cursor_endpoint.snapshot())
                 .with_selecting(self.is_selecting)
                 .with_window_points(Some(TextSelectionWindowPoints { anchor, cursor }))
@@ -1334,7 +1396,8 @@ impl WindowSelectionState {
         )> = None;
 
         for registration in self.participants.values() {
-            if registration.registration.scope != self.active_scope
+            if !registration.visible
+                || registration.registration.scope != self.active_scope
                 || registration.participant.upgrade().is_none()
             {
                 continue;
@@ -1428,24 +1491,71 @@ impl WindowSelectionState {
         self.prune_dead_participants();
         let snapshot = self.snapshot();
         let single_participant = self.single_participant();
+        let groups = self.group_orders();
+
         for (id, registration) in &self.participants {
             let Some(participant) = registration.participant.upgrade() else {
                 continue;
             };
             let participant_snapshot = (registration.registration.scope == self.active_scope
-                && self.participates(*id, registration)
+                && self.participates(*id, registration, &groups)
                 && single_participant.is_none_or(|single| single == *id))
             .then_some(snapshot)
             .flatten()
             .map(|mut snapshot| {
-                snapshot.coverage = self.coverage_for(*id);
+                snapshot.coverage = self.coverage_for(*id, &groups);
+
+                if registration.registration.virtual_group.is_some() {
+                    let bounds = registration.registration.bounds;
+                    let start = bounds.origin - point(px(1.), px(1.));
+                    let end = bounds.bottom_right() + point(px(1.), px(1.));
+
+                    let own_endpoint = if snapshot.anchor.entity_id() == Some(*id) {
+                        snapshot.anchor.point
+                    } else {
+                        snapshot.cursor.point
+                    } + bounds.origin
+                        + registration.registration.scroll_offset;
+
+                    snapshot.window_points = match snapshot.coverage {
+                        TextSelectionCoverage::Full => Some(TextSelectionWindowPoints {
+                            anchor: start,
+                            cursor: end,
+                        }),
+                        TextSelectionCoverage::FromStart => Some(TextSelectionWindowPoints {
+                            anchor: start,
+                            cursor: own_endpoint,
+                        }),
+                        TextSelectionCoverage::ToEnd => Some(TextSelectionWindowPoints {
+                            anchor: own_endpoint,
+                            cursor: end,
+                        }),
+                        TextSelectionCoverage::Bounded => snapshot.window_points,
+                    };
+                }
+
                 snapshot
             });
             participant.update(cx, |state, cx| state.set_snapshot(participant_snapshot, cx));
         }
     }
 
-    fn coverage_for(&self, id: EntityId) -> TextSelectionCoverage {
+    fn group_orders(&self) -> HashMap<EntityId, u64> {
+        let mut groups = HashMap::<EntityId, u64>::new();
+
+        for entry in self.participants.values().filter(|entry| entry.visible) {
+            if let Some((group, _)) = entry.registration.virtual_group {
+                groups
+                    .entry(group)
+                    .and_modify(|order| *order = (*order).min(entry.registration.document_order))
+                    .or_insert(entry.registration.document_order);
+            }
+        }
+
+        groups
+    }
+
+    fn coverage_for(&self, id: EntityId, groups: &HashMap<EntityId, u64>) -> TextSelectionCoverage {
         let Some(anchor) = self.anchor.as_ref().and_then(SelectionEndpoint::entity_id) else {
             return TextSelectionCoverage::Bounded;
         };
@@ -1455,8 +1565,10 @@ impl WindowSelectionState {
         if anchor == cursor {
             return TextSelectionCoverage::Bounded;
         }
-        let anchor_order = self.participants[&anchor].registration.document_order;
-        let cursor_order = self.participants[&cursor].registration.document_order;
+
+        let anchor_order = self.participants[&anchor].registration.position(groups);
+        let cursor_order = self.participants[&cursor].registration.position(groups);
+
         if id != anchor && id != cursor {
             TextSelectionCoverage::Full
         } else if (id == anchor) == (anchor_order < cursor_order) {
@@ -1472,7 +1584,12 @@ impl WindowSelectionState {
         (anchor == cursor).then_some(anchor)
     }
 
-    fn participates(&self, id: EntityId, registration: &ParticipantRegistration) -> bool {
+    fn participates(
+        &self,
+        id: EntityId,
+        registration: &ParticipantRegistration,
+        groups: &HashMap<EntityId, u64>,
+    ) -> bool {
         let Some(anchor) = self.anchor.as_ref().and_then(SelectionEndpoint::entity_id) else {
             return false;
         };
@@ -1487,13 +1604,15 @@ impl WindowSelectionState {
         };
         let start = anchor_registration
             .registration
-            .document_order
-            .min(cursor_registration.registration.document_order);
+            .position(groups)
+            .min(cursor_registration.registration.position(groups));
+
         let end = anchor_registration
             .registration
-            .document_order
-            .max(cursor_registration.registration.document_order);
-        (start..=end).contains(&registration.registration.document_order)
+            .position(groups)
+            .max(cursor_registration.registration.position(groups));
+
+        (start..=end).contains(&registration.registration.position(groups))
             || id == anchor
             || id == cursor
     }
@@ -1677,7 +1796,8 @@ impl TextSelection {
         let state = live_text_selection_state(window, cx)?;
         let state = state.read(cx);
         let mut result: Option<Bounds<Pixels>> = None;
-        for entry in state.participants.values() {
+
+        for entry in state.participants.values().filter(|entry| entry.visible) {
             if entry.registration.scope != state.active_scope {
                 continue;
             }
@@ -2064,17 +2184,19 @@ pub(crate) fn clear_window_text_selection(window_id: gpui::WindowId, cx: &mut Ap
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::ElementExt as _;
+    use std::{
+        cell::{Cell, RefCell},
+        rc::Rc,
+    };
+
     use gpui::{
         Bounds, ContentMask, Context, Hitbox, HitboxBehavior, HitboxId, InteractiveElement as _,
         IntoElement, ParentElement as _, Render, SharedString, Styled as _, StyledText,
         TestAppContext, TextLayout, Window, div, point, prelude::FluentBuilder as _, px, size,
     };
-    use std::{
-        cell::{Cell, RefCell},
-        rc::Rc,
-    };
+
+    use crate::ElementExt as _;
+    use crate::text_selection::*;
 
     struct FakeParticipant {
         selection: TextSelectionHandle,

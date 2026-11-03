@@ -1,22 +1,29 @@
+pub use crate::text::fragment::TextFragment;
+pub use crate::text::markdown_ext::*;
+pub use crate::text::node::{CodeBlock, TableData};
+pub use crate::text::state::*;
+pub use crate::text::style::*;
+pub use crate::text::text_view::*;
+
+pub(crate) mod selection;
+
 mod document;
 mod format;
+mod fragment;
 mod inline;
 mod inline_flow;
 mod markdown_ext;
 mod node;
-pub(crate) mod selection;
 mod selection_adapter;
 mod state;
 mod style;
 mod text_view;
 mod utils;
 
+#[cfg(test)]
+mod fragment_tests;
+
 use gpui::{App, ElementId, IntoElement, RenderOnce, SharedString, Window};
-pub use markdown_ext::*;
-pub use node::{CodeBlock, TableData};
-pub use state::*;
-pub use style::*;
-pub use text_view::*;
 
 pub(crate) fn init(cx: &mut App) {
     state::init(cx);

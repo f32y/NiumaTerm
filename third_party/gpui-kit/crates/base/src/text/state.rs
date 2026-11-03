@@ -1,4 +1,12 @@
-use futures::Stream as _;
+#[cfg(test)]
+#[path = "state/tests.rs"]
+mod nmt_tests;
+#[cfg(test)]
+#[path = "state/streaming_tests.rs"]
+mod streaming_tests;
+
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::{
     ops::{Range, RangeInclusive},
     pin::Pin,
@@ -6,12 +14,14 @@ use std::{
     task::Poll,
 };
 
+use futures::Stream as _;
 use gpui::{
     App, AppContext as _, Bounds, Context, FocusHandle, HighlightStyle, IntoElement, KeyBinding,
     ListState, ParentElement as _, Pixels, Point, Render, SharedString, Styled as _, Task, Window,
     prelude::FluentBuilder as _, px,
 };
 
+use crate::text::fragment::{FragmentSelection, FragmentView, TextFragment};
 use crate::{
     AutoScroll, ElementExt, TextSelection,
     async_util::{Receiver, Sender, unbounded},
@@ -86,6 +96,8 @@ pub(super) struct LineSpan {
 
 /// The state of a TextView.
 pub struct TextViewState {
+    fragment: Option<FragmentView>,
+    fragment_group: Option<Rc<RefCell<FragmentSelection>>>,
     pub(super) focus_handle: FocusHandle,
     pub(super) list_state: ListState,
 
@@ -133,6 +145,98 @@ pub struct TextViewState {
 }
 
 impl TextViewState {
+    /// Returns blocks from the shared parse without parsing their source again.
+    pub fn fragments(&mut self) -> Vec<TextFragment> {
+        let content = Arc::new(self.parsed_content.clone());
+
+        let group = self
+            .fragment_group
+            .get_or_insert_with(|| {
+                Rc::new(RefCell::new(FragmentSelection::new(
+                    content.document.clone(),
+                )))
+            })
+            .clone();
+
+        group.borrow_mut().document = content.document.clone();
+
+        let epoch = if content.node_cx.has_reference_definitions {
+            self.parsed_revision
+        } else {
+            self.replacement_revision
+        };
+
+        let count = content.document.blocks.len();
+
+        content
+            .document
+            .blocks
+            .iter()
+            .enumerate()
+            .map(|(index, block)| {
+                let (start, end) = block
+                    .span()
+                    .map_or((index, index), |span| (span.start, span.end));
+
+                TextFragment {
+                    content: content.clone(),
+                    index,
+                    key: (start, end, epoch, index + 1 == count),
+                    group: group.clone(),
+                }
+            })
+            .collect()
+    }
+
+    /// Creates a read-only block view backed by an existing document parse.
+    pub fn from_fragment(fragment: TextFragment, cx: &mut Context<Self>) -> Self {
+        let mut state =
+            Self::new_prepared(TextViewFormat::Markdown, "", Some(fragment.content()), cx);
+
+        let id = state.selection_adapter.attach_fragment(
+            fragment.group.clone(),
+            fragment.index,
+            cx.entity().downgrade(),
+            cx,
+        );
+
+        let group = fragment.group.clone();
+
+        cx.on_release(move |_, _| {
+            let mut group = group.borrow_mut();
+
+            group.members.remove(&id);
+            group.snapshots.remove(&id);
+        })
+        .detach();
+
+        state.fragment = Some(fragment.into_view());
+
+        state
+    }
+
+    /// Updates only a changed block while preserving completed prefix views.
+    pub fn set_fragment(&mut self, fragment: TextFragment, cx: &mut Context<Self>) {
+        if self
+            .fragment
+            .as_ref()
+            .is_some_and(|previous| previous.key == fragment.key)
+        {
+            return;
+        }
+
+        self.parsed_content = fragment.content();
+        self.fragment = Some(fragment.into_view());
+        self.selection_revision = self.selection_revision.wrapping_add(1);
+
+        cx.notify();
+    }
+
+    /// Changes only when a parsed content update is accepted.
+    pub fn content_revision(&self) -> usize {
+        self.parsed_revision
+    }
+
     /// Create a Markdown TextViewState.
     pub fn markdown(text: &str, cx: &mut Context<Self>) -> Self {
         Self::new(TextViewFormat::Markdown, text, cx)
@@ -150,26 +254,47 @@ impl TextViewState {
 
     /// Create a new TextViewState.
     fn new(format: TextViewFormat, text: &str, cx: &mut Context<Self>) -> Self {
+        Self::new_prepared(format, text, None, cx)
+    }
+
+    fn new_prepared(
+        format: TextViewFormat,
+        text: &str,
+        initial: Option<ParsedContent>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let focus_handle = cx.focus_handle();
         let selection_adapter = TextViewSelectionAdapter::new(cx.entity().downgrade(), cx);
 
         let (tx, rx) = unbounded::<UpdateOptions>();
         let (tx_result, rx_result) = unbounded::<ParsedUpdate>();
-        let _receive_task = cx.spawn({
-            async move |weak_self, cx| {
-                while let Ok(parsed_update) = rx_result.recv().await {
-                    _ = weak_self.update(cx, |state, cx| {
-                        if state.apply_parsed_update(parsed_update, cx) {
-                            cx.notify();
-                        }
-                    });
-                }
-            }
-        });
+        let prepared = initial.is_some();
 
-        let _parse_task = cx.background_spawn(UpdateFuture::new(format, rx, tx_result));
+        let _receive_task = if prepared {
+            Task::ready(())
+        } else {
+            cx.spawn({
+                async move |weak_self, cx| {
+                    while let Ok(parsed_update) = rx_result.recv().await {
+                        _ = weak_self.update(cx, |state, cx| {
+                            if state.apply_parsed_update(parsed_update, cx) {
+                                cx.notify();
+                            }
+                        });
+                    }
+                }
+            })
+        };
+
+        let _parse_task = if prepared {
+            Task::ready(())
+        } else {
+            cx.background_spawn(UpdateFuture::new(format, rx, tx_result))
+        };
 
         let mut this = Self {
+            fragment: None,
+            fragment_group: None,
             focus_handle,
             bounds: Bounds::default(),
             multi_click_selection: None,
@@ -196,7 +321,7 @@ impl TextViewState {
             is_selecting: false,
             auto_scroll: AutoScroll::default(),
             selection_adapter,
-            parsed_content: Default::default(),
+            parsed_content: initial.unwrap_or_default(),
             format,
             parsed_error: None,
             text: text.to_string(),
@@ -209,12 +334,28 @@ impl TextViewState {
             _parse_task,
             _receive_task,
         };
-        this.increment_update(&text, false, cx);
+
+        if !prepared {
+            this.increment_update(text, false, cx);
+        }
+
         this
     }
 
     /// Get the text content.
     pub(crate) fn source(&self) -> SharedString {
+        if let Some(fragment) = &self.fragment {
+            return fragment
+                .group
+                .borrow()
+                .document
+                .source
+                .get(fragment.key.0..fragment.key.1)
+                .unwrap_or_default()
+                .to_string()
+                .into();
+        }
+
         self.parsed_content.document.source.clone()
     }
 
@@ -351,7 +492,8 @@ impl TextViewState {
         cx.notify();
     }
 
-    pub(crate) fn set_markdown_extensions(
+    /// Configures parsing before a document is split into shared block views.
+    pub fn set_markdown_extensions(
         &mut self,
         markdown_extensions: Arc<MarkdownExtensions>,
         cx: &mut Context<Self>,
@@ -364,7 +506,11 @@ impl TextViewState {
             .markdown_extensions
             .has_same_parser_configuration(&markdown_extensions);
         self.markdown_extensions = markdown_extensions;
-        if parser_configuration_changed && self.format == TextViewFormat::Markdown {
+
+        if parser_configuration_changed
+            && self.format == TextViewFormat::Markdown
+            && self.fragment.is_none()
+        {
             let text = self.text.clone();
             self.increment_update(&text, false, cx);
         }
@@ -398,9 +544,24 @@ impl TextViewState {
     /// even after it scrolls out of view; see
     /// [`ParsedDocument::selected_text`](crate::text::document::ParsedDocument).
     pub(super) fn selected_text_in(&self, blocks: Option<RangeInclusive<usize>>) -> String {
-        let format = self.effective_format();
+        self.selected_text_as(self.effective_format(), blocks)
+    }
 
+    pub(super) fn selected_text_as(
+        &self,
+        format: SelectionFormat,
+        blocks: Option<RangeInclusive<usize>>,
+    ) -> String {
         if self.select_all {
+            if let Some(fragment) = &self.fragment {
+                let group = fragment.group.borrow();
+
+                return match format {
+                    SelectionFormat::Source => group.document.source.to_string(),
+                    SelectionFormat::Plain => group.document.text(),
+                };
+            }
+
             if format == SelectionFormat::Source {
                 return self.source().to_string();
             }
@@ -563,6 +724,14 @@ impl TextViewState {
     }
 
     pub(super) fn reset_selection(&mut self) {
+        if let Some(fragment) = &self.fragment {
+            let mut group = fragment.group.borrow_mut();
+
+            if group.select_all == Some(fragment.index) {
+                group.select_all = None;
+            }
+        }
+
         self.multi_click_selection = None;
         self.selected_text_override = None;
         self.select_all = false;
@@ -577,6 +746,14 @@ impl TextViewState {
     fn reset_selection_and_adapter(&mut self, cx: &mut App) {
         self.reset_selection();
         self.selection_adapter.set_local_selection(false, cx);
+
+        if let Some(window) = self
+            .fragment_group
+            .as_ref()
+            .and_then(|group| group.borrow().window)
+        {
+            cx.defer(move |cx| TextSelection::clear_for_window(window, cx));
+        }
     }
 
     /// Clear the current text selection.
@@ -595,6 +772,10 @@ impl TextViewState {
 
     /// Select all rendered text in this view.
     pub fn select_all(&mut self, cx: &mut Context<Self>) {
+        if let Some(fragment) = &self.fragment {
+            fragment.group.borrow_mut().select_all = Some(fragment.index);
+        }
+
         self.multi_click_selection = None;
         self.selected_text_override = None;
         self.select_all = true;
@@ -641,8 +822,19 @@ impl TextViewState {
         self.selection_adapter.selection_points(cx)
     }
 
-    pub(crate) fn has_selection(&self, cx: &App) -> bool {
+    pub(super) fn has_selection(&self, cx: &App) -> bool {
         self.has_view_selection() || self.selection_points(cx).is_some()
+    }
+
+    /// Selection endpoints must remain available after their blocks scroll away.
+    /// Interior blocks can be reconstructed from the shared parsed document.
+    pub fn retains_selection_state(&self, cx: &App) -> bool {
+        if let Some(fragment) = &self.fragment {
+            return fragment.group.borrow().select_all == Some(fragment.index)
+                || self.selection_adapter.is_part_of_window_selection(cx);
+        }
+
+        self.has_selection(cx)
     }
 
     pub(super) fn on_action_select_all(
@@ -690,6 +882,14 @@ pub(crate) enum TextViewMultiClickKind {
 
 impl Render for TextViewState {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if let Some(fragment) = &self.fragment {
+            let mut group = fragment.group.borrow_mut();
+
+            self.select_all = group.select_all.is_some();
+            group.format = self.selection_format;
+            group.window = Some(window.window_handle().window_id());
+        }
+
         let state = cx.entity();
         let document = self.parsed_content.document.clone();
         let mut node_cx = self.parsed_content.node_cx.clone();
@@ -709,6 +909,7 @@ impl Render for TextViewState {
             .when(self.max_lines.is_none(), |this| this.h_full())
             .map(|this| match &mut self.parsed_error {
                 None => this.child(document.render_root(
+                    self.fragment.as_ref().is_none_or(|fragment| fragment.key.3),
                     if self.scrollable {
                         Some(self.list_state.clone())
                     } else {
@@ -954,9 +1155,10 @@ fn parse_content(
 
 #[cfg(test)]
 mod tests {
+    use gpui::TestAppContext;
+
     use crate::text::MarkdownNode;
     use crate::text::state::*;
-    use gpui::TestAppContext;
 
     #[gpui::test]
     fn small_full_replace_parses_before_background_executor_runs(cx: &mut TestAppContext) {
@@ -1288,11 +1490,3 @@ mod tests {
         });
     }
 }
-
-#[cfg(test)]
-#[path = "state/tests.rs"]
-mod nmt_tests;
-
-#[cfg(test)]
-#[path = "state/streaming_tests.rs"]
-mod streaming_tests;
