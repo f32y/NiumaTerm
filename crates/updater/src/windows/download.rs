@@ -264,11 +264,14 @@ fn unpack(archive: &Path, into: &Path) -> Result<(), InstallError> {
     for index in 0..zip.len() {
         let mut entry = zip.by_index(index).map_err(|_| InstallError::Unpack)?;
 
-        let name = flat_name(entry.name()).ok_or_else(|| {
-            warn!(
-                "update: the package holds an entry named `{}`",
-                entry.name()
-            );
+        let entry_name = entry.name().map_err(|error| {
+            warn!("update: decoding a package entry name failed: {error}");
+
+            InstallError::Unpack
+        })?;
+
+        let name = flat_name(&entry_name).ok_or_else(|| {
+            warn!("update: the package holds an entry named `{entry_name}`");
 
             InstallError::Unpack
         })?;

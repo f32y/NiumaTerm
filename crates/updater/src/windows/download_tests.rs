@@ -1,4 +1,12 @@
-use crate::windows::download::{expected_digest, flat_name, package_assets};
+use std::fs::{self, File};
+use std::io::Write as _;
+
+use tempfile::tempdir;
+use zip::ZipWriter;
+use zip::write::SimpleFileOptions;
+
+use crate::windows::InstallError;
+use crate::windows::download::{expected_digest, flat_name, package_assets, unpack};
 use crate::windows::releases::Asset;
 
 const DIGEST: &str = "9f2fcc7c586c1eba3c4b7b48d0f2a9a6e1c9c1a1b2c3d4e5f60718293a4b5c6d";
@@ -142,4 +150,49 @@ fn only_flat_entry_names_are_unpacked() {
     ] {
         assert_eq!(flat_name(rejected), None, "accepted `{rejected}`");
     }
+}
+
+#[test]
+fn unpack_extracts_files_with_decoded_names() {
+    let root = tempdir().unwrap();
+    let archive = root.path().join("package.zip");
+    let staging = root.path().join("staging");
+
+    fs::create_dir(&staging).unwrap();
+
+    let mut zip = ZipWriter::new(File::create(&archive).unwrap());
+
+    for name in ["NiumaTerm.exe", "release-\u{e9}.txt"] {
+        zip.start_file(name, SimpleFileOptions::default()).unwrap();
+        zip.write_all(b"update contents").unwrap();
+    }
+
+    zip.finish().unwrap();
+
+    unpack(&archive, &staging).unwrap();
+
+    for name in ["NiumaTerm.exe", "release-\u{e9}.txt"] {
+        assert_eq!(fs::read(staging.join(name)).unwrap(), b"update contents");
+    }
+}
+
+#[test]
+fn unpack_rejects_paths_outside_staging() {
+    let root = tempdir().unwrap();
+    let archive = root.path().join("package.zip");
+    let staging = root.path().join("staging");
+
+    fs::create_dir(&staging).unwrap();
+
+    let mut zip = ZipWriter::new(File::create(&archive).unwrap());
+
+    zip.start_file("../NiumaTerm.exe", SimpleFileOptions::default())
+        .unwrap();
+
+    zip.write_all(b"update contents").unwrap();
+    zip.finish().unwrap();
+
+    assert_eq!(unpack(&archive, &staging), Err(InstallError::Unpack));
+    assert!(!root.path().join("NiumaTerm.exe").exists());
+    assert!(fs::read_dir(&staging).unwrap().next().is_none());
 }
