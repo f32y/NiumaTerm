@@ -142,13 +142,9 @@ impl RowSource<'_> {
             return;
         }
 
-        // Only the mode that names work folds a settled turn's work away by
-        // default, and only the modes that offer the disclosure can fold at
-        // all. "Only tool calls" reads the work inline, so it has no
-        // disclosure and no per-turn toggle; the other two keep the control
-        // and record hand-folds against whichever direction their default
-        // points.
-        let discloses_work = !matches!(collapse, CollapseRows::ToolCalls);
+        // A turn disclosure is available only when work folding is enabled.
+        // The other modes show finished work without a turn toggle.
+        let discloses_work = folds_turns(collapse);
         let folded = discloses_work && folds_turns(collapse) != self.disclosures.turn_toggled(turn);
 
         // Only the prompt that opened the turn heads it. A message steered
@@ -256,7 +252,7 @@ impl RowSource<'_> {
                 j += 1;
             }
 
-            if !matches!(collapse, CollapseRows::Off) && visible.len() > 1 {
+            if !matches!(collapse, CollapseRows::Off) && !visible.is_empty() {
                 let expanded = self.disclosures.group_expanded(run_start);
 
                 rows.push(RowSpec::RunToggle {

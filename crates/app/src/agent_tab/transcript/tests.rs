@@ -303,6 +303,7 @@ mod steered_prompt_rows_tests {
             .map(|spec| match spec {
                 RowSpec::Entry { index, .. } | RowSpec::Work { index, .. } => index.to_string(),
                 RowSpec::TurnFold { row_count, .. } => format!("fold({row_count})"),
+                RowSpec::RunToggle { tool_count, .. } => format!("run({tool_count})"),
                 RowSpec::TurnSummary { .. } => "summary".to_string(),
                 _ => "?".to_string(),
             })
@@ -402,7 +403,7 @@ mod steered_prompt_rows_tests {
 
                 assert_eq!(
                     order(transcript),
-                    vec!["0", "fold(1)", "1", "2", "3", "summary"]
+                    vec!["0", "fold(1)", "run(1)", "2", "3", "summary"]
                 );
             });
         });
@@ -996,6 +997,57 @@ mod row_rhythm_tests {
                         ("run", RowGap::Work),
                         ("entry", RowGap::Group),
                     ]
+                );
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn collapse_modes_control_single_tools_and_finished_work(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            cx.set_global(AgentSettings::default());
+
+            let view = cx.new(|_| TranscriptView::new(AgentKind::Codex, None));
+
+            view.update(cx, |view, cx| {
+                view.append_replay(
+                    1,
+                    replay(vec![user("ask"), command("ls"), agent("done")]),
+                    cx,
+                );
+
+                let off = view.build_row_specs(CollapseRows::Off);
+
+                assert!(!off.iter().any(|row| matches!(
+                    row,
+                    RowSpec::TurnFold { .. } | RowSpec::RunToggle { .. }
+                )));
+                assert!(
+                    off.iter()
+                        .any(|row| matches!(row, RowSpec::Work { index: 1, .. }))
+                );
+
+                let tools = view.build_row_specs(CollapseRows::ToolCalls);
+
+                assert!(
+                    !tools
+                        .iter()
+                        .any(|row| matches!(row, RowSpec::TurnFold { .. } | RowSpec::Work { .. }))
+                );
+                assert!(tools.iter().any(|row| matches!(
+                    row,
+                    RowSpec::RunToggle {
+                        tool_count: 1,
+                        expanded: false,
+                        ..
+                    }
+                )));
+
+                let both = view.build_row_specs(CollapseRows::WorkAndToolCalls);
+
+                assert!(
+                    both.iter()
+                        .any(|row| matches!(row, RowSpec::TurnFold { folded: true, .. }))
                 );
             });
         });
