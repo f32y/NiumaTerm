@@ -59,7 +59,7 @@ use nmt_agent::{
     AgentActivityPolicy, AgentEvent, AgentMonitor, AgentRoute, AgentRuntimeStatus, AgentWorkspace,
     agent_process,
 };
-use nmt_config::local_state::{WindowLocalState, WindowState};
+use nmt_config::local_state::{TabFold, WindowLocalState, WindowState};
 use nmt_config::system::WarnBeforeTerminatingShell;
 use nmt_config::{config_dir_path, get};
 use nmt_platform::default_shell_name;
@@ -4599,7 +4599,11 @@ impl Render for AppWindow {
                                 tabs,
                                 active: ws.summary.active,
                                 closeable: ws.summary.closeable,
-                                fold: ws.summary.tab_fold,
+                                fold: if ws.summary.kind == WorkspaceKind::Settings {
+                                    TabFold::All
+                                } else {
+                                    ws.summary.tab_fold
+                                },
                             },
                             &unread_tabs,
                             &busy_agent_tabs,

@@ -135,7 +135,7 @@ impl WorkspaceList {
                     }))
                     .map(|list| accept_row_drops(list, cx))
                     .children(summaries.iter().map(|ws| {
-                        let header = self.render_row(ws.index, ws, renames, width, window, cx);
+                        let tabs = tab_rows.next();
 
                         // A workspace heads its own tab rows, and the
                         // list gap is what separates one such block
@@ -143,9 +143,13 @@ impl WorkspaceList {
                         // draw a second boundary inside the same gap.
                         let mut rows = Vec::new();
 
-                        rows.push(header);
+                        // Settings has one page and no directory grouping, so
+                        // its tab is sufficient when tabs appear in this list.
+                        if ws.summary.kind != WorkspaceKind::Settings || tabs.is_none() {
+                            rows.push(self.render_row(ws.index, ws, renames, width, window, cx));
+                        }
 
-                        rows.extend(tab_rows.next().into_iter().flatten());
+                        rows.extend(tabs.into_iter().flatten());
 
                         v_flex().w_full().children(rows)
                     }))
