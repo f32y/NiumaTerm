@@ -32,12 +32,6 @@ fn is_all_tabs(fold: &TabFold) -> bool {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum TabFold {
-    /// Only the tabs that are running: a restored tab sleeps until it is
-    /// first shown, and listing those is what makes a long workspace long.
-    /// Builds before this fold was named for awake tabs saved it as
-    /// `active`.
-    #[serde(alias = "active")]
-    Awake,
     /// None: the workspace row alone.
     Collapsed,
     /// Every tab. A fold a newer build saved also lists every tab here, so
@@ -48,13 +42,11 @@ pub enum TabFold {
 }
 
 impl TabFold {
-    /// The fold a click on the workspace row steps to: every tab, then none,
-    /// then only the awake ones.
+    /// Toggle between showing every tab and hiding the workspace's tabs.
     pub fn next(self) -> Self {
         match self {
             Self::All => Self::Collapsed,
-            Self::Collapsed => Self::Awake,
-            Self::Awake => Self::All,
+            Self::Collapsed => Self::All,
         }
     }
 }

@@ -193,7 +193,6 @@ impl VerticalTabList {
             .filter_map(|(index, row)| {
                 let shown = match workspace.fold {
                     TabFold::All => true,
-                    TabFold::Awake => !row.pending,
                     TabFold::Collapsed => false,
                 };
 

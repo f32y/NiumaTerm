@@ -149,7 +149,6 @@ pub(super) fn remote_workspace_blocks(
                     let shown = host_shown
                         && match fold {
                             TabFold::All => true,
-                            TabFold::Awake => !session.pending,
                             TabFold::Collapsed => false,
                         };
 

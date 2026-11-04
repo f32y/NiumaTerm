@@ -769,7 +769,7 @@ impl Disclosure {
 
         let icon = match self.fold {
             TabFold::Collapsed => icon,
-            TabFold::Awake | TabFold::All => icon.rotate(radians(FRAC_PI_2)),
+            TabFold::All => icon.rotate(radians(FRAC_PI_2)),
         };
 
         div()
