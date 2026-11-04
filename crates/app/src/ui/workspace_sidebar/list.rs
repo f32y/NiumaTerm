@@ -9,6 +9,7 @@ use gpui::prelude::*;
 use gpui::{
     AnyElement, App, ClipboardItem, Context, Div, DragMoveEvent, ElementId, Entity, FontWeight,
     Pixels, ScrollHandle, SharedString, Stateful, Window, div, px, radians, relative,
+    transparent_black,
 };
 use gpui_base::animation::ease_out_cubic;
 use gpui_base::motion::{Transition, transition};
@@ -850,8 +851,8 @@ pub(super) fn workspace_row_button(id: impl Into<ElementId>, cx: &App) -> Button
         // without installing a second hover style on the same element.
         .custom(
             ButtonCustomVariant::new(cx)
-                .color(cx.theme().sidebar_foreground.opacity(0.045))
-                .hover(cx.theme().sidebar_foreground.opacity(0.085))
+                .color(transparent_black())
+                .hover(selection.hover_background)
                 .active(selection.active_background),
         )
         .w_full()

@@ -271,7 +271,7 @@ fn host_row(
         .custom(
             ButtonCustomVariant::new(cx)
                 .color(transparent_black())
-                .hover(cx.theme().sidebar_foreground.opacity(0.085))
+                .hover(selection.hover_background)
                 .active(selection.active_background),
         )
         .w_full()
