@@ -766,9 +766,6 @@ impl NotificationList {
     }
 
     /// Tick the toast lifecycle until the last notification is unmounted.
-    ///
-    /// It advances the transition phases and samples the pause input (stack
-    /// expansion) that reaches the list through no event.
     /// With nothing mounted there is nothing to do, so an idle window arms no
     /// timer.
     fn start_advancing(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -794,12 +791,6 @@ impl NotificationList {
             }
         })
         .detach();
-    }
-
-    fn is_expanded(&self) -> bool {
-        self.stacks
-            .iter()
-            .any(|(_, stack)| stack.state.is_expanded())
     }
 
     /// Group the visible notifications by their effective placement, pairing
@@ -930,7 +921,7 @@ impl NotificationList {
     fn advance(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let changes = self
             .notifications
-            .advance(cx.background_executor().now(), self.is_expanded());
+            .advance(cx.background_executor().now(), false);
         for id in changes.presented {
             if let Some(note) = self.notifications.get(&id) {
                 note.update(cx, |note, cx| note.complete_enter(cx));
@@ -1490,7 +1481,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn focus_pauses_autohide_and_present_phase_is_projected(cx: &mut TestAppContext) {
+    fn focused_stack_does_not_pause_autohide(cx: &mut TestAppContext) {
         cx.update(|cx| cx.set_global(Theme::default()));
         let (root, cx) = cx.add_window_view(|window, cx| TestRoot {
             list: cx.new(|cx| NotificationList::new(window, cx)),
@@ -1498,7 +1489,7 @@ mod tests {
         });
         let list = root.read_with(cx, |root, _| root.list.clone());
         list.update_in(cx, |list, window, cx| {
-            list.push(Notification::info("paused").id::<FooKind>(), window, cx);
+            list.push(Notification::info("focused").id::<FooKind>(), window, cx);
         });
 
         cx.background_executor
@@ -1520,19 +1511,11 @@ mod tests {
             list_focus.focus(window, cx);
             window.draw(cx).clear(cx);
         });
-        cx.background_executor.advance_clock(Duration::from_secs(5));
-        cx.run_until_parked();
-        assert_eq!(
-            note.read_with(cx, |note, _| note.transition_status),
-            ToastTransitionStatus::Present
-        );
-
-        let other_focus = root.read_with(cx, |root, _| root.other_focus.clone());
-        cx.update(|window, cx| {
-            other_focus.focus(window, cx);
-            window.draw(cx).clear(cx);
-        });
-        assert!(!list.read_with(cx, |list, _| list.is_expanded()));
+        assert!(list.read_with(cx, |list, _| {
+            list.stacks
+                .iter()
+                .any(|(_, stack)| stack.state.is_expanded())
+        }));
         cx.background_executor
             .advance_clock(Duration::from_secs(5) + Duration::from_millis(50));
         cx.run_until_parked();
@@ -1540,6 +1523,8 @@ mod tests {
             note.read_with(cx, |note, _| note.transition_status),
             ToastTransitionStatus::Ending
         );
+        flush_dismiss(cx);
+        assert!(ids(&list, cx).is_empty());
     }
 
     #[gpui::test]
