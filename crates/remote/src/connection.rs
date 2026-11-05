@@ -18,6 +18,9 @@
 #[cfg(test)]
 #[path = "connection_paging_tests.rs"]
 mod paging_tests;
+#[cfg(test)]
+#[path = "connection_retry_tests.rs"]
+mod retry_tests;
 
 use std::collections::HashMap;
 use std::mem;
@@ -341,7 +344,7 @@ impl RemoteHost {
         on_record: impl Fn(PairedHost) + Send + Sync + 'static,
     ) -> Arc<Self> {
         let host = Self::unstarted(record, key, app_version, retry, on_record);
-        let task = runtime().spawn(Arc::clone(&host).supervise());
+        let task = runtime().spawn(Arc::clone(&host).supervise(netwatch::changes()));
 
         *host.supervisor.lock() = Some(task.abort_handle());
 
@@ -1004,11 +1007,11 @@ impl RemoteHost {
         });
     }
 
-    async fn supervise(self: Arc<Self>) {
+    async fn supervise(self: Arc<Self>, mut network: watch::Receiver<u64>) {
         let mut backoff = MIN_BACKOFF;
         let mut failures = 0;
         let mut ever_connected = false;
-        let mut network = netwatch::changes();
+        let mut retry_requested = false;
 
         // A LAN or direct channel the last link opened to move to, used
         // instead of connecting anew.
@@ -1040,11 +1043,19 @@ impl RemoteHost {
                 None => {
                     // A limited round runs to its end, so a request with no
                     // view open still gets every attempt.
-                    if failures == 0 && !self.has_views() {
+                    if failures == 0 && !retry_requested && !self.has_views() {
                         self.status.send_replace(Status::Idle);
 
                         self.wake.notified().await;
                     }
+
+                    retry_requested = false;
+
+                    // This attempt responds to notifications already received.
+                    // Later notifications must remain pending if it fails.
+                    let _ = self.wake.notified().now_or_never();
+
+                    network.mark_unchanged();
 
                     self.status.send_replace(if ever_connected {
                         Status::Reconnecting
@@ -1119,13 +1130,6 @@ impl RemoteHost {
                                 info!(parent: &attempt_span, ?attempts, status = ?Status::Unreachable,
                                     "connection retries exhausted; waiting for a request or network change");
 
-                                // Wakes stored while the round ran came from
-                                // requests and views that round already
-                                // served; only a later one retries.
-                                let _ = self.wake.notified().now_or_never();
-
-                                network.mark_unchanged();
-
                                 select! {
                                     () = self.wake.notified() => {
                                         info!(parent: &attempt_span, reason = "request", "resuming connection retries");
@@ -1136,6 +1140,10 @@ impl RemoteHost {
                                     }
                                 }
 
+                                // The wait above consumed a notification, so
+                                // another round starts even without open views.
+                                retry_requested = true;
+
                                 continue;
                             }
 
@@ -1143,8 +1151,6 @@ impl RemoteHost {
                             // does a network change, which may have brought
                             // the host back; otherwise the backoff spreads
                             // retries of many clients apart.
-                            network.mark_unchanged();
-
                             select! {
                                 () = sleep(jitter(backoff)) => {}
 
