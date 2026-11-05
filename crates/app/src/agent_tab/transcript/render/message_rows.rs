@@ -213,6 +213,9 @@ pub(crate) fn error_row(
 pub(crate) fn hover_stamp(at: Option<i64>, cx: &App) -> Div {
     div()
         .flex_none()
+        // A timestamp must keep one line even when the message is narrower
+        // than the label; wrapping would constrain its width to the message.
+        .whitespace_nowrap()
         .text_xs()
         .text_color(cx.theme().muted_foreground)
         .invisible()
