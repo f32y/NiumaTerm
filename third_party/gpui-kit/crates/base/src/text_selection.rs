@@ -1248,7 +1248,7 @@ impl WindowSelectionState {
         window: &Window,
         cx: &mut Context<Self>,
     ) {
-        if !cx.has_active_drag() {
+        if self.is_selecting && !cx.has_active_drag() {
             self.update_impl(position, Some(window), cx);
             self.update_auto_scroll(position, Some(window), cx);
         }
