@@ -121,11 +121,20 @@ impl WindowsPlatformState {
 
 impl WindowsPlatform {
     pub fn new(headless: bool) -> Result<Self> {
+        Self::new_with_gpu_preference(headless, false)
+    }
+
+    /// Set the GPU preference before any graphics devices are created.
+    pub fn new_with_gpu_preference(
+        headless: bool,
+        prioritize_integrated_gpu: bool,
+    ) -> Result<Self> {
         unsafe {
             OleInitialize(None).context("unable to initialize Windows OLE")?;
         }
         let (directx_devices, text_system, direct_write_text_system) = if !headless {
-            let devices = DirectXDevices::new().context("Creating DirectX devices")?;
+            let devices = DirectXDevices::new(prioritize_integrated_gpu)
+                .context("Creating DirectX devices")?;
             let dw_text_system = Arc::new(
                 DirectWriteTextSystem::new(&devices)
                     .context("Error creating DirectWriteTextSystem")?,
@@ -1581,7 +1590,8 @@ fn handle_gpu_device_lost(
     std::thread::sleep(std::time::Duration::from_millis(350));
 
     *directx_devices = try_to_recover_from_device_lost(|| {
-        DirectXDevices::new().context("Failed to recreate new DirectX devices after device lost")
+        DirectXDevices::new(directx_devices.prioritize_integrated_gpu)
+            .context("Failed to recreate new DirectX devices after device lost")
     })?;
     log::info!("DirectX devices successfully recreated.");
 
@@ -1704,7 +1714,7 @@ mod tests {
     use crate::{read_from_clipboard, write_to_clipboard};
     use gpui::ClipboardItem;
 
-    use super::encode_restart_arguments;
+    use crate::platform::encode_restart_arguments;
 
     #[test]
     fn test_encode_restart_arguments() {

@@ -1953,8 +1953,9 @@ const DEFAULT_LOCALE_NAME: PCWSTR = windows::core::w!("en-US");
 
 #[cfg(test)]
 mod tests {
-    use super::{DirectWriteState, DirectWriteTextSystem, GPUState, GlyphLayerTexture};
-    use crate::direct_write::ClusterAnalyzer;
+    use crate::direct_write::{
+        ClusterAnalyzer, DirectWriteState, DirectWriteTextSystem, GPUState, GlyphLayerTexture,
+    };
     use crate::directx_devices::DirectXDevices;
     use anyhow::Result;
     use gpui::{
@@ -2007,7 +2008,7 @@ mod tests {
 
     #[test]
     fn color_emoji_rasterization_is_stable_across_batches() -> Result<()> {
-        let devices = DirectXDevices::new()?;
+        let devices = DirectXDevices::new(false)?;
         let text_system = DirectWriteTextSystem::new(&devices)?;
 
         let font = Font {
@@ -2070,7 +2071,7 @@ mod tests {
 
     #[test]
     fn color_emoji_composites_over_cleared_texture() -> Result<()> {
-        let devices = DirectXDevices::new()?;
+        let devices = DirectXDevices::new(false)?;
         let gpu_state = GPUState::new(&devices)?;
 
         const SIZE: u32 = 32;

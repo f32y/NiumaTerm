@@ -15,7 +15,7 @@ use windows::Win32::{
         },
         Dxgi::{
             CreateDXGIFactory2, DXGI_CREATE_FACTORY_DEBUG, DXGI_CREATE_FACTORY_FLAGS,
-            IDXGIAdapter1, IDXGIFactory6,
+            DXGI_GPU_PREFERENCE_MINIMUM_POWER, IDXGIAdapter1, IDXGIFactory6,
         },
     },
 };
@@ -37,6 +37,7 @@ pub(crate) fn try_to_recover_from_device_lost<T>(mut f: impl FnMut() -> Result<T
 
 #[derive(Clone)]
 pub(crate) struct DirectXDevices {
+    pub(crate) prioritize_integrated_gpu: bool,
     pub(crate) adapter: IDXGIAdapter1,
     pub(crate) dxgi_factory: IDXGIFactory6,
     pub(crate) device: ID3D11Device,
@@ -44,12 +45,16 @@ pub(crate) struct DirectXDevices {
 }
 
 impl DirectXDevices {
-    pub(crate) fn new() -> Result<Self> {
+    pub(crate) fn new(prioritize_integrated_gpu: bool) -> Result<Self> {
         let debug_layer_available = check_debug_layer_available();
         let dxgi_factory =
             get_dxgi_factory(debug_layer_available).context("Creating DXGI factory")?;
-        let (adapter, device, device_context, feature_level) =
-            get_adapter(&dxgi_factory, debug_layer_available).context("Getting DXGI adapter")?;
+        let (adapter, device, device_context, feature_level) = get_adapter(
+            &dxgi_factory,
+            debug_layer_available,
+            prioritize_integrated_gpu,
+        )
+        .context("Getting DXGI adapter")?;
         match feature_level {
             D3D_FEATURE_LEVEL_11_1 => {
                 log::info!("Created device with Direct3D 11.1 feature level.")
@@ -64,6 +69,7 @@ impl DirectXDevices {
         }
 
         Ok(Self {
+            prioritize_integrated_gpu,
             adapter,
             dxgi_factory,
             device,
@@ -106,20 +112,26 @@ fn get_dxgi_factory(debug_layer_available: bool) -> Result<IDXGIFactory6> {
 fn get_adapter(
     dxgi_factory: &IDXGIFactory6,
     debug_layer_available: bool,
+    prioritize_integrated_gpu: bool,
 ) -> Result<(
     IDXGIAdapter1,
     ID3D11Device,
     ID3D11DeviceContext,
     D3D_FEATURE_LEVEL,
 )> {
+    log::info!("GPU selection: prioritize integrated GPU={prioritize_integrated_gpu}");
+
     for adapter_index in 0.. {
-        let adapter: IDXGIAdapter1 = unsafe { dxgi_factory.EnumAdapters(adapter_index)?.cast()? };
-        if let Ok(desc) = unsafe { adapter.GetDesc1() } {
-            let gpu_name = String::from_utf16_lossy(&desc.Description)
-                .trim_matches(char::from(0))
-                .to_string();
-            log::info!("Using GPU: {}", gpu_name);
-        }
+        // SAFETY: The factory is valid and both enumeration methods return
+        // an owned adapter interface or an error when the index is exhausted.
+        let adapter: IDXGIAdapter1 = unsafe {
+            if prioritize_integrated_gpu {
+                dxgi_factory
+                    .EnumAdapterByGpuPreference(adapter_index, DXGI_GPU_PREFERENCE_MINIMUM_POWER)?
+            } else {
+                dxgi_factory.EnumAdapters(adapter_index)?.cast()?
+            }
+        };
         // Check to see whether the adapter supports Direct3D 11 and create
         // the device if it does.
         let mut context: Option<ID3D11DeviceContext> = None;
@@ -132,6 +144,15 @@ fn get_adapter(
         )
         .log_err()
         {
+            // SAFETY: The successfully created device retains a valid adapter.
+            if let Ok(desc) = unsafe { adapter.GetDesc1() } {
+                let gpu_name = String::from_utf16_lossy(&desc.Description)
+                    .trim_matches(char::from(0))
+                    .to_string();
+
+                log::info!("Using GPU: {}", gpu_name);
+            }
+
             return Ok((adapter, device, context.unwrap(), feature_level));
         }
     }

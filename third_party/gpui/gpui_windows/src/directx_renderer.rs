@@ -186,6 +186,7 @@ impl DirectXRendererDevices {
             dxgi_factory,
             device,
             device_context,
+            ..
         } = directx_devices;
         let dxgi_device = if disable_direct_composition {
             None
@@ -2933,7 +2934,7 @@ mod tests {
     #[test]
     fn unavailable_backdrop_keeps_a_drawable_surface_after_reuse_and_recovery() -> Result<()> {
         let window = TestWindow::new()?;
-        let devices = DirectXDevices::new()?;
+        let devices = DirectXDevices::new(false)?;
         let mut renderer = DirectXRenderer::new(window.0, &devices, false)?;
         renderer.composited_blur_available = false;
         for _ in 0..2 {
@@ -2956,7 +2957,7 @@ mod tests {
                 continue;
             }
             let window = TestWindow::new()?;
-            let devices = DirectXDevices::new()?;
+            let devices = DirectXDevices::new(false)?;
             let mut renderer = DirectXRenderer::new(window.0, &devices, false)?;
             renderer.composited_blur_available = true;
             BACKDROP_FAILURE.with(|failure| failure.set(Some(stage)));
@@ -2986,7 +2987,7 @@ mod tests {
     #[test]
     fn backdrop_blur_preserves_alpha_and_restores_the_viewport() -> Result<()> {
         let window = TestWindow::new()?;
-        let devices = DirectXDevices::new()?;
+        let devices = DirectXDevices::new(false)?;
         let mut renderer = DirectXRenderer::new(window.0, &devices, false)?;
         renderer.resize(size(DevicePixels(64), DevicePixels(64)))?;
         let bounds = |x, y, width, height| Bounds {
