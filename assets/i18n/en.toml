@@ -319,6 +319,7 @@
 "settings-system-proxy-url" = "Proxy address"
 "settings-system-proxy-url-description" = "host:port, for example 127.0.0.1:7890. Add user:password@ before the host for a proxy that asks for credentials. Empty uses the system proxy. Open connections keep their route until they reconnect."
 "settings-system-proxy-apply" = "Apply"
+"settings-system-power-efficiency-mode" = "Power Efficiency Mode"
 
 # Theme and background controls
 "settings-theme-default" = "Default"

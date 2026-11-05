@@ -318,6 +318,7 @@
 "settings-system-proxy-url" = "代理地址"
 "settings-system-proxy-url-description" = "host:port，例如 127.0.0.1:7890。需要认证的代理在主机前加 user:password@。留空则使用系统代理。已建立的连接在重连后才会改用新设置。"
 "settings-system-proxy-apply" = "应用"
+"settings-system-power-efficiency-mode" = "Power Efficiency Mode"
 
 # Theme and background controls
 "settings-theme-default" = "默认"

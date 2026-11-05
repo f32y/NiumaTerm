@@ -168,6 +168,16 @@ pub(super) fn system_page(shell_integration_mismatched: bool, proxy: ProxyMode) 
                             .set_ui_thread_priority(value);
                     },
                 ),
+            ))
+            .item(SettingItem::new(
+                t!("settings-system-power-efficiency-mode"),
+                settings_switch(
+                    |config| config.system.power_efficiency_mode,
+                    |settings, value| {
+                        settings.edit_system(|section| section.power_efficiency_mode = value);
+                    },
+                )
+                .default_value(true),
             )),
     );
 

@@ -87,6 +87,7 @@ open-in-best-workspace = true
 send-system-notifications = true
 proxy = "system"
 proxy-url = ""
+power-efficiency-mode = true
 
 [update]
 check-updates = true

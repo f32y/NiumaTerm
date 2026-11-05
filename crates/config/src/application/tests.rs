@@ -100,6 +100,7 @@ fn sample_system() -> SystemConfig {
         send_system_notifications: false,
         proxy: system::ProxyMode::Socks,
         proxy_url: "127.0.0.1:7890".into(),
+        power_efficiency_mode: false,
     }
 }
 

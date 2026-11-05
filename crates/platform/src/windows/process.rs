@@ -18,9 +18,66 @@ use windows_sys::Win32::System::JobObjects::{
     JobObjectBasicProcessIdList, JobObjectExtendedLimitInformation, QueryInformationJobObject,
     SetInformationJobObject,
 };
-use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
+use windows_sys::Win32::System::Threading::{
+    CREATE_NO_WINDOW, GetCurrentProcess, IDLE_PRIORITY_CLASS, NORMAL_PRIORITY_CLASS,
+    PROCESS_POWER_THROTTLING_CURRENT_VERSION, PROCESS_POWER_THROTTLING_EXECUTION_SPEED,
+    PROCESS_POWER_THROTTLING_STATE, ProcessPowerThrottling, SetPriorityClass,
+    SetProcessInformation,
+};
 
 use crate::windows::pipes::{Direction, child_stdio_pair};
+
+/// Apply EcoQoS and the CPU scheduling priority to the current process.
+pub fn set_power_efficiency_mode(enabled: bool) -> io::Result<()> {
+    let state = PROCESS_POWER_THROTTLING_STATE {
+        Version: PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+        ControlMask: PROCESS_POWER_THROTTLING_EXECUTION_SPEED,
+        StateMask: if enabled {
+            PROCESS_POWER_THROTTLING_EXECUTION_SPEED
+        } else {
+            0
+        },
+    };
+
+    // SAFETY: The pseudo-handle refers to this process and must not be closed.
+    let process = unsafe { GetCurrentProcess() };
+
+    // SAFETY: The pointer and byte count describe an initialized state that
+    // remains valid until the synchronous call returns.
+    let throttling_result = if unsafe {
+        SetProcessInformation(
+            process,
+            ProcessPowerThrottling,
+            (&state as *const PROCESS_POWER_THROTTLING_STATE).cast(),
+            mem::size_of_val(&state) as u32,
+        )
+    } == 0
+    {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    };
+
+    if enabled && throttling_result.is_err() {
+        return throttling_result;
+    }
+
+    let priority = if enabled {
+        IDLE_PRIORITY_CLASS
+    } else {
+        NORMAL_PRIORITY_CLASS
+    };
+
+    // SAFETY: The current process handle permits changing its priority class.
+    // Disabling restores Normal priority even when the QoS update fails.
+    let priority_result = if unsafe { SetPriorityClass(process, priority) } == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    };
+
+    throttling_result.and(priority_result)
+}
 
 /// A child whose standard streams are asynchronous pipes owned by this process.
 pub struct PipedChild {

@@ -45,6 +45,8 @@ use nmt_net::set_proxy;
 use nmt_platform::firewall;
 use nmt_platform::ipc as platform_ipc;
 use nmt_platform::window::show_error_dialog;
+#[cfg(windows)]
+use nmt_platform::windows::process::set_power_efficiency_mode;
 #[cfg(enable_profiling)]
 use nmt_profiling::allocation::ProfilingAllocator;
 use nmt_updater::AWAIT_EXIT_FLAG;
@@ -358,6 +360,34 @@ fn on_finish_launching(
     notification.margins.top = px(16.);
 
     cx.set_global(AppSettings::load());
+
+    #[cfg(windows)]
+    {
+        let mut previous = None;
+
+        let mut apply_power_efficiency = move |cx: &mut App| {
+            let enabled = cx
+                .global::<AppSettings>()
+                .config()
+                .system
+                .power_efficiency_mode;
+
+            if previous == Some(enabled) {
+                return;
+            }
+
+            previous = Some(enabled);
+
+            if let Err(error) = set_power_efficiency_mode(enabled) {
+                warn!("failed to set power efficiency mode to {enabled}: {error}");
+            }
+        };
+
+        apply_power_efficiency(cx);
+
+        cx.observe_global::<AppSettings>(apply_power_efficiency)
+            .detach();
+    }
 
     ui::install_terminal_settings(cx);
 

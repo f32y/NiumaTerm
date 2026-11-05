@@ -96,6 +96,10 @@ pub struct SystemConfig {
     /// the HTTP and SOCKS modes; empty falls back to the system proxy.
     #[serde(default, rename = "proxy-url")]
     pub proxy_url: String,
+
+    /// Enable Windows EcoQoS and use the Idle process priority class.
+    #[serde(default = "default_bool_true", rename = "power-efficiency-mode")]
+    pub power_efficiency_mode: bool,
 }
 
 impl Default for SystemConfig {
@@ -110,6 +114,7 @@ impl Default for SystemConfig {
             send_system_notifications: true,
             proxy: ProxyMode::default(),
             proxy_url: String::new(),
+            power_efficiency_mode: true,
         }
     }
 }
