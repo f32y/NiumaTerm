@@ -119,7 +119,9 @@ struct AgentSessionView: View {
         .onScrollGeometryChange(for: TranscriptScrollMetrics.self) { geometry in
             TranscriptScrollMetrics(height: geometry.contentSize.height,
                                     offset: geometry.contentOffset.y,
-                                    topInset: geometry.contentInsets.top)
+                                    topInset: geometry.contentInsets.top,
+                                    awayFromBottom: geometry.contentSize.height + geometry.contentInsets.bottom
+                                        - geometry.visibleRect.maxY > 44)
         } action: { previous, current in
             scrollMetrics = current
 
@@ -152,6 +154,15 @@ struct AgentSessionView: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .background(Theme.transcriptBackground)
+        .overlay(alignment: .bottom) {
+            if model.attached && scrollMetrics.awayFromBottom {
+                ScrollToBottomButton {
+                    historyAnchor = nil
+
+                    scrollPosition.scrollTo(edge: .bottom)
+                }
+            }
+        }
         .safeAreaInset(edge: .bottom) {
             ComposerView(model: model, focused: $composerFocused)
         }
@@ -255,13 +266,16 @@ struct AgentSessionView: View {
 
     private func requestEarlier() {
         guard model.attached, model.hasEarlier, !model.loadingEarlier,
-              historyAnchor == nil, let first = model.entries.first?.index else { return }
+              let first = model.entries.first?.index else { return }
 
         historyAnchor = TranscriptHistoryAnchor(height: transcriptLayout.height,
                                                offset: scrollMetrics.offset, firstIndex: first)
 
         Task {
             await model.loadEarlier()
+
+            // A failed or unchanged page may not trigger a layout update.
+            if model.entries.first?.index == first { historyAnchor = nil }
         }
     }
 
@@ -290,6 +304,7 @@ private struct TranscriptScrollMetrics: Equatable {
     var height: CGFloat = 0
     var offset: CGFloat = 0
     var topInset: CGFloat = 0
+    var awayFromBottom = false
 }
 
 private struct TranscriptHistoryAnchor {

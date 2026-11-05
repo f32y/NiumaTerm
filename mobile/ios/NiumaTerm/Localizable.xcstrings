@@ -858,6 +858,16 @@
     "JetBrains Mono": {
       "shouldTranslate": false
     },
+    "Jump to bottom": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "跳到底部"
+          }
+        }
+      }
+    },
     "LAN": {
       "localizations": {
         "zh-Hans": {

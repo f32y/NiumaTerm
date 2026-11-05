@@ -36,8 +36,8 @@ final class TerminalSessionModel {
         didSet { surface?.setNeedsFrame() }
     }
 
-    /// The viewport shows history rather than the live screen.
-    @ObservationIgnored private var scrolledBack = false
+    /// Whether the viewport displays scrollback above the live screen.
+    private(set) var scrolledBack = false
 
     /// Attach to a session the host already runs.
     init(core: MobileCore, route: SessionRoute, title: String) {
@@ -197,9 +197,12 @@ final class TerminalSessionModel {
     /// typed text shows up.
     private func followInput() {
         if scrolledBack {
-            scrolledBack = false
-            _ = handle?.scrollToBottom()
+            _ = scrollToBottom()
         }
+    }
+
+    func scrollToBottom() -> Bool {
+        handle?.scrollToBottom() ?? false
     }
 
     func toggleKeyboard() {

@@ -74,6 +74,13 @@ struct TerminalSessionView: View {
                         .padding(.top, 8)
                 }
             }
+            .overlay(alignment: .bottom) {
+                if model.attached && model.scrolledBack {
+                    ScrollToBottomButton {
+                        if model.scrollToBottom() { model.surface?.setNeedsFrame() }
+                    }
+                }
+            }
             .safeAreaInset(edge: .bottom) {
                 if model.exited && model.ended == nil {
                     ExitedBar { dismiss() }
