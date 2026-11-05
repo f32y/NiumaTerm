@@ -736,7 +736,7 @@ impl<V> Entity<V> {
 
 use derive_more::{Deref, DerefMut};
 
-use super::{Context, Entity};
+use crate::app::{Context, Entity};
 #[derive(Deref, DerefMut, Clone)]
 /// A VisualTestContext is the test-equivalent of a `Window` and `App`. It allows you to
 /// run window-specific test code. It can be dereferenced to a `TextAppContext`.
@@ -769,6 +769,13 @@ impl VisualTestContext {
     /// Wait until there are no more pending tasks.
     pub fn run_until_parked(&self) {
         self.cx.background_executor.run_until_parked();
+    }
+
+    /// Run a platform frame callback, including queued next-frame work.
+    pub fn simulate_frame(&self) {
+        self.cx
+            .test_window(self.window)
+            .simulate_frame_request(Default::default());
     }
 
     /// Dispatch the action to the currently focused node.

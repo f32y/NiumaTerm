@@ -145,10 +145,40 @@ impl Scene {
     }
 
     pub fn replay(&mut self, range: Range<usize>, prev_scene: &Scene) {
+        self.replay_with_offset(range, prev_scene, Point::default());
+    }
+
+    pub(crate) fn can_translate(&self, range: Range<usize>) -> bool {
+        self.paint_operations[range]
+            .iter()
+            .all(|operation| match operation {
+                PaintOperation::Primitive(Primitive::MonochromeSprite(sprite)) => {
+                    sprite.transformation == TransformationMatrix::unit()
+                }
+                PaintOperation::Primitive(Primitive::SubpixelSprite(sprite)) => {
+                    sprite.transformation == TransformationMatrix::unit()
+                }
+                _ => true,
+            })
+    }
+
+    pub(crate) fn replay_with_offset(
+        &mut self,
+        range: Range<usize>,
+        prev_scene: &Scene,
+        offset: Point<ScaledPixels>,
+    ) {
         for operation in &prev_scene.paint_operations[range] {
             match operation {
-                PaintOperation::Primitive(primitive) => self.insert_primitive(primitive.clone()),
-                PaintOperation::StartLayer(bounds) => self.push_layer(*bounds),
+                PaintOperation::Primitive(primitive) => {
+                    let mut primitive = primitive.clone();
+                    primitive.translate(offset);
+                    self.insert_primitive(primitive);
+                }
+                PaintOperation::StartLayer(bounds) => self.push_layer(Bounds {
+                    origin: bounds.origin + offset,
+                    size: bounds.size,
+                }),
                 PaintOperation::EndLayer => self.pop_layer(),
             }
         }
@@ -243,6 +273,33 @@ pub enum Primitive {
 
 #[expect(missing_docs)]
 impl Primitive {
+    fn translate(&mut self, offset: Point<ScaledPixels>) {
+        if offset == Point::default() {
+            return;
+        }
+        let (bounds, mask) = match self {
+            Self::Shadow(value) => (&mut value.bounds, &mut value.content_mask),
+            Self::BackdropBlur(value) => (&mut value.bounds, &mut value.content_mask),
+            Self::Quad(value) => (&mut value.bounds, &mut value.content_mask),
+            Self::Underline(value) => (&mut value.bounds, &mut value.content_mask),
+            Self::MonochromeSprite(value) => (&mut value.bounds, &mut value.content_mask),
+            Self::SubpixelSprite(value) => (&mut value.bounds, &mut value.content_mask),
+            Self::PolychromeSprite(value) => (&mut value.bounds, &mut value.content_mask),
+            Self::Surface(value) => (&mut value.bounds, &mut value.content_mask),
+            Self::Path(value) => {
+                value.start += offset;
+                value.current += offset;
+                for vertex in &mut value.vertices {
+                    vertex.xy_position += offset;
+                    vertex.content_mask.bounds.origin += offset;
+                }
+                (&mut value.bounds, &mut value.content_mask)
+            }
+        };
+        bounds.origin += offset;
+        mask.bounds.origin += offset;
+    }
+
     pub fn bounds(&self) -> &Bounds<ScaledPixels> {
         match self {
             Primitive::Shadow(shadow) => &shadow.bounds,

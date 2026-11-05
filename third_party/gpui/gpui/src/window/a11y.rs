@@ -100,13 +100,16 @@
 
 use crate::*;
 
+pub(crate) mod cache;
 pub(crate) mod debug;
 
 use crate::{App, Bounds, FocusId, Pixels, SharedString, Window};
 use accesskit::{Action, NodeId, TreeUpdate};
 use collections::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
+use std::cell::RefCell;
 use std::hash::{Hash, Hasher};
+use std::rc::Rc;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -118,6 +121,9 @@ pub(crate) const ROOT_NODE_ID: NodeId = NodeId(0);
 /// A listener for an accessibility action on a specific node.
 pub(crate) type A11yActionListener =
     Box<dyn FnMut(Option<&accesskit::ActionData>, &mut Window, &mut App) + 'static>;
+
+pub(crate) type RetainedA11yActionListener =
+    Rc<RefCell<dyn FnMut(Option<&accesskit::ActionData>, &mut Window, &mut App) + 'static>>;
 
 /// Per-window accessibility state.
 ///
@@ -148,7 +154,7 @@ pub(crate) struct A11y {
     pub(crate) nodes: A11yNodeBuilder,
     pub(crate) focus_ids: FxHashMap<NodeId, FocusId>,
     pub(crate) node_bounds: FxHashMap<NodeId, Bounds<Pixels>>,
-    pub(crate) action_listeners: FxHashMap<NodeId, Vec<(Action, A11yActionListener)>>,
+    pub(crate) action_listeners: FxHashMap<NodeId, Vec<(Action, RetainedA11yActionListener)>>,
     /// The window's title, used to label the root node so assistive
     /// technology can tell windows apart.
     window_title: Option<SharedString>,

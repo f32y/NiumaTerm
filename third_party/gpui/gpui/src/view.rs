@@ -1,9 +1,11 @@
+use crate::window::a11y::cache::{self, CachedA11y};
 use crate::{
     AnyElement, AnyEntity, AnyWeakEntity, App, Bounds, ContentMask, Context, Element, ElementId,
     Entity, EntityId, GlobalElementId, InspectorElementId, IntoElement, LayoutId, PaintIndex,
     Pixels, PrepaintStateIndex, Render, RenderOnce, Style, StyleRefinement, TextStyle, WeakEntity,
 };
 use crate::{Empty, Window};
+use crate::{FocusId, Point};
 use anyhow::Result;
 use collections::{FxHashSet, TypeIdHashSet};
 use refineable::Refineable;
@@ -222,6 +224,20 @@ impl<T: Render> View for Entity<T> {
 }
 
 impl<T: Render> Entity<T> {
+    /// Cache a subtree clipped to its layout bounds. Fully visible subtrees can
+    /// reuse drawing at a new position when their callbacks support offsets.
+    /// Partly clipped content and unsupported handlers are rendered again.
+    /// Custom elements must update retained geometry through
+    /// [`Window::on_draw_with_offset`] and use
+    /// [`Window::on_mouse_event_with_offset`] for handlers that capture bounds.
+    /// Element event handlers must not capture absolute layout coordinates.
+    #[track_caller]
+    pub fn cached_clipped(self, style: StyleRefinement) -> ViewElement<Entity<T>> {
+        let mut element = ViewElement::new(self).cached(style);
+        element.clip = true;
+        element
+    }
+
     /// Embed this entity as a cached [`ViewElement`] laid out at `style`.
     ///
     /// The rendered subtree is reused until the entity or a view inside it is
@@ -243,6 +259,7 @@ pub struct ViewElement<V: View> {
     view: Option<V>,
     entity_id: Option<EntityId>,
     cached_style: Option<StyleRefinement>,
+    clip: bool,
     #[cfg(debug_assertions)]
     source: &'static core::panic::Location<'static>,
 }
@@ -255,6 +272,7 @@ impl<V: View> ViewElement<V> {
         ViewElement {
             entity_id,
             cached_style: None,
+            clip: false,
             view: Some(view),
             #[cfg(debug_assertions)]
             source: core::panic::Location::caller(),
@@ -294,12 +312,57 @@ struct ViewElementState {
     /// after the render so a global the subtree itself mutates while
     /// rendering does not bust its own cache on every frame.
     global_generation: u64,
+    a11y: Option<CachedA11y>,
+    paint_offset: Point<Pixels>,
 }
 
 struct ViewElementCacheKey {
     bounds: Bounds<Pixels>,
     content_mask: ContentMask<Pixels>,
     text_style: TextStyle,
+    a11y_active: bool,
+    focus: Option<FocusId>,
+    clipped: bool,
+    scale: f32,
+}
+
+impl ViewElementState {
+    fn can_reuse(
+        &self,
+        next: &ViewElementCacheKey,
+        entity_id: EntityId,
+        window: &Window,
+        cx: &App,
+    ) -> bool {
+        let previous = &self.cache_key;
+        if previous.clipped != next.clipped
+            || previous.scale != next.scale
+            || previous.text_style != next.text_style
+            || previous.a11y_active != next.a11y_active
+            || (next.a11y_active && previous.focus != next.focus)
+            || (next.a11y_active && window.cache_has_deferred_draws(&self.prepaint_range))
+            || window.dirty_views.contains(&entity_id)
+            || window.refreshing
+            || cx.globals_changed_since(&self.accessed_globals, self.global_generation)
+        {
+            return false;
+        }
+        if previous.bounds == next.bounds && previous.content_mask == next.content_mask {
+            return true;
+        }
+
+        // Glyph rasterization depends on the fractional device-pixel origin.
+        // An integer translation preserves the selected atlas images.
+        let offset = (next.bounds.origin - previous.bounds.origin).scale(next.scale);
+        next.clipped
+            && previous.bounds.size == next.bounds.size
+            && previous.content_mask.bounds == previous.bounds
+            && next.content_mask.bounds == next.bounds
+            && offset.x.0.fract() == 0.
+            && offset.y.0.fract() == 0.
+            && self.a11y.as_ref().is_none_or(CachedA11y::can_translate)
+            && window.can_translate_cache(&self.prepaint_range, &self.paint_range)
+    }
 }
 
 impl<V: View> Element for ViewElement<V> {
@@ -387,22 +450,41 @@ impl<V: View> Element for ViewElement<V> {
                 window.with_element_state::<ViewElementState, _>(
                     global_id.unwrap(),
                     |element_state, window| {
-                        let content_mask = window.content_mask();
+                        let mut content_mask = window.content_mask();
+                        if self.clip {
+                            content_mask.bounds = content_mask.bounds.intersect(&bounds);
+                        }
                         let text_style = window.text_style();
+                        let a11y_active = window.is_a11y_active();
+                        let focus = window.focused(cx).map(|handle| handle.id);
+                        let scale = window.scale_factor();
+                        let cache_key = ViewElementCacheKey {
+                            bounds,
+                            content_mask,
+                            text_style,
+                            a11y_active,
+                            focus,
+                            clipped: self.clip,
+                            scale,
+                        };
 
                         if let Some(mut element_state) = element_state
-                            && element_state.cache_key.bounds == bounds
-                            && element_state.cache_key.content_mask == content_mask
-                            && element_state.cache_key.text_style == text_style
-                            && !window.dirty_views.contains(&entity_id)
-                            && !window.refreshing
-                            && !cx.globals_changed_since(
-                                &element_state.accessed_globals,
-                                element_state.global_generation,
-                            )
+                            && element_state.can_reuse(&cache_key, entity_id, window, cx)
                         {
                             let prepaint_start = window.prepaint_index();
-                            window.reuse_prepaint(element_state.prepaint_range.clone());
+                            let offset = bounds.origin - element_state.cache_key.bounds.origin;
+                            window.reuse_prepaint_with_offset(
+                                element_state.prepaint_range.clone(),
+                                offset,
+                                cx,
+                            );
+                            if let Some(a11y) = &mut element_state.a11y {
+                                a11y.translate(offset, scale);
+                                a11y.prepaint(&mut window.a11y);
+                            }
+                            element_state.paint_offset = offset;
+                            element_state.cache_key.bounds = bounds;
+                            element_state.cache_key.content_mask = content_mask;
                             cx.entities
                                 .extend_accessed(&element_state.accessed_entities);
                             cx.extend_accessed_globals(&element_state.accessed_globals);
@@ -414,6 +496,7 @@ impl<V: View> Element for ViewElement<V> {
 
                         let refreshing = mem::replace(&mut window.refreshing, true);
                         let prepaint_start = window.prepaint_index();
+                        let a11y_start = cache::index(&window.a11y);
                         let ((mut element, accessed_entities), accessed_globals) = cx
                             .detect_accessed_globals(|cx| {
                                 cx.detect_accessed_entities(|cx| {
@@ -424,7 +507,9 @@ impl<V: View> Element for ViewElement<V> {
                                         .render(window, cx)
                                         .into_any_element();
                                     element.layout_as_root(bounds.size.into(), window, cx);
-                                    element.prepaint_at(bounds.origin, window, cx);
+                                    window.with_content_mask(Some(content_mask), |window| {
+                                        element.prepaint_at(bounds.origin, window, cx);
+                                    });
                                     element
                                 })
                             });
@@ -439,13 +524,11 @@ impl<V: View> Element for ViewElement<V> {
                                 accessed_entities,
                                 accessed_globals,
                                 global_generation,
+                                a11y: a11y_start.map(|start| cache::capture(&window.a11y, start)),
+                                paint_offset: Point::default(),
                                 prepaint_range: prepaint_start..prepaint_end,
                                 paint_range: PaintIndex::default()..PaintIndex::default(),
-                                cache_key: ViewElementCacheKey {
-                                    bounds,
-                                    content_mask,
-                                    text_style,
-                                },
+                                cache_key,
                             },
                         )
                     },
@@ -487,10 +570,25 @@ impl<V: View> Element for ViewElement<V> {
 
                             if let Some(element) = element {
                                 let refreshing = mem::replace(&mut window.refreshing, true);
-                                element.paint(window, cx);
+                                window.with_content_mask(
+                                    Some(element_state.cache_key.content_mask),
+                                    |window| {
+                                        element.paint(window, cx);
+                                    },
+                                );
                                 window.refreshing = refreshing;
+                                if let Some(a11y) = &mut element_state.a11y {
+                                    a11y.capture_actions(&window.a11y);
+                                }
                             } else {
-                                window.reuse_paint(element_state.paint_range.clone());
+                                window.reuse_paint_with_offset(
+                                    element_state.paint_range.clone(),
+                                    element_state.paint_offset,
+                                    cx,
+                                );
+                                if let Some(a11y) = &element_state.a11y {
+                                    a11y.paint(&mut window.a11y);
+                                }
                             }
 
                             let paint_end = window.paint_index();

@@ -2439,10 +2439,16 @@ impl Interactivity {
 
                 #[cfg(any(feature = "test-support", test))]
                 if let Some(debug_selector) = &self.debug_selector {
-                    window
-                        .next_frame
-                        .debug_bounds
-                        .insert(debug_selector.clone(), bounds);
+                    let selector = debug_selector.clone();
+                    window.on_draw_with_offset(cx, move |offset, window, _| {
+                        window.next_frame.debug_bounds.insert(
+                            selector.clone(),
+                            Bounds {
+                                origin: bounds.origin + offset,
+                                size: bounds.size,
+                            },
+                        );
+                    });
                 }
 
                 self.paint_hover_group_handler(window, cx);
@@ -2688,7 +2694,7 @@ impl Interactivity {
         // This behavior can be suppressed by using `cx.prevent_default()`.
         if let Some(focus_handle) = self.tracked_focus_handle.clone() {
             let hitbox = hitbox.clone();
-            window.on_mouse_event(move |_: &MouseDownEvent, phase, window, cx| {
+            window.on_mouse_event_with_offset(move |_: &MouseDownEvent, _, phase, window, cx| {
                 if phase == DispatchPhase::Bubble
                     && hitbox.is_hovered(window)
                     && !window.default_prevented()
@@ -2703,51 +2709,65 @@ impl Interactivity {
 
         for listener in self.mouse_down_listeners.drain(..) {
             let hitbox = hitbox.clone();
-            window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
-                listener(event, phase, &hitbox, window, cx);
-            })
+            window.on_mouse_event_with_offset(
+                move |event: &MouseDownEvent, offset, phase, window, cx| {
+                    listener(event, phase, &hitbox.translated(offset), window, cx);
+                },
+            )
         }
 
         for listener in self.mouse_up_listeners.drain(..) {
             let hitbox = hitbox.clone();
-            window.on_mouse_event(move |event: &MouseUpEvent, phase, window, cx| {
-                listener(event, phase, &hitbox, window, cx);
-            })
+            window.on_mouse_event_with_offset(
+                move |event: &MouseUpEvent, offset, phase, window, cx| {
+                    listener(event, phase, &hitbox.translated(offset), window, cx);
+                },
+            )
         }
 
         for listener in self.mouse_pressure_listeners.drain(..) {
             let hitbox = hitbox.clone();
-            window.on_mouse_event(move |event: &MousePressureEvent, phase, window, cx| {
-                listener(event, phase, &hitbox, window, cx);
-            })
+            window.on_mouse_event_with_offset(
+                move |event: &MousePressureEvent, offset, phase, window, cx| {
+                    listener(event, phase, &hitbox.translated(offset), window, cx);
+                },
+            )
         }
 
         for listener in self.mouse_move_listeners.drain(..) {
             let hitbox = hitbox.clone();
-            window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
-                listener(event, phase, &hitbox, window, cx);
-            })
+            window.on_mouse_event_with_offset(
+                move |event: &MouseMoveEvent, offset, phase, window, cx| {
+                    listener(event, phase, &hitbox.translated(offset), window, cx);
+                },
+            )
         }
 
         for listener in self.mouse_exit_listeners.drain(..) {
             let hitbox = hitbox.clone();
-            window.on_mouse_event(move |event: &MouseExitEvent, phase, window, cx| {
-                listener(event, phase, &hitbox, window, cx);
-            })
+            window.on_mouse_event_with_offset(
+                move |event: &MouseExitEvent, offset, phase, window, cx| {
+                    listener(event, phase, &hitbox.translated(offset), window, cx);
+                },
+            )
         }
 
         for listener in self.scroll_wheel_listeners.drain(..) {
             let hitbox = hitbox.clone();
-            window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, cx| {
-                listener(event, phase, &hitbox, window, cx);
-            })
+            window.on_mouse_event_with_offset(
+                move |event: &ScrollWheelEvent, offset, phase, window, cx| {
+                    listener(event, phase, &hitbox.translated(offset), window, cx);
+                },
+            )
         }
 
         for listener in self.pinch_listeners.drain(..) {
             let hitbox = hitbox.clone();
-            window.on_mouse_event(move |event: &PinchEvent, phase, window, cx| {
-                listener(event, phase, &hitbox, window, cx);
-            })
+            window.on_mouse_event_with_offset(
+                move |event: &PinchEvent, offset, phase, window, cx| {
+                    listener(event, phase, &hitbox.translated(offset), window, cx);
+                },
+            )
         }
 
         if self.hover_style.is_some()
@@ -2763,7 +2783,7 @@ impl Interactivity {
             });
             let current_view = window.current_view();
 
-            window.on_mouse_event(move |_: &MouseMoveEvent, phase, window, cx| {
+            window.on_mouse_event_with_offset(move |_: &MouseMoveEvent, _, phase, window, cx| {
                 let hovered = hitbox.is_hovered(window);
                 let was_hovered = hover_state
                     .as_ref()
@@ -2785,18 +2805,20 @@ impl Interactivity {
                     .cloned();
                 let current_view = window.current_view();
 
-                window.on_mouse_event(move |_: &MouseMoveEvent, phase, window, cx| {
-                    let group_hovered = group_hitbox_id.is_hovered(window);
-                    let was_group_hovered = hover_state
-                        .as_ref()
-                        .is_some_and(|state| state.borrow().group);
-                    if phase == DispatchPhase::Capture && group_hovered != was_group_hovered {
-                        if let Some(hover_state) = &hover_state {
-                            hover_state.borrow_mut().group = group_hovered;
-                            cx.notify(current_view);
+                window.on_mouse_event_with_offset(
+                    move |_: &MouseMoveEvent, _, phase, window, cx| {
+                        let group_hovered = group_hitbox_id.is_hovered(window);
+                        let was_group_hovered = hover_state
+                            .as_ref()
+                            .is_some_and(|state| state.borrow().group);
+                        if phase == DispatchPhase::Capture && group_hovered != was_group_hovered {
+                            if let Some(hover_state) = &hover_state {
+                                hover_state.borrow_mut().group = group_hovered;
+                                cx.notify(current_view);
+                            }
                         }
-                    }
-                });
+                    },
+                );
             }
         }
 
@@ -3148,25 +3170,29 @@ impl Interactivity {
 
             {
                 let active_state = active_state.clone();
-                window.on_mouse_event(move |_: &MouseUpEvent, phase, window, _cx| {
-                    if phase == DispatchPhase::Capture && active_state.borrow().is_clicked() {
-                        *active_state.borrow_mut() = ElementClickedState::default();
-                        window.refresh();
-                    }
-                });
+                window.on_mouse_event_with_offset(
+                    move |_: &MouseUpEvent, _, phase, window, _cx| {
+                        if phase == DispatchPhase::Capture && active_state.borrow().is_clicked() {
+                            *active_state.borrow_mut() = ElementClickedState::default();
+                            window.refresh();
+                        }
+                    },
+                );
             }
 
             {
                 let active_state = active_state.clone();
-                window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, _cx| {
-                    if phase == DispatchPhase::Capture
-                        && event.pressed_button.is_none()
-                        && active_state.borrow().is_clicked()
-                    {
-                        *active_state.borrow_mut() = ElementClickedState::default();
-                        window.refresh();
-                    }
-                });
+                window.on_mouse_event_with_offset(
+                    move |event: &MouseMoveEvent, _, phase, window, _cx| {
+                        if phase == DispatchPhase::Capture
+                            && event.pressed_button.is_none()
+                            && active_state.borrow().is_clicked()
+                        {
+                            *active_state.borrow_mut() = ElementClickedState::default();
+                            window.refresh();
+                        }
+                    },
+                );
             }
 
             {
@@ -3175,20 +3201,22 @@ impl Interactivity {
                     .as_ref()
                     .and_then(|group_active| GroupHitboxes::get(&group_active.group, cx));
                 let hitbox = hitbox.clone();
-                window.on_mouse_event(move |_: &MouseDownEvent, phase, window, _cx| {
-                    if phase == DispatchPhase::Bubble && !window.default_prevented() {
-                        let group_hovered = active_group_hitbox
-                            .is_some_and(|group_hitbox_id| group_hitbox_id.is_hovered(window));
-                        let element_hovered = hitbox.is_hovered(window);
-                        if group_hovered || element_hovered {
-                            *active_state.borrow_mut() = ElementClickedState {
-                                group: group_hovered,
-                                element: element_hovered,
-                            };
-                            window.refresh();
+                window.on_mouse_event_with_offset(
+                    move |_: &MouseDownEvent, _, phase, window, _cx| {
+                        if phase == DispatchPhase::Bubble && !window.default_prevented() {
+                            let group_hovered = active_group_hitbox
+                                .is_some_and(|group_hitbox_id| group_hitbox_id.is_hovered(window));
+                            let element_hovered = hitbox.is_hovered(window);
+                            if group_hovered || element_hovered {
+                                *active_state.borrow_mut() = ElementClickedState {
+                                    group: group_hovered,
+                                    element: element_hovered,
+                                };
+                                window.refresh();
+                            }
                         }
-                    }
-                });
+                    },
+                );
             }
         }
     }
@@ -3234,7 +3262,7 @@ impl Interactivity {
         if let Some(group_hitbox) = group_hitbox {
             let was_hovered = group_hitbox.is_hovered(window);
             let current_view = window.current_view();
-            window.on_mouse_event(move |_: &MouseMoveEvent, phase, window, cx| {
+            window.on_mouse_event_with_offset(move |_: &MouseMoveEvent, _, phase, window, cx| {
                 let hovered = group_hitbox.is_hovered(window);
                 if phase == DispatchPhase::Capture && hovered != was_hovered {
                     cx.notify(current_view);

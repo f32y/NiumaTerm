@@ -66,7 +66,7 @@ use uuid::Uuid;
 pub(crate) mod a11y;
 mod prompts;
 
-pub use a11y::A11ySubtreeBuilder;
+pub use crate::window::a11y::A11ySubtreeBuilder;
 
 use crate::util::{
     atomic_incr_if_not_zero, ceil_to_device_pixel, floor_to_device_pixel, round_half_toward_zero,
@@ -75,7 +75,7 @@ use crate::util::{
 use crate::window::a11y::A11y;
 #[cfg(not(target_family = "wasm"))]
 use crate::window::a11y::ROOT_NODE_ID;
-pub use prompts::*;
+pub use crate::window::prompts::*;
 
 /// Default window size used when no explicit size is provided.
 pub const DEFAULT_WINDOW_SIZE: Size<Pixels> = size(px(1536.), px(1095.));
@@ -728,8 +728,11 @@ pub struct DismissEvent;
 
 type FrameCallback = Box<dyn FnOnce(&mut Window, &mut App)>;
 
-pub(crate) type AnyMouseListener =
-    Box<dyn FnMut(&dyn Any, DispatchPhase, &mut Window, &mut App) + 'static>;
+pub(crate) struct AnyMouseListener {
+    listener: Box<dyn FnMut(&dyn Any, Point<Pixels>, DispatchPhase, &mut Window, &mut App)>,
+    offset: Point<Pixels>,
+    can_translate: bool,
+}
 
 #[derive(Clone)]
 pub(crate) struct CursorStyleRequest {
@@ -840,6 +843,13 @@ pub struct Hitbox {
 }
 
 impl Hitbox {
+    pub(crate) fn translated(&self, offset: Point<Pixels>) -> Self {
+        let mut hitbox = self.clone();
+        hitbox.bounds.origin += offset;
+        hitbox.content_mask.bounds.origin += offset;
+        hitbox
+    }
+
     /// Checks if the hitbox is currently hovered. Returns `false` during keyboard input modality
     /// so that keyboard navigation suppresses hover highlights. Except when handling
     /// `ScrollWheelEvent`, this is typically what you want when determining whether to handle mouse
@@ -972,6 +982,13 @@ pub(crate) struct DeferredDraw {
     paint_range: Range<PaintIndex>,
 }
 
+#[derive(Clone)]
+struct DrawCallback {
+    callback: Rc<dyn Fn(Point<Pixels>, &mut Window, &mut App)>,
+    offset: Point<Pixels>,
+    can_translate: bool,
+}
+
 pub(crate) struct Frame {
     pub(crate) focus: Option<FocusId>,
     pub(crate) window_active: bool,
@@ -986,6 +1003,8 @@ pub(crate) struct Frame {
     pub(crate) input_handlers: Vec<Option<PlatformInputHandler>>,
     pub(crate) tooltip_requests: Vec<Option<TooltipRequest>>,
     pub(crate) cursor_styles: Vec<CursorStyleRequest>,
+    prepaint_callbacks: Vec<DrawCallback>,
+    paint_callbacks: Vec<DrawCallback>,
     #[cfg(any(test, feature = "test-support"))]
     pub(crate) debug_bounds: FxHashMap<String, Bounds<Pixels>>,
     #[cfg(any(feature = "inspector", debug_assertions))]
@@ -997,6 +1016,7 @@ pub(crate) struct Frame {
 
 #[derive(Clone, Default)]
 pub(crate) struct PrepaintStateIndex {
+    callbacks_index: usize,
     hitboxes_index: usize,
     tooltips_index: usize,
     deferred_draws_index: usize,
@@ -1007,6 +1027,8 @@ pub(crate) struct PrepaintStateIndex {
 
 #[derive(Clone, Default)]
 pub(crate) struct PaintIndex {
+    callbacks_index: usize,
+    window_control_hitboxes_index: usize,
     scene_index: usize,
     mouse_listeners_index: usize,
     input_handlers_index: usize,
@@ -1032,6 +1054,8 @@ impl Frame {
             input_handlers: Vec::new(),
             tooltip_requests: Vec::new(),
             cursor_styles: Vec::new(),
+            prepaint_callbacks: Vec::new(),
+            paint_callbacks: Vec::new(),
 
             #[cfg(any(test, feature = "test-support"))]
             debug_bounds: FxHashMap::default(),
@@ -1054,6 +1078,8 @@ impl Frame {
         self.input_handlers.clear();
         self.tooltip_requests.clear();
         self.cursor_styles.clear();
+        self.prepaint_callbacks.clear();
+        self.paint_callbacks.clear();
         self.hitboxes.clear();
         self.window_control_hitboxes.clear();
         self.deferred_draws.clear();
@@ -1967,6 +1993,12 @@ impl ContentMask<Pixels> {
 }
 
 impl Window {
+    /// Whether a view or one of its descendants needs fresh layout and drawing.
+    /// Content-sized caches can use this to discard their previous measurement.
+    pub fn is_view_dirty(&self, view_id: EntityId) -> bool {
+        self.refreshing || self.dirty_views.contains(&view_id)
+    }
+
     fn mark_view_dirty(&mut self, view_id: EntityId) {
         // Mark ancestor views as dirty. If already in the `dirty_views` set, then all its ancestors
         // should already be dirty.
@@ -3438,7 +3470,7 @@ impl Window {
                     });
                     self.next_frame.deferred_draws[deferred_draw_ix].element = Some(element);
                 } else {
-                    self.reuse_prepaint(prepaint_range);
+                    self.reuse_prepaint(prepaint_range, cx);
                 }
                 let prepaint_end = self.prepaint_index();
                 self.next_frame.deferred_draws[deferred_draw_ix].prepaint_range =
@@ -3481,7 +3513,7 @@ impl Window {
                     })
                 })
             } else {
-                self.reuse_paint(deferred_draw.paint_range.clone());
+                self.reuse_paint(deferred_draw.paint_range.clone(), cx);
             }
             let paint_end = self.paint_index();
             deferred_draw.paint_range = paint_start..paint_end;
@@ -3499,6 +3531,7 @@ impl Window {
 
     pub(crate) fn prepaint_index(&self) -> PrepaintStateIndex {
         PrepaintStateIndex {
+            callbacks_index: self.next_frame.prepaint_callbacks.len(),
             hitboxes_index: self.next_frame.hitboxes.len(),
             tooltips_index: self.next_frame.tooltip_requests.len(),
             deferred_draws_index: self.next_frame.deferred_draws.len(),
@@ -3508,11 +3541,66 @@ impl Window {
         }
     }
 
-    pub(crate) fn reuse_prepaint(&mut self, range: Range<PrepaintStateIndex>) {
+    pub(crate) fn reuse_prepaint(&mut self, range: Range<PrepaintStateIndex>, cx: &mut App) {
+        self.reuse_prepaint_with_offset(range, Point::default(), cx);
+    }
+
+    pub(crate) fn can_translate_cache(
+        &self,
+        prepaint: &Range<PrepaintStateIndex>,
+        paint: &Range<PaintIndex>,
+    ) -> bool {
+        prepaint.start.deferred_draws_index == prepaint.end.deferred_draws_index
+            && prepaint.start.tooltips_index == prepaint.end.tooltips_index
+            && paint.start.input_handlers_index == paint.end.input_handlers_index
+            && paint.start.window_control_hitboxes_index == paint.end.window_control_hitboxes_index
+            && self.rendered_frame.prepaint_callbacks
+                [prepaint.start.callbacks_index..prepaint.end.callbacks_index]
+                .iter()
+                .all(|callback| callback.can_translate)
+            && self.rendered_frame.paint_callbacks
+                [paint.start.callbacks_index..paint.end.callbacks_index]
+                .iter()
+                .all(|callback| callback.can_translate)
+            && self.rendered_frame.mouse_listeners
+                [paint.start.mouse_listeners_index..paint.end.mouse_listeners_index]
+                .iter()
+                .all(|listener| {
+                    listener
+                        .as_ref()
+                        .is_some_and(|listener| listener.can_translate)
+                })
+            && self
+                .rendered_frame
+                .scene
+                .can_translate(paint.start.scene_index..paint.end.scene_index)
+    }
+
+    pub(crate) fn cache_has_deferred_draws(&self, range: &Range<PrepaintStateIndex>) -> bool {
+        range.start.deferred_draws_index != range.end.deferred_draws_index
+    }
+
+    pub(crate) fn reuse_prepaint_with_offset(
+        &mut self,
+        range: Range<PrepaintStateIndex>,
+        offset: Point<Pixels>,
+        cx: &mut App,
+    ) {
+        for index in range.start.callbacks_index..range.end.callbacks_index {
+            let mut callback = self.rendered_frame.prepaint_callbacks[index].clone();
+            callback.offset += offset;
+            (callback.callback)(callback.offset, self, cx);
+            self.next_frame.prepaint_callbacks.push(callback);
+        }
         self.next_frame.hitboxes.extend(
             self.rendered_frame.hitboxes[range.start.hitboxes_index..range.end.hitboxes_index]
                 .iter()
-                .cloned(),
+                .cloned()
+                .map(|mut hitbox| {
+                    hitbox.bounds.origin += offset;
+                    hitbox.content_mask.bounds.origin += offset;
+                    hitbox
+                }),
         );
         self.next_frame.tooltip_requests.extend(
             self.rendered_frame.tooltip_requests
@@ -3561,6 +3649,8 @@ impl Window {
 
     pub(crate) fn paint_index(&self) -> PaintIndex {
         PaintIndex {
+            callbacks_index: self.next_frame.paint_callbacks.len(),
+            window_control_hitboxes_index: self.next_frame.window_control_hitboxes.len(),
             scene_index: self.next_frame.scene.len(),
             mouse_listeners_index: self.next_frame.mouse_listeners.len(),
             input_handlers_index: self.next_frame.input_handlers.len(),
@@ -3571,10 +3661,77 @@ impl Window {
         }
     }
 
-    pub(crate) fn reuse_paint(&mut self, range: Range<PaintIndex>) {
+    /// Run a registration now and on each reuse of this subtree's draw phase.
+    /// Capture its geometry and context in the callback so a reused scene can
+    /// refresh frame-local bookkeeping without rebuilding its elements.
+    /// The callback must not draw or register additional draw callbacks.
+    pub fn on_draw(&mut self, cx: &mut App, callback: impl Fn(&mut Self, &mut App) + 'static) {
+        self.register_draw_callback(
+            cx,
+            DrawCallback {
+                callback: Rc::new(move |_, window, cx| callback(window, cx)),
+                offset: Point::default(),
+                can_translate: false,
+            },
+        );
+    }
+
+    /// Register geometry that can be updated when a clipped cached view moves.
+    /// The offset is measured from the frame that created the callback.
+    /// The callback must not draw or register additional draw callbacks.
+    pub fn on_draw_with_offset(
+        &mut self,
+        cx: &mut App,
+        callback: impl Fn(Point<Pixels>, &mut Self, &mut App) + 'static,
+    ) {
+        self.register_draw_callback(
+            cx,
+            DrawCallback {
+                callback: Rc::new(callback),
+                offset: Point::default(),
+                can_translate: true,
+            },
+        );
+    }
+
+    fn register_draw_callback(&mut self, cx: &mut App, callback: DrawCallback) {
+        self.invalidator.debug_assert_paint_or_prepaint();
+        let phase = self.invalidator.inner.borrow().draw_phase;
+        (callback.callback)(callback.offset, self, cx);
+        match phase {
+            DrawPhase::Prepaint => self.next_frame.prepaint_callbacks.push(callback),
+            DrawPhase::Paint => self.next_frame.paint_callbacks.push(callback),
+            DrawPhase::None | DrawPhase::Focus => {
+                unreachable!("draw callbacks require a draw phase")
+            }
+        }
+    }
+
+    pub(crate) fn reuse_paint(&mut self, range: Range<PaintIndex>, cx: &mut App) {
+        self.reuse_paint_with_offset(range, Point::default(), cx);
+    }
+
+    pub(crate) fn reuse_paint_with_offset(
+        &mut self,
+        range: Range<PaintIndex>,
+        offset: Point<Pixels>,
+        cx: &mut App,
+    ) {
+        for index in range.start.callbacks_index..range.end.callbacks_index {
+            let mut callback = self.rendered_frame.paint_callbacks[index].clone();
+            callback.offset += offset;
+            (callback.callback)(callback.offset, self, cx);
+            self.next_frame.paint_callbacks.push(callback);
+        }
         self.next_frame.cursor_styles.extend(
             self.rendered_frame.cursor_styles
                 [range.start.cursor_styles_index..range.end.cursor_styles_index]
+                .iter()
+                .cloned(),
+        );
+        self.next_frame.window_control_hitboxes.extend(
+            self.rendered_frame.window_control_hitboxes[range.start.window_control_hitboxes_index
+                ..range.end.window_control_hitboxes_index]
                 .iter()
                 .cloned(),
         );
@@ -3588,7 +3745,12 @@ impl Window {
             self.rendered_frame.mouse_listeners
                 [range.start.mouse_listeners_index..range.end.mouse_listeners_index]
                 .iter_mut()
-                .map(|listener| listener.take()),
+                .map(|listener| {
+                    listener.take().map(|mut listener| {
+                        listener.offset += offset;
+                        listener
+                    })
+                }),
         );
         self.next_frame.accessed_element_states.extend(
             self.rendered_frame.accessed_element_states[range.start.accessed_element_states_index
@@ -3603,9 +3765,10 @@ impl Window {
 
         self.text_system
             .reuse_layouts(range.start.line_layout_index..range.end.line_layout_index);
-        self.next_frame.scene.replay(
+        self.next_frame.scene.replay_with_offset(
             range.start.scene_index..range.end.scene_index,
             &self.rendered_frame.scene,
+            offset.scale(self.scale_factor()),
         );
     }
 
@@ -3743,6 +3906,9 @@ impl Window {
         let result = f(self);
         if result.is_err() {
             self.next_frame.hitboxes.truncate(index.hitboxes_index);
+            self.next_frame
+                .prepaint_callbacks
+                .truncate(index.callbacks_index);
             self.next_frame
                 .tooltip_requests
                 .truncate(index.tooltips_index);
@@ -5038,13 +5204,40 @@ impl Window {
     ) {
         self.invalidator.debug_assert_paint();
 
-        self.next_frame.mouse_listeners.push(Some(Box::new(
-            move |event: &dyn Any, phase: DispatchPhase, window: &mut Window, cx: &mut App| {
+        self.next_frame.mouse_listeners.push(Some(AnyMouseListener {
+            offset: Point::default(),
+            can_translate: false,
+            listener: Box::new(
+                move |event: &dyn Any,
+                      _,
+                      phase: DispatchPhase,
+                      window: &mut Window,
+                      cx: &mut App| {
+                    if let Some(event) = event.downcast_ref() {
+                        listener(event, phase, window, cx)
+                    }
+                },
+            ),
+        }));
+    }
+
+    /// Register a mouse handler that adjusts captured geometry by the supplied
+    /// cache offset. Event positions remain in current window coordinates.
+    /// The offset is measured from the frame that registered the handler.
+    pub fn on_mouse_event_with_offset<Event: MouseEvent>(
+        &mut self,
+        mut listener: impl FnMut(&Event, Point<Pixels>, DispatchPhase, &mut Window, &mut App) + 'static,
+    ) {
+        self.invalidator.debug_assert_paint();
+        self.next_frame.mouse_listeners.push(Some(AnyMouseListener {
+            offset: Point::default(),
+            can_translate: true,
+            listener: Box::new(move |event, offset, phase, window, cx| {
                 if let Some(event) = event.downcast_ref() {
-                    listener(event, phase, window, cx)
+                    listener(event, offset, phase, window, cx);
                 }
-            },
-        )));
+            }),
+        }));
     }
 
     /// Register a key event listener on this node for the next frame. The type of event
@@ -5385,7 +5578,7 @@ impl Window {
         // special purposes, such as detecting events outside of a given Bounds.
         for listener in &mut mouse_listeners {
             let listener = listener.as_mut().unwrap();
-            listener(event, DispatchPhase::Capture, self, cx);
+            (listener.listener)(event, listener.offset, DispatchPhase::Capture, self, cx);
             if !cx.propagate_event {
                 break;
             }
@@ -5395,7 +5588,7 @@ impl Window {
         if cx.propagate_event {
             for listener in mouse_listeners.iter_mut().rev() {
                 let listener = listener.as_mut().unwrap();
-                listener(event, DispatchPhase::Bubble, self, cx);
+                (listener.listener)(event, listener.offset, DispatchPhase::Bubble, self, cx);
                 if !cx.propagate_event {
                     break;
                 }
@@ -6308,7 +6501,7 @@ impl Window {
             .action_listeners
             .entry(node_id)
             .or_default()
-            .push((action, Box::new(listener)));
+            .push((action, Rc::new(RefCell::new(listener))));
     }
 
     #[cfg(not(target_family = "wasm"))]
@@ -6320,7 +6513,7 @@ impl Window {
             let mut matched = false;
             for (action, listener) in &mut listeners {
                 if *action == request.action {
-                    listener(extra_data, self, cx);
+                    listener.borrow_mut()(extra_data, self, cx);
                     matched = true;
                 }
             }
