@@ -214,7 +214,10 @@ fn main() {
     }
 
     #[cfg(windows)]
-    let platform = Rc::new(Platform::new(false).expect("failed to initialize GPUI Windows"));
+    let platform = Rc::new(
+        Platform::new_with_gpu_preference(false, get().system.prioritize_integrated_gpu)
+            .expect("failed to initialize GPUI Windows"),
+    );
 
     #[cfg(target_os = "macos")]
     let platform = Rc::new(Platform::new(false));

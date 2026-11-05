@@ -319,6 +319,8 @@
 "settings-system-proxy-url-description" = "host:port，例如 127.0.0.1:7890。需要认证的代理在主机前加 user:password@。留空则使用系统代理。已建立的连接在重连后才会改用新设置。"
 "settings-system-proxy-apply" = "应用"
 "settings-system-power-efficiency-mode" = "Power Efficiency Mode"
+"settings-system-prioritize-integrated-gpu" = "Prioritize integrated GPU"
+"settings-system-prioritize-integrated-gpu-description" = "启动时优先使用可用的集成 GPU。更改将在重启 NiumaTerm 后生效。"
 
 # Theme and background controls
 "settings-theme-default" = "默认"

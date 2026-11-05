@@ -178,7 +178,23 @@ pub(super) fn system_page(shell_integration_mismatched: bool, proxy: ProxyMode) 
                     },
                 )
                 .default_value(true),
-            )),
+            ))
+            .item(
+                SettingItem::new(
+                    t!("settings-system-prioritize-integrated-gpu"),
+                    settings_switch(
+                        |config| config.system.prioritize_integrated_gpu,
+                        |settings, value| {
+                            settings
+                                .edit_system(|section| section.prioritize_integrated_gpu = value);
+                        },
+                    )
+                    .default_value(true),
+                )
+                .description(
+                    t!("settings-system-prioritize-integrated-gpu-description").into_owned(),
+                ),
+            ),
     );
 
     page.group(

@@ -88,6 +88,7 @@ send-system-notifications = true
 proxy = "system"
 proxy-url = ""
 power-efficiency-mode = true
+prioritize-integrated-gpu = true
 
 [update]
 check-updates = true

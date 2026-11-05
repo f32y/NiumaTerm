@@ -320,6 +320,8 @@
 "settings-system-proxy-url-description" = "host:port, for example 127.0.0.1:7890. Add user:password@ before the host for a proxy that asks for credentials. Empty uses the system proxy. Open connections keep their route until they reconnect."
 "settings-system-proxy-apply" = "Apply"
 "settings-system-power-efficiency-mode" = "Power Efficiency Mode"
+"settings-system-prioritize-integrated-gpu" = "Prioritize integrated GPU"
+"settings-system-prioritize-integrated-gpu-description" = "Prefer an integrated GPU at startup when available. Changes take effect after restarting NiumaTerm."
 
 # Theme and background controls
 "settings-theme-default" = "Default"

@@ -100,6 +100,10 @@ pub struct SystemConfig {
     /// Enable Windows EcoQoS and use the Idle process priority class.
     #[serde(default = "default_bool_true", rename = "power-efficiency-mode")]
     pub power_efficiency_mode: bool,
+
+    /// Prefer an integrated GPU when creating the Windows graphics device.
+    #[serde(default = "default_bool_true", rename = "prioritize-integrated-gpu")]
+    pub prioritize_integrated_gpu: bool,
 }
 
 impl Default for SystemConfig {
@@ -115,6 +119,7 @@ impl Default for SystemConfig {
             proxy: ProxyMode::default(),
             proxy_url: String::new(),
             power_efficiency_mode: true,
+            prioritize_integrated_gpu: true,
         }
     }
 }
