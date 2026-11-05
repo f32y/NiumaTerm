@@ -9,7 +9,7 @@ use rust_i18n::t;
 
 use crate::agent_updates;
 use crate::agent_updates::{
-    AgentUpdates, FocusedVisibleLifetime, NotificationPrimaryAction, UpdateNotificationView,
+    AgentUpdates, NotificationLifetime, NotificationPrimaryAction, UpdateNotificationView,
 };
 use crate::ui::notification_card::{NotificationAction, NotificationCard};
 use crate::ui::shell::AppWindow;
@@ -19,12 +19,12 @@ use crate::update::UpdateNotification;
 
 /// One on-screen provider-update notification: the reduced view it was built
 /// from, the card entity presenting it, and, for the auto-hiding phases, the
-/// focused-visible clock that retires it. One record per key, so the three
+/// elapsed-time clock that retires it. One record per key, so the three
 /// cannot fall out of step.
 pub(super) struct UpdateCard {
     view: UpdateNotificationView,
     card: Entity<Notification>,
-    elapsed: Option<FocusedVisibleLifetime>,
+    elapsed: Option<NotificationLifetime>,
 }
 
 /// Provider and application updates share one stack so their cards cannot
@@ -143,7 +143,7 @@ impl UpdateNotificationLayer {
                 }
             };
 
-            // Auto-hiding phases keep a focused-visible clock; entering a
+            // Auto-hiding phases keep an elapsed-time clock; entering a
             // sticky one clears it, so a card cannot expire on time banked
             // while it still counted down.
             if entry.view.terminal_timeout {
@@ -151,7 +151,7 @@ impl UpdateNotificationLayer {
 
                 entry
                     .elapsed
-                    .get_or_insert_with(|| FocusedVisibleLifetime::new(phase))
+                    .get_or_insert_with(|| NotificationLifetime::new(phase))
                     .set_phase(phase);
             } else {
                 entry.elapsed = None;
@@ -210,13 +210,11 @@ impl UpdateNotificationLayer {
 fn expire_elapsed_cards(shell: &mut AppWindow, cx: &mut Context<AppWindow>) -> bool {
     let mut expired = Vec::new();
 
-    if shell.window_active {
-        for (key, entry) in &mut shell.update_notifications.cards {
-            if let Some(lifetime) = &mut entry.elapsed
-                && lifetime.tick(true, time::Duration::from_millis(100))
-            {
-                expired.push(key.clone());
-            }
+    for (key, entry) in &mut shell.update_notifications.cards {
+        if let Some(lifetime) = &mut entry.elapsed
+            && lifetime.tick(time::Duration::from_millis(100))
+        {
+            expired.push(key.clone());
         }
     }
 

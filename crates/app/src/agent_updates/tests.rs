@@ -235,17 +235,16 @@ fn dismissal_is_scoped_to_the_reported_target() {
 }
 
 #[test]
-fn terminal_lifetime_counts_only_focused_visible_time_and_resets_by_phase() {
-    let mut lifetime = FocusedVisibleLifetime::new(UpdatePhase::Updated);
+fn terminal_lifetime_counts_elapsed_time_and_resets_by_phase() {
+    let mut lifetime = NotificationLifetime::new(UpdatePhase::Updated);
 
-    assert!(!lifetime.tick(false, Duration::from_secs(5)));
-    assert!(!lifetime.tick(true, Duration::from_millis(2_999)));
-    assert!(lifetime.tick(true, Duration::from_millis(1)));
+    assert!(!lifetime.tick(Duration::from_millis(2_999)));
+    assert!(lifetime.tick(Duration::from_millis(1)));
 
     lifetime.set_phase(UpdatePhase::Unchanged);
 
-    assert!(!lifetime.tick(true, Duration::from_millis(2_999)));
-    assert!(lifetime.tick(true, Duration::from_millis(1)));
+    assert!(!lifetime.tick(Duration::from_millis(2_999)));
+    assert!(lifetime.tick(Duration::from_millis(1)));
 }
 
 #[test]

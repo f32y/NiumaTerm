@@ -13,12 +13,12 @@ pub(crate) enum NotificationPrimaryAction {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct FocusedVisibleLifetime {
+pub(crate) struct NotificationLifetime {
     phase: UpdatePhase,
     elapsed: Duration,
 }
 
-impl FocusedVisibleLifetime {
+impl NotificationLifetime {
     pub(crate) fn new(phase: UpdatePhase) -> Self {
         Self {
             phase,
@@ -33,10 +33,8 @@ impl FocusedVisibleLifetime {
         }
     }
 
-    pub(crate) fn tick(&mut self, focused_visible: bool, elapsed: Duration) -> bool {
-        if focused_visible {
-            self.elapsed = self.elapsed.saturating_add(elapsed);
-        }
+    pub(crate) fn tick(&mut self, elapsed: Duration) -> bool {
+        self.elapsed = self.elapsed.saturating_add(elapsed);
 
         self.elapsed >= Duration::from_secs(3)
     }
