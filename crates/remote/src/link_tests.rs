@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures::stream::{empty, iter};
 use nmt_remote_core::channel::{Channel, ClientHandshake, HostHandshake};
 use nmt_remote_core::frame::{CONTROL_STREAM, kind};
 use nmt_remote_core::identity::DeviceKey;
@@ -12,8 +13,33 @@ use tokio::task::yield_now;
 use tokio::time::{sleep, timeout};
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::protocol::Role;
+use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
-use crate::link::{ControlChunks, MAX_CONTROL_TRANSFER, MAX_QUEUED, Outbound, SendQueue, pump};
+use crate::link::{
+    ControlChunks, MAX_CONTROL_TRANSFER, MAX_QUEUED, Outbound, ReceiveEnd, SendQueue, pump,
+    recv_binary,
+};
+
+#[tokio::test]
+async fn stream_end_and_a_close_without_status_remain_distinct() {
+    let mut ended = empty::<Result<Message, WsError>>();
+
+    let error = recv_binary(&mut ended).await.unwrap_err();
+
+    assert!(matches!(
+        error.downcast_ref::<ReceiveEnd>(),
+        Some(ReceiveEnd::StreamEnd)
+    ));
+
+    let mut closed = iter([Ok(Message::Close(None))]);
+
+    let error = recv_binary(&mut closed).await.unwrap_err();
+
+    assert!(matches!(
+        error.downcast_ref::<ReceiveEnd>(),
+        Some(ReceiveEnd::Close(None))
+    ));
+}
 
 fn channels() -> (Channel, Channel) {
     let client = DeviceKey::generate().unwrap();

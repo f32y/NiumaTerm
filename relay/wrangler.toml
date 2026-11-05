@@ -7,6 +7,9 @@ name = "niumaterm-relay"
 main = "src/index.ts"
 compatibility_date = "2026-07-29"
 
+[version_metadata]
+binding = "VERSION_METADATA"
+
 [observability.logs]
 enabled = true
 invocation_logs = true

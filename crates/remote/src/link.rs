@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
+use std::{error, fmt};
 
 use anyhow::{Result, bail};
 use futures::{Sink, SinkExt as _, Stream, StreamExt as _};
@@ -20,7 +21,34 @@ use tokio::sync::Mutex;
 use tokio::sync::Notify;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::time::{Instant, sleep_until};
+use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
+use tracing::info;
+
+pub(crate) const AUTH_REFUSED_CODE: u16 = 4403;
+
+#[derive(Debug)]
+pub(crate) enum ReceiveEnd {
+    Close(Option<CloseFrame>),
+    StreamEnd,
+}
+
+impl fmt::Display for ReceiveEnd {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Close(Some(frame)) => write!(
+                f,
+                "WebSocket closed with code {}: {}",
+                u16::from(frame.code),
+                frame.reason
+            ),
+            Self::Close(None) => f.write_str("WebSocket closed without a status code"),
+            Self::StreamEnd => f.write_str("WebSocket stream ended without a close frame"),
+        }
+    }
+}
+
+impl error::Error for ReceiveEnd {}
 
 /// Largest backlog one channel may queue. A peer that stays this far
 /// behind is closed and reconnects, which replaces the backlog with a
@@ -321,9 +349,23 @@ where
     loop {
         match ws.next().await {
             Some(Ok(Message::Binary(bytes))) => return Ok(bytes.to_vec()),
-            Some(Ok(Message::Close(_))) | None => bail!("connection closed"),
+            Some(Ok(Message::Close(frame))) => {
+                info!(origin = "websocket_close", code = ?frame.as_ref().map(|frame| u16::from(frame.code)),
+                    reason = ?frame.as_ref().map(|frame| frame.reason.as_str()), "remote socket ended");
+
+                return Err(ReceiveEnd::Close(frame).into());
+            }
+            None => {
+                info!(origin = "stream_end", "remote socket ended");
+
+                return Err(ReceiveEnd::StreamEnd.into());
+            }
             Some(Ok(_)) => {}
-            Some(Err(error)) => return Err(error.into()),
+            Some(Err(error)) => {
+                info!(origin = "receive", error = %format_args!("{error:#}"), "remote socket failed");
+
+                return Err(error.into());
+            }
         }
     }
 }
@@ -332,7 +374,11 @@ pub(crate) async fn send_binary<S>(ws: &mut S, bytes: Vec<u8>) -> Result<()>
 where
     S: Sink<Message, Error = WsError> + Unpin,
 {
-    ws.send(Message::Binary(bytes.into())).await?;
+    ws.send(Message::Binary(bytes.into()))
+        .await
+        .inspect_err(|error| {
+            info!(origin = "send", error = %format_args!("{error:#}"), "remote socket failed");
+        })?;
 
     Ok(())
 }
@@ -407,6 +453,8 @@ where
 
             next = outbound.rx.recv() => {
                 let Some(next) = next else {
+                    info!(origin = "local", reason = "outbound_queue_closed", "closing remote socket");
+
                     let _ = ws.close().await;
 
                     return Ok(());
@@ -442,6 +490,9 @@ where
                     missed += 1;
 
                     if missed >= MAX_MISSED_PINGS {
+                        info!(origin = "local", reason = "heartbeat_timeout", missed,
+                            "closing remote socket");
+
                         bail!("the peer stopped answering");
                     }
                 }

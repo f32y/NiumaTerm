@@ -26,14 +26,13 @@ use tokio::select;
 use tokio::time::{sleep, timeout};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
-use tracing::warn;
+use tracing::{Instrument as _, info, info_span, warn};
 
 use crate::discovery::{self, Target};
-use crate::link::{recv_binary, send_binary};
+use crate::link::{AUTH_REFUSED_CODE, ReceiveEnd, recv_binary, send_binary};
 use crate::relay::{RelaySocket, dial_host, dial_pairing};
 use crate::store::{PairedHost, StoredRelay, now_ms};
-
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+use crate::{CONNECT_TIMEOUT, connection_stage};
 
 /// The most a whole pairing attempt may take, finding the host included.
 /// Each pairing message has its own [`CONNECT_TIMEOUT`], so a slow but live
@@ -55,7 +54,7 @@ const MAX_LAN_HINTS: usize = 4;
 /// network that keeps devices apart, only times out. All candidates are
 /// tried together and the relay starts after [`RELAY_DELAY`] regardless, so
 /// a stale address delays nothing unless the relay is out of reach too.
-const LAN_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(3);
+const LAN_ATTEMPT_TIMEOUT: Duration = CONNECT_TIMEOUT;
 
 const FEATURES: &[&str] = &["terminal"];
 
@@ -97,8 +96,7 @@ pub enum LinkPath {
     Direct(String),
 }
 
-/// The host completed the preface but closed instead of answering the
-/// handshake: this device is not, or no longer, paired with it.
+/// The host returned the application close code for an unpaired device.
 #[derive(Debug)]
 pub(crate) struct Refused;
 
@@ -412,6 +410,7 @@ async fn lan_path(
                 // A fresh hello per attempt, each later than the one before,
                 // so the host takes none of them for a replay.
                 let hello = hello(app_version, clock);
+                let span = info_span!("lan_candidate", %address);
 
                 async move {
                     let attempt = async {
@@ -426,6 +425,7 @@ async fn lan_path(
 
                     (address, result)
                 }
+                .instrument(span)
             })
             .collect();
 
@@ -551,7 +551,7 @@ fn hello(app_version: &str, clock: &HelloClock) -> ClientHello {
 }
 
 /// Run the channel handshake over an open socket.
-async fn channel_handshake<S>(
+pub(crate) async fn channel_handshake<S>(
     mut ws: S,
     key: &DeviceKey,
     host_key: &[u8; 32],
@@ -560,15 +560,30 @@ async fn channel_handshake<S>(
 where
     S: Stream<Item = Result<Message, WsError>> + Sink<Message, Error = WsError> + Unpin,
 {
-    let (offer, answer) = negotiate(&mut ws, PrefaceKind::Channel).await?;
+    let (offer, answer) =
+        connection_stage::run("protocol_preface", negotiate(&mut ws, PrefaceKind::Channel)).await?;
+
     let (handshake, msg1) = ClientHandshake::start(key, host_key, &offer, &answer, hello)?;
 
-    send_binary(&mut ws, msg1).await?;
+    connection_stage::run("authentication_send", send_binary(&mut ws, msg1)).await?;
 
-    // An unpaired or revoked device gets no reply, only a closed socket.
-    let msg2 = recv_binary(&mut ws).await.map_err(|_| Refused)?;
+    // Transport failures remain retryable; only the host's dedicated close
+    // code identifies an unpaired or revoked device.
+    let msg2 = connection_stage::run("authentication_reply", recv_binary(&mut ws))
+        .await
+        .map_err(|error| {
+            if matches!(error.downcast_ref::<ReceiveEnd>(), Some(ReceiveEnd::Close(Some(frame)))
+            if u16::from(frame.code) == AUTH_REFUSED_CODE)
+            {
+                error.context(Refused)
+            } else {
+                error.context("receiving the host authentication reply")
+            }
+        })?;
 
     let (channel, host_hello) = handshake.finish(&msg2)?;
+
+    info!(peer_app_version = %host_hello.app_version, "remote host authentication completed");
 
     Ok((ws, channel, host_hello))
 }

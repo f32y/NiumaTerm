@@ -6,25 +6,33 @@ use std::sync::atomic::AtomicBool;
 use std::task::Poll;
 use std::time::Duration;
 
+use futures::SinkExt as _;
 use nmt_config::CursorShape;
 use nmt_config::colors::Colors;
 use nmt_platform::{AsyncPty, PtyOptions, create_pty_with_env, runtime};
 use nmt_remote_core::identity::DeviceKey;
 use nmt_remote_core::messages::{DeviceInfo, DeviceKind, RelayAccess};
 use nmt_remote_core::pairing::PairingCode;
+use nmt_remote_core::preface::Preface;
 use nmt_remote_core::push::{PushEnvironment, PushKind, PushRegistration};
 use nmt_remote_core::rpc::{self, EndReason, Origin, SessionInfo, SessionKind};
 use nmt_terminal::event::VoidListener;
 use nmt_terminal::termio::{SessionHandles, SessionOptions, start_session};
 use serde_json::{Value, json};
+use tokio::io::copy_bidirectional;
+use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 use tokio::time::{Instant, sleep, timeout};
+use tokio_tungstenite::accept_async;
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::protocol::CloseFrame;
+use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 
 use crate::client::{LinkPath, PathPolicy, pair};
 use crate::connection::{AgentUpdate, RemoteHost, Retry, Status};
 use crate::host::{HostConfig, HostService};
 use crate::lan::lan_addresses;
-use crate::link::MAX_CONTROL_TRANSFER;
+use crate::link::{MAX_CONTROL_TRANSFER, recv_binary, send_binary};
 use crate::local_view;
 use crate::netwatch::notify_changed as notify_network_changed;
 use crate::network_pty::NetworkPty;
@@ -485,6 +493,72 @@ fn unpaired_and_revoked_devices_are_refused() {
         assert!(client.list_sessions().await.is_err());
 
         wait_status(&client, Status::Refused).await;
+    });
+}
+
+#[test]
+fn a_network_failure_during_authentication_retries_and_lists_sessions() {
+    let host_dir = tempfile::tempdir().unwrap();
+    let host = start_host(&host_dir, SessionRegistry::new());
+
+    runtime().block_on(async {
+        let (mut paired, key) = paired_client(&host).await;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+
+        paired.lan_hints = vec![listener.local_addr().unwrap().to_string()];
+
+        let host_address = host.local_addr();
+
+        let proxy = tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await.unwrap();
+
+            let mut ws = accept_async(tcp).await.unwrap();
+
+            let offer = Preface::decode(&recv_binary(&mut ws).await.unwrap()).unwrap();
+
+            send_binary(&mut ws, offer.answer().encode().to_vec())
+                .await
+                .unwrap();
+
+            recv_binary(&mut ws).await.unwrap();
+
+            ws.send(Message::Close(Some(CloseFrame {
+                code: CloseCode::Error,
+                reason: "temporary relay error".into(),
+            })))
+            .await
+            .unwrap();
+
+            drop(ws);
+
+            let (mut client, _) = listener.accept().await.unwrap();
+            let mut server = TcpStream::connect(host_address).await.unwrap();
+
+            let _ = copy_bidirectional(&mut client, &mut server).await;
+        });
+
+        let client = RemoteHost::new(
+            paired,
+            key,
+            "test".into(),
+            Retry::Limited {
+                attempts: 2,
+                window: Duration::from_secs(1),
+            },
+            |_| {},
+        );
+
+        client.set_path_policy(PathPolicy::Lan);
+
+        timeout(WAIT, client.list_sessions())
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(*client.status().borrow(), Status::Connected);
+
+        proxy.abort();
     });
 }
 

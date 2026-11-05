@@ -21,6 +21,7 @@ pub mod presence;
 pub mod sessions;
 pub mod store;
 
+mod connection_stage;
 mod direct;
 #[cfg(all(feature = "lan", target_os = "macos"))]
 mod discovery_macos;
@@ -58,3 +59,8 @@ mod store_tests;
 #[cfg(test)]
 #[cfg(feature = "host")]
 mod stream_tests;
+
+use std::time::Duration;
+
+/// Maximum time for a connection attempt or an individual handshake step.
+pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);

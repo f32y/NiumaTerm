@@ -20,7 +20,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, Result, bail};
-use futures::{Sink, Stream};
+use futures::{Sink, SinkExt as _, Stream};
 use nmt_platform::runtime;
 use nmt_remote_core::channel::{Channel, HostHandshake};
 use nmt_remote_core::direct::{DirectOffer, Side};
@@ -54,13 +54,16 @@ use tokio::time::{sleep, timeout};
 use tokio_tungstenite::accept_hdr_async;
 use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
 use tokio_tungstenite::tungstenite::http::StatusCode;
+use tokio_tungstenite::tungstenite::protocol::CloseFrame;
+use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tracing::{Instrument as _, debug, info, info_span, warn};
 
-use crate::direct;
 use crate::discovery::Advertiser;
 use crate::lan::lan_addresses;
-use crate::link::{MAX_CONTROL_TRANSFER, Outbound, SendQueue, pump, recv_binary, send_binary};
+use crate::link::{
+    AUTH_REFUSED_CODE, MAX_CONTROL_TRANSFER, Outbound, SendQueue, pump, recv_binary, send_binary,
+};
 use crate::presence::{DISCONNECT_EXPIRY, DISCONNECT_GRACE, Presence, Presences};
 use crate::push_sender::{self, Delivery};
 use crate::relay::RelaySocket;
@@ -68,6 +71,7 @@ use crate::relay_host::{RelayCommand, run_host_link};
 use crate::sessions::{AgentRequest, HostRequest, Kick, SessionRegistry, TerminalControl, Viewer};
 use crate::store::{self, PairedDevice, now_ms};
 use crate::stream::StreamFlow;
+use crate::{CONNECT_TIMEOUT, connection_stage, direct};
 
 pub const DEFAULT_PORT: u16 = 47470;
 
@@ -78,12 +82,10 @@ const MAX_UNAUTHENTICATED: usize = 16;
 /// How long one handshake step may take. A relay path crosses Cloudflare
 /// twice per message, and a lossy route there spends seconds on TCP
 /// retransmits, so this leaves room beyond a LAN round trip.
-const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+const HANDSHAKE_TIMEOUT: Duration = CONNECT_TIMEOUT;
 
-/// How long a whole pairing exchange may hold its socket: three round trips
-/// at the client's per-message limit. It stays a total instead of a
-/// per-message limit so a peer that trickles messages cannot keep one of the
-/// few unauthenticated slots forever.
+/// A total deadline bounds the complete pairing exchange, so a peer that
+/// trickles messages cannot keep an unauthenticated slot forever.
 const PAIRING_TIMEOUT: Duration = Duration::from_secs(30);
 
 const FEATURES: &[&str] = &["terminal", PUSH_FEATURE];
@@ -600,6 +602,9 @@ impl HostService {
 
             state.connections.retain(|(client, task)| {
                 if *client == key {
+                    info!(connection = %task.id(), device = %id, origin = "local",
+                        reason = "device_revoked", "stopping remote channel task");
+
                     task.abort();
                 }
 
@@ -620,7 +625,10 @@ impl Drop for HostService {
         self.task.abort();
         self.desk.abort();
 
-        for (_, task) in self.shared.state.lock().connections.drain(..) {
+        for (key, task) in self.shared.state.lock().connections.drain(..) {
+            info!(connection = %task.id(), device = %DeviceId::from_public_key(&key),
+                origin = "local", reason = "host_stopped", "stopping remote channel task");
+
             task.abort();
         }
 
@@ -1692,19 +1700,22 @@ where
         + Send
         + 'static,
 {
-    info!("starting remote protocol handshake");
+    info!(app_version = %shared.config.device.app_version, "starting remote protocol handshake");
 
-    let (offer, answer) = timeout(HANDSHAKE_TIMEOUT, async {
-        let offer = Preface::decode(&recv_binary(&mut ws).await?)?;
-        let answer = offer.answer();
+    let (offer, answer) = connection_stage::run("protocol_preface", async {
+        timeout(HANDSHAKE_TIMEOUT, async {
+            let offer = Preface::decode(&recv_binary(&mut ws).await?)?;
+            let answer = offer.answer();
 
-        send_binary(&mut ws, answer.encode().to_vec()).await?;
+            send_binary(&mut ws, answer.encode().to_vec()).await?;
 
-        anyhow::Ok((offer, answer))
+            anyhow::Ok((offer, answer))
+        })
+        .await
+        .context("remote protocol preface timed out")?
+        .context("remote protocol preface failed")
     })
-    .await
-    .context("remote protocol preface timed out")?
-    .context("remote protocol preface failed")?;
+    .await?;
 
     match answer.kind {
         PrefaceKind::Rejected => {
@@ -1720,13 +1731,16 @@ where
         .context("remote pairing timed out")?
         .context("remote pairing failed"),
         PrefaceKind::Channel => {
-            let (channel, client_key) = timeout(
-                HANDSHAKE_TIMEOUT,
-                accept_channel(&shared, &mut ws, &offer, &answer),
-            )
-            .await
-            .context("remote channel handshake timed out")?
-            .context("remote channel handshake failed")?;
+            let (channel, client_key) = connection_stage::run("authentication", async {
+                timeout(
+                    HANDSHAKE_TIMEOUT,
+                    accept_channel(&shared, &mut ws, &offer, &answer),
+                )
+                .await
+                .context("remote channel handshake timed out")?
+                .context("remote channel handshake failed")
+            })
+            .await?;
 
             drop(permit);
 
@@ -1866,26 +1880,45 @@ where
     let client_key = *pending.client_key();
     let hello_ms = pending.hello().hello_ms;
 
+    info!(peer_app_version = %pending.hello().app_version,
+        device = %DeviceId::from_public_key(&client_key), "remote client hello received");
+
     let devices = {
         let mut state = shared.state.lock();
 
-        // An unknown or revoked key gets no reply at all.
-        let Some(device) = state
+        if let Some(device) = state
             .devices
             .iter_mut()
             .find(|device| device.public_key == client_key)
-        else {
-            bail!("unpaired device");
-        };
+        {
+            if hello_ms <= device.last_hello_ms {
+                bail!("replayed handshake from {}", device.id);
+            }
 
-        if hello_ms <= device.last_hello_ms {
-            bail!("replayed handshake from {}", device.id);
+            device.last_hello_ms = hello_ms;
+            device.last_seen = now_ms();
+
+            Some(state.devices.clone())
+        } else {
+            None
         }
+    };
 
-        device.last_hello_ms = hello_ms;
-        device.last_seen = now_ms();
+    let Some(devices) = devices else {
+        info!(
+            origin = "local",
+            reason = "unpaired_device",
+            code = AUTH_REFUSED_CODE,
+            "rejecting remote authentication"
+        );
 
-        state.devices.clone()
+        ws.send(Message::Close(Some(CloseFrame {
+            code: CloseCode::from(AUTH_REFUSED_CODE),
+            reason: "device not paired".into(),
+        })))
+        .await?;
+
+        bail!("unpaired device");
     };
 
     if let Err(error) = store::save_devices(&shared.dir, &devices) {
@@ -1931,7 +1964,7 @@ where
 
     // The host answers probes and waits out quiet links; a device whose
     // network changed runs the fast check from its side.
-    let pump = tokio::spawn(pump(ws, channel, queue_rx, in_tx, Arc::default()));
+    let pump = tokio::spawn(pump(ws, channel, queue_rx, in_tx, Arc::default()).in_current_span());
     let pump_id = pump.id();
     let channel_started = Instant::now();
 

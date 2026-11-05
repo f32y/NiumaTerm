@@ -15,6 +15,7 @@ use tokio::time::sleep;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{Instrument as _, info, info_span, warn};
 
+use crate::connection_stage;
 use crate::relay::{RelaySocket, open};
 
 const MIN_BACKOFF: Duration = Duration::from_secs(1);
@@ -33,6 +34,8 @@ enum ControlMessage {
     SlotOk { slot: String },
     SlotTaken { slot: String },
     SlotRelease { slot: String },
+    Ping,
+    Pong,
 }
 
 /// What the host service asks of its relay link.
@@ -56,7 +59,11 @@ pub(crate) async fn run_host_link(
     let mut claimed: Option<String> = None;
 
     loop {
-        let control = open(&relay, &format!("/v1/host/{}", host.as_str()), Some(&token)).await;
+        let control = connection_stage::run(
+            "relay_control",
+            open(&relay, &format!("/v1/host/{}", host.as_str()), Some(&token)),
+        )
+        .await;
 
         let mut control = match control {
             Ok(control) => control,
@@ -107,7 +114,7 @@ pub(crate) async fn run_host_link(
                                 let token = token.clone();
                                 let path = format!("/v1/host/{}/accept/{id}", host.as_str());
                                 let serve = Arc::clone(&serve);
-                                let span = info_span!("relay_data", connection = %id);
+                                let span = info_span!("relay_data", relay_connection = %id);
 
                                 tokio::spawn(async move {
                                     info!("opening relay data socket");
@@ -120,18 +127,24 @@ pub(crate) async fn run_host_link(
                             Ok(ControlMessage::SlotTaken { slot }) => {
                                 warn!(%slot, "another host on this relay holds the pairing slot");
                             }
-                            Err(error) => warn!(%error, "invalid relay control message"),
+                            Err(error) => warn!(%error, message_type = "text", message_len = text.len(), "invalid relay control message"),
                             Ok(_) => {}
                         }
                     }
+                    Some(Ok(Message::Close(frame))) => {
+                        info!(code = ?frame.as_ref().map(|frame| u16::from(frame.code)),
+                            reason = ?frame.as_ref().map(|frame| frame.reason.as_str()),
+                            origin = "websocket_close", "relay control socket closed");
+                        break;
+                    }
                     Some(Ok(_)) => {}
                     Some(Err(error)) => {
-                        info!(%error, "relay control socket dropped");
+                        info!(error = %format_args!("{error:#}"), origin = "transport", "relay control socket dropped");
 
                         break;
                     }
                     None => {
-                        info!("relay control socket closed");
+                        info!(origin = "stream_end", "relay control socket closed");
                         break;
                     }
                 },
@@ -162,7 +175,7 @@ pub(crate) async fn run_host_link(
                 }
 
                 () = sleep(CONTROL_PING) => {
-                    if let Err(error) = control.send(Message::Text("ping".into())).await {
+                    if let Err(error) = send_control(&mut control, &ControlMessage::Ping).await {
                         info!(%error, "relay keepalive send failed");
 
                         break;

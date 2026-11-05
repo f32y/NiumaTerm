@@ -31,7 +31,7 @@ struct NiumaTermApp: App {
         // down there and come back, with fresh session lists, on return
         // (design doc §6).
         .onChange(of: scenePhase, initial: true) { _, phase in
-            app.setForeground(phase == .active)
+            app.setApplicationPhase(phase)
         }
     }
 }

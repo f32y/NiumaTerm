@@ -39,6 +39,7 @@ export interface Env extends PushEnv {
   HOST_ROOM: DurableObjectNamespace<HostRoom>;
   DIRECTORY: DurableObjectNamespace<PairingDirectory>;
   USER_QUOTA: DurableObjectNamespace<UserQuota>;
+  VERSION_METADATA?: WorkerVersionMetadata;
 }
 
 /// Client connections one user may hold at once, over all of their hosts.
@@ -55,7 +56,7 @@ const QUOTA_GRACE_MS = 10_000;
 const MAX_MESSAGE = 128 * 1024;
 
 /// A client that sees no `open` within this long gets close code 4404.
-const OPEN_TIMEOUT_MS = 10_000;
+const OPEN_TIMEOUT_MS = 15_000;
 
 /// Connection attempts allowed per client IP per minute. Counted per
 /// isolate, so this bounds abuse without a shared store.
@@ -289,6 +290,8 @@ interface QuotaEntry {
 interface ControlAttachment {
   hostId: string;
   user: string;
+  connection: string;
+  since: number;
 }
 
 /// The sockets of one host: its control socket, its clients, and the data
@@ -299,7 +302,7 @@ export class HostRoom extends DurableObject<Env> {
     super(ctx, env);
 
     // Keep-alive pings are answered without waking the object.
-    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('{"t":"ping"}', '{"t":"pong"}'));
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -364,15 +367,18 @@ export class HostRoom extends DurableObject<Env> {
   private acceptControl(hostId: string, user: string): Response {
     // A reconnecting host replaces its previous control socket.
     for (const old of this.ctx.getWebSockets("control")) {
+      this.logSocket(old, "close_requested", { code: 1000, reason: "replaced", origin: "relay" });
       old.close(1000, "replaced");
     }
 
     const [client, server] = Object.values(new WebSocketPair());
 
     this.ctx.acceptWebSocket(server, ["control"]);
-    server.serializeAttachment({ hostId, user } satisfies ControlAttachment);
+    const connection = randomConn();
+    server.serializeAttachment({ hostId, user, connection, since: Date.now() } satisfies ControlAttachment);
+    this.logSocket(server, "control_connected");
 
-    return new Response(null, { status: 101, webSocket: client });
+    return new Response(null, { status: 101, webSocket: client, headers: { "X-Relay-Connection": connection } });
   }
 
   /// A host of another user is refused exactly like an offline one, so a
@@ -401,6 +407,7 @@ export class HostRoom extends DurableObject<Env> {
 
     this.ctx.acceptWebSocket(server, ["client", `c:${conn}`]);
     server.serializeAttachment({ conn, user, opened: false, since: Date.now() } satisfies ClientAttachment);
+    this.logSocket(server, "client_connected");
 
     control.send(JSON.stringify({ t: "conn", id: conn }));
 
@@ -408,7 +415,7 @@ export class HostRoom extends DurableObject<Env> {
     // buffering here; one that never gets `open` is closed.
     this.ctx.storage.setAlarm(Date.now() + OPEN_TIMEOUT_MS);
 
-    return new Response(null, { status: 101, webSocket: client });
+    return new Response(null, { status: 101, webSocket: client, headers: { "X-Relay-Connection": conn } });
   }
 
   private acceptData(conn: string): Response {
@@ -424,8 +431,11 @@ export class HostRoom extends DurableObject<Env> {
 
     const attachment = client.deserializeAttachment() as ClientAttachment;
 
-    client.serializeAttachment({ ...attachment, opened: true });
-    client.send(JSON.stringify({ t: "open" }));
+    const openedAttachment = { ...attachment, opened: true };
+    client.serializeAttachment(openedAttachment);
+    server.serializeAttachment(openedAttachment);
+    client.send(JSON.stringify({ t: "open", id: conn }));
+    this.logSocket(client, "host_accepted");
 
     return new Response(null, { status: 101, webSocket: pair0 });
   }
@@ -442,6 +452,7 @@ export class HostRoom extends DurableObject<Env> {
     }
 
     if (typeof message !== "string" && message.byteLength > MAX_MESSAGE) {
+      this.logSocket(ws, "close_requested", { code: 1009, reason: "message too large", origin: "relay" });
       ws.close(1009, "message too large");
 
       return;
@@ -450,16 +461,23 @@ export class HostRoom extends DurableObject<Env> {
     const peer = this.peerOf(tags);
 
     if (peer !== undefined) {
-      peer.send(message);
+      try {
+        peer.send(message);
+      } catch (error) {
+        this.logSocket(ws, "forward_failed", { error: String(error), origin: "send" });
+        throw error;
+      }
     }
   }
 
-  async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {
+  async webSocketClose(ws: WebSocket, code: number, reason: string, wasClean: boolean): Promise<void> {
+    this.logSocket(ws, "close_received", { code, reason, was_clean: wasClean, origin: "peer" });
     this.closePeer(ws, code, reason);
     await this.releaseClient(ws);
   }
 
-  async webSocketError(ws: WebSocket): Promise<void> {
+  async webSocketError(ws: WebSocket, error: unknown): Promise<void> {
+    this.logSocket(ws, "socket_error", { error: String(error), origin: "transport" });
     this.closePeer(ws, 1011, "peer error");
     await this.releaseClient(ws);
   }
@@ -495,6 +513,7 @@ export class HostRoom extends DurableObject<Env> {
       }
 
       if (now - attachment.since >= OPEN_TIMEOUT_MS) {
+        this.logSocket(client, "close_requested", { code: 4404, reason: "host not answering", origin: "relay" });
         client.close(4404, "host not answering");
       } else {
         waiting = true;
@@ -508,6 +527,10 @@ export class HostRoom extends DurableObject<Env> {
 
   /// Pairing slots are claimed and released over the control socket.
   private async onControl(ws: WebSocket, message: string): Promise<void> {
+    if (message === "ping") {
+      ws.send(JSON.stringify({ t: "pong" }));
+      return;
+    }
     let request: { t?: string; slot?: string; ttl?: number };
 
     try {
@@ -555,10 +578,27 @@ export class HostRoom extends DurableObject<Env> {
     const forwarded = code === 1005 || code === 1006 ? 1000 : code;
 
     try {
+      this.logSocket(ws, "close_forwarded", { original_code: code, forwarded_code: forwarded, reason, peer_present: peer !== undefined });
       peer?.close(forwarded, reason);
-    } catch {
-      // Already closing.
+    } catch (error) {
+      this.logSocket(ws, "close_forward_failed", { error: String(error) });
     }
+  }
+
+  private logSocket(ws: WebSocket, event: string, details: Record<string, unknown> = {}): void {
+    const tags = this.ctx.getTags(ws);
+    const tag = tags.find((tag) => tag.startsWith("c:") || tag.startsWith("h:"));
+    const attachment = ws.deserializeAttachment() as ClientAttachment | ControlAttachment | null;
+
+    console.log(JSON.stringify({
+      event,
+      room: this.ctx.id.toString(),
+      relay_version: this.env.VERSION_METADATA?.id ?? "local",
+      relay_connection: tag?.slice(2) ?? (attachment !== null && "connection" in attachment ? attachment.connection : undefined),
+      side: tags.includes("control") ? "control" : tag?.startsWith("c:") ? "client" : "host",
+      elapsed_ms: attachment !== null && "since" in attachment ? Date.now() - attachment.since : undefined,
+      ...details,
+    }));
   }
 }
 

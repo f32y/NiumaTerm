@@ -18,13 +18,13 @@ use nmt_config::system::ProxyMode;
 use parking_lot::RwLock;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::TcpStream;
-use tokio::time::timeout;
+use tokio::time::{Instant, timeout};
 use tokio_socks::tcp::Socks5Stream;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::handshake::client::Response;
 use tokio_tungstenite::tungstenite::http::Uri;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, client_async_tls};
-use tracing::warn;
+use tracing::{info, warn};
 
 pub type WebSocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -91,14 +91,49 @@ where
     R: IntoClientRequest + Unpin,
 {
     let request = request.into_client_request()?;
+    let started = Instant::now();
+
+    let mut stage = "tcp_proxy";
 
     timeout(CONNECT_TIMEOUT, async {
-        let tcp = dial(request.uri()).await?;
+        info!(stage, "WebSocket connection stage started");
 
-        anyhow::Ok(client_async_tls(request, tcp).await?)
+        let tcp = dial(request.uri())
+            .await
+            .context("opening TCP or proxy connection")?;
+
+        info!(
+            stage,
+            elapsed_ms = started.elapsed().as_millis(),
+            "WebSocket connection stage completed"
+        );
+
+        stage = "tls_websocket_upgrade";
+
+        let handshake_started = Instant::now();
+
+        info!(stage, "WebSocket connection stage started");
+
+        let result = client_async_tls(request, tcp)
+            .await
+            .context("TLS or WebSocket upgrade failed");
+
+        info!(
+            stage,
+            elapsed_ms = handshake_started.elapsed().as_millis(),
+            succeeded = result.is_ok(),
+            "WebSocket connection stage ended"
+        );
+
+        result
     })
     .await
-    .map_err(|_| anyhow!("connecting timed out"))?
+    .map_err(|_| {
+        anyhow!(
+            "connecting timed out during {stage} after {} seconds",
+            CONNECT_TIMEOUT.as_secs()
+        )
+    })?
 }
 
 /// Open the TCP connection a WebSocket to `uri` runs over, through a proxy

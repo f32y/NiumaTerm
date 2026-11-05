@@ -1,4 +1,91 @@
-use crate::client::merge_lan_hints;
+use anyhow::Error;
+use futures::SinkExt as _;
+use nmt_remote_core::identity::DeviceKey;
+use nmt_remote_core::messages::ClientHello;
+use nmt_remote_core::preface::Preface;
+use tokio::io::{AsyncWriteExt as _, duplex};
+use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
+use tokio_tungstenite::tungstenite::protocol::{CloseFrame, Role};
+use tokio_tungstenite::tungstenite::{Error as WsError, Message};
+
+use crate::client::{Refused, channel_handshake, merge_lan_hints};
+use crate::link::{AUTH_REFUSED_CODE, ReceiveEnd, recv_binary, send_binary};
+
+async fn authentication_failure(close: Option<CloseFrame>) -> Error {
+    let key = DeviceKey::generate().unwrap();
+    let host = DeviceKey::generate().unwrap();
+    let (client_io, host_io) = duplex(4096);
+    let client = WebSocketStream::from_raw_socket(client_io, Role::Client, None).await;
+
+    let mut server = WebSocketStream::from_raw_socket(host_io, Role::Server, None).await;
+
+    let hello = ClientHello {
+        proto_minor: 0,
+        app_version: "test".into(),
+        features: Vec::new(),
+        hello_ms: 1,
+    };
+
+    let peer = async {
+        let offer = Preface::decode(&recv_binary(&mut server).await.unwrap()).unwrap();
+
+        send_binary(&mut server, offer.answer().encode().to_vec())
+            .await
+            .unwrap();
+
+        recv_binary(&mut server).await.unwrap();
+
+        match close {
+            Some(frame) => server.send(Message::Close(Some(frame))).await.unwrap(),
+            None => server.get_mut().shutdown().await.unwrap(),
+        }
+    };
+
+    let (result, ()) = tokio::join!(channel_handshake(client, &key, host.public(), &hello), peer);
+
+    result
+        .err()
+        .expect("the host did not send an authentication reply")
+}
+
+#[tokio::test]
+async fn a_reset_during_authentication_keeps_the_transport_error() {
+    let error = authentication_failure(None).await;
+
+    assert!(!error.is::<Refused>());
+    assert!(error.is::<WsError>(), "{error:#}");
+}
+
+#[tokio::test]
+async fn an_unrelated_close_during_authentication_is_retryable() {
+    let error = authentication_failure(Some(CloseFrame {
+        code: CloseCode::Error,
+        reason: "relay peer error".into(),
+    }))
+    .await;
+
+    assert!(!error.is::<Refused>());
+
+    let Some(ReceiveEnd::Close(Some(frame))) = error.downcast_ref::<ReceiveEnd>() else {
+        panic!("close status was lost: {error:#}");
+    };
+
+    assert_eq!(frame.code, CloseCode::Error);
+    assert_eq!(frame.reason, "relay peer error");
+}
+
+#[tokio::test]
+async fn the_unpaired_close_code_preserves_the_refusal_and_close_details() {
+    let error = authentication_failure(Some(CloseFrame {
+        code: CloseCode::from(AUTH_REFUSED_CODE),
+        reason: "device not paired".into(),
+    }))
+    .await;
+
+    assert!(error.is::<Refused>());
+    assert!(error.is::<ReceiveEnd>());
+}
 
 fn strings(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| (*value).to_owned()).collect()

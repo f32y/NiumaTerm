@@ -48,13 +48,14 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{Notify, oneshot, watch};
 use tokio::task::{AbortHandle, JoinHandle};
 use tokio::time::{Instant, sleep, sleep_until, timeout};
+use tracing::field::Empty;
 use tracing::{Instrument as _, info, info_span, warn};
 
 use crate::client::{LinkPath, PathPolicy, Refused, establish, establish_direct, establish_lan};
 use crate::link::{BoxSocket, ControlChunks, Outbound, SendQueue, pump};
 use crate::network_pty::NetworkPty;
-use crate::store::PairedHost;
-use crate::{direct, netwatch};
+use crate::store::{PairedHost, now_ms};
+use crate::{connection_stage, direct, netwatch};
 
 const MIN_BACKOFF: Duration = Duration::from_millis(500);
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
@@ -1012,8 +1013,15 @@ impl RemoteHost {
         // A LAN or direct channel the last link opened to move to, used
         // instead of connecting anew.
         let mut moved: Option<Box<Upgrade>> = None;
+        let mut attempt_number = 0_u64;
 
         loop {
+            attempt_number += 1;
+
+            let attempt_span = info_span!("remote_attempt", host = %self.id,
+                attempt = %format_args!("{}-{attempt_number}", now_ms()),
+                app_version = %self.app_version, relay_connection = Empty);
+
             let (ws, channel, path) = match moved.take() {
                 Some(upgrade) => {
                     let Upgrade {
@@ -1049,15 +1057,24 @@ impl RemoteHost {
                     let started = Instant::now();
                     let policy = *self.policy.borrow();
 
-                    info!(host = %self.id, ?policy, "connecting to remote host");
+                    info!(parent: &attempt_span, ?policy, "connecting to remote host");
 
-                    let attempt = establish(&mut record, &self.key, &self.app_version, policy);
+                    let attempt = connection_stage::run(
+                        "connection_attempt",
+                        establish(&mut record, &self.key, &self.app_version, policy),
+                    )
+                    .instrument(attempt_span.clone());
 
                     let result = match self.retry {
                         Retry::Forever => attempt.await,
                         Retry::Limited { window, .. } => timeout(window, attempt)
                             .await
-                            .unwrap_or_else(|_| Err(anyhow!("connecting timed out"))),
+                            .unwrap_or_else(|_| {
+                                info!(parent: &attempt_span, origin = "local", reason = "connection_timeout",
+                                    timeout_secs = window.as_secs(), "connection attempt cancelled");
+
+                                Err(anyhow!("connecting timed out after {} seconds", window.as_secs()))
+                            }),
                     };
 
                     match result {
@@ -1073,7 +1090,8 @@ impl RemoteHost {
                             (Box::new(ws) as BoxSocket, channel, path)
                         }
                         Err(error) if error.is::<Refused>() => {
-                            info!(host = %self.id, "remote host refused authentication");
+                            info!(parent: &attempt_span, status = ?Status::Refused,
+                                error = %format_args!("{error:#}"), "remote host refused authentication");
 
                             self.status.send_replace(Status::Refused);
 
@@ -1082,7 +1100,7 @@ impl RemoteHost {
                             return;
                         }
                         Err(error) => {
-                            info!(host = %self.id, elapsed_ms = started.elapsed().as_millis(),
+                            info!(parent: &attempt_span, elapsed_ms = started.elapsed().as_millis(),
                                 error = %format_args!("{error:#}"), "connecting to the remote host failed");
 
                             if let Retry::Limited { attempts, window } = self.retry {
@@ -1098,6 +1116,9 @@ impl RemoteHost {
 
                                 self.status.send_replace(Status::Unreachable);
 
+                                info!(parent: &attempt_span, ?attempts, status = ?Status::Unreachable,
+                                    "connection retries exhausted; waiting for a request or network change");
+
                                 // Wakes stored while the round ran came from
                                 // requests and views that round already
                                 // served; only a later one retries.
@@ -1106,9 +1127,13 @@ impl RemoteHost {
                                 network.mark_unchanged();
 
                                 select! {
-                                    () = self.wake.notified() => {}
+                                    () = self.wake.notified() => {
+                                        info!(parent: &attempt_span, reason = "request", "resuming connection retries");
+                                    }
 
-                                    _ = network.changed() => {}
+                                    _ = network.changed() => {
+                                        info!(parent: &attempt_span, reason = "network_change", "resuming connection retries");
+                                    }
                                 }
 
                                 continue;
@@ -1153,7 +1178,7 @@ impl RemoteHost {
                     .inspect_err(|error| {
                         info!(error = %format_args!("{error:#}"), "remote channel receive/send task failed");
                     })
-                    .instrument(info_span!("remote_link", host = %self.id, ?path)),
+                    .instrument(info_span!(parent: &attempt_span, "remote_link", ?path)),
             );
 
             *self.link.lock() = Some(link.clone());
@@ -1165,7 +1190,7 @@ impl RemoteHost {
 
             self.status.send_replace(Status::Connected);
 
-            info!(host = %self.id, ?path, "connected to the remote host");
+            info!(parent: &attempt_span, ?path, status = ?Status::Connected, "connected to the remote host");
 
             // Views the host ended wait for the user to take them up.
             let ended = self.ended.lock().clone();
@@ -1198,7 +1223,10 @@ impl RemoteHost {
 
             let end = self
                 .dispatch(&link, inbound_rx, &mut network, &probe, &path)
+                .instrument(attempt_span.clone())
                 .await;
+
+            info!(parent: &attempt_span, origin = "local", "stopping remote channel task");
 
             pump.abort();
 
@@ -1255,6 +1283,8 @@ impl RemoteHost {
         let current = *policy.borrow_and_update();
 
         if !current.allows(path) {
+            info!(reason = "path_policy", "closing remote link");
+
             return LinkEnd::Closed;
         }
 
@@ -1391,7 +1421,11 @@ impl RemoteHost {
                     match (idle, idle_since) {
                         (false, _) => idle_since = None,
                         (true, None) => idle_since = Some(Instant::now()),
-                        (true, Some(since)) if since.elapsed() >= IDLE_CLOSE => return LinkEnd::Closed,
+                        (true, Some(since)) if since.elapsed() >= IDLE_CLOSE => {
+                            info!(reason = "idle_timeout", elapsed_ms = since.elapsed().as_millis(), "closing remote link");
+
+                            return LinkEnd::Closed;
+                        }
                         (true, Some(_)) => {}
                     }
 
@@ -1400,6 +1434,8 @@ impl RemoteHost {
             };
 
             let Some(message) = message else {
+                info!(reason = "inbound_queue_closed", "remote link ended");
+
                 return LinkEnd::Closed;
             };
 

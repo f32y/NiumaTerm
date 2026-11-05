@@ -80,7 +80,7 @@ pub(crate) fn initialize() {
     INITIALIZE.call_once(|| {
         let result = tracing_subscriber::fmt()
             .with_ansi(false)
-            .with_env_filter("warn,nmt_mobile=debug,nmt_remote=info")
+            .with_env_filter("warn,nmt_mobile=debug,nmt_remote=info,nmt_net=info")
             .with_writer(|| LogWriter {
                 log: Arc::clone(&LOG),
                 bytes: Vec::new(),

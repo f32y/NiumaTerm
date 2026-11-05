@@ -82,8 +82,17 @@ final class AppModel {
 
     // MARK: Lifecycle
 
-    func setForeground(_ foreground: Bool) {
-        core?.setForeground(foreground: foreground)
+    func setApplicationPhase(_ phase: ScenePhase) {
+        let activity: ApplicationPhase
+
+        switch phase {
+        case .active: activity = .active
+        case .inactive: activity = .inactive
+        case .background: activity = .background
+        @unknown default: activity = .inactive
+        }
+
+        core?.setApplicationPhase(phase: activity)
     }
 
     // MARK: Core events

@@ -8,14 +8,14 @@ use nmt_platform::runtime;
 use nmt_remote::client::PathPolicy;
 use nmt_remote::connection::{RemoteHost, Retry, Status};
 use nmt_remote::store::{PairedHost, load_hosts, load_or_create_identity, save_hosts};
-use nmt_remote::{client, notify_network_changed};
+use nmt_remote::{CONNECT_TIMEOUT, client, notify_network_changed};
 use nmt_remote_core::identity::DeviceKey;
 use nmt_remote_core::messages::{DeviceInfo, DeviceKind, RelayAccess};
 use nmt_remote_core::pairing::{PairingCode, PairingLink};
 use parking_lot::Mutex;
 use tokio::select;
 use tokio::task::AbortHandle;
-use tokio::time::timeout;
+use tokio::time::{Instant, timeout};
 use tracing::{debug, info, warn};
 
 use crate::agent::{AgentHandle, AgentObserver};
@@ -23,6 +23,13 @@ use crate::diagnostics;
 use crate::error::CoreError;
 use crate::records::{HostLink, HostOffer, HostRecord, NetworkMode, PushSettings, SessionRecord};
 use crate::terminal::{TerminalHandle, TerminalObserver};
+
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum ApplicationPhase {
+    Active,
+    Inactive,
+    Background,
+}
 
 /// Told about hosts and their sessions. Called on the core's threads; the
 /// app moves to its main thread itself.
@@ -67,11 +74,11 @@ pub struct MobileCore {
 }
 
 /// A person is looking at the host list while the phone connects, so after
-/// three attempts of five seconds each the host shows as unreachable instead
+/// three attempts of fifteen seconds each the host shows as unreachable instead
 /// of connecting indefinitely.
 const CONNECT_RETRY: Retry = Retry::Limited {
     attempts: 3,
-    window: Duration::from_secs(5),
+    window: CONNECT_TIMEOUT,
 };
 
 /// How long forgetting a connected host waits for it to withdraw this
@@ -165,6 +172,8 @@ impl MobileCore {
     /// list stays live; in the background only open views hold a link, and
     /// the app closes those itself before it is suspended.
     pub fn set_foreground(&self, foreground: bool) {
+        info!(foreground, "mobile application activity changed");
+
         self.foreground.store(foreground, Ordering::Relaxed);
 
         for paired in self.hosts.lock().iter() {
@@ -176,10 +185,18 @@ impl MobileCore {
         }
     }
 
+    pub fn set_application_phase(&self, phase: ApplicationPhase) {
+        info!(?phase, "mobile application phase changed");
+
+        self.set_foreground(matches!(phase, ApplicationPhase::Active));
+    }
+
     /// The phone's network changed (from `NWPathMonitor`): links check they
     /// still reach their hosts, and links through a relay try the LAN, which
     /// may now be the host's.
     pub fn network_changed(&self) {
+        info!("mobile network changed");
+
         notify_network_changed();
     }
 
@@ -577,9 +594,15 @@ fn spawn_watcher(remote: &Arc<RemoteHost>, observer: &Arc<dyn CoreObserver>) -> 
 async fn watch(remote: Arc<RemoteHost>, observer: Arc<dyn CoreObserver>) {
     let mut status = remote.status();
     let mut sessions = remote.session_changes();
+    let mut last_status = None;
 
     loop {
         let current = *status.borrow_and_update();
+
+        if last_status != Some(current) {
+            info!(host = %remote.id(), status = ?current, "mobile host state observed");
+            last_status = Some(current);
+        }
 
         sessions.borrow_and_update();
 
@@ -588,6 +611,8 @@ async fn watch(remote: Arc<RemoteHost>, observer: Arc<dyn CoreObserver>) {
         if current == Status::Connected
             && let Err(error) = publish_sessions(&remote, observer.as_ref()).await
         {
+            warn!(host = %remote.id(), %error, "restoring mobile session list failed");
+
             observer.sessions_failed(remote.id().as_str().to_owned(), error.to_string());
         }
 
@@ -606,7 +631,9 @@ async fn publish_sessions(
     remote: &RemoteHost,
     observer: &dyn CoreObserver,
 ) -> Result<(), CoreError> {
+    let started = Instant::now();
     let list = remote.list_sessions().await?;
+    let session_count = list.len();
 
     // Workspace changes need a fresh offer so the list and its grouping
     // update together. Older hosts may not implement the offer query.
@@ -628,6 +655,9 @@ async fn publish_sessions(
         list.into_iter().map(SessionRecord::from).collect(),
         offer,
     );
+
+    info!(host = %remote.id(), session_count, elapsed_ms = started.elapsed().as_millis(),
+        "mobile session list restored");
 
     Ok(())
 }

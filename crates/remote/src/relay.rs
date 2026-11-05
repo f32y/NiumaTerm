@@ -4,13 +4,12 @@
 //! channel as on the LAN, so the relay can cost availability, never
 //! confidentiality. Its access key only guards the owner's quota.
 
-use std::time::Duration;
-
-use anyhow::{Context as _, Result, anyhow, bail};
+use anyhow::{Context as _, Error, Result, anyhow};
 use futures::StreamExt as _;
 use nmt_net::connect_websocket;
 use nmt_remote_core::identity::DeviceId;
 use nmt_remote_core::messages::RelayAccess;
+use serde::Deserialize;
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 use tokio_tungstenite::tungstenite::Message;
@@ -18,11 +17,19 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
+use tracing::{Span, info};
+
+use crate::link::ReceiveEnd;
+use crate::{CONNECT_TIMEOUT, connection_stage};
 
 pub(crate) type RelaySocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
-/// How long a client waits for the host to pick up through the relay.
-const OPEN_TIMEOUT: Duration = Duration::from_secs(12);
+#[derive(Deserialize)]
+#[serde(tag = "t", rename_all = "snake_case")]
+enum RelayMessage {
+    Open { id: Option<String> },
+    Pong,
+}
 
 /// Connect to `path` on the relay with the access key and optional host
 /// token, through the proxy in the settings. `https://` and `http://` URLs
@@ -55,9 +62,19 @@ pub(crate) async fn open(
         headers.insert("X-Host-Token", HeaderValue::from_str(token)?);
     }
 
-    let (ws, _) = connect_websocket(request)
+    let (ws, response) = connection_stage::run("relay_websocket", connect_websocket(request))
         .await
         .with_context(|| format!("reaching the relay at {}", relay.url))?;
+
+    if let Some(id) = response
+        .headers()
+        .get("X-Relay-Connection")
+        .and_then(|value| value.to_str().ok())
+    {
+        Span::current().record("relay_connection", id);
+
+        info!(relay_connection = id, "relay WebSocket connected");
+    }
 
     Ok(ws)
 }
@@ -67,35 +84,48 @@ pub(crate) async fn open(
 pub(crate) async fn dial_host(relay: &RelayAccess, host: &DeviceId) -> Result<RelaySocket> {
     let ws = open(relay, &format!("/v1/client/{}", host.as_str()), None).await?;
 
-    wait_for_open(ws).await
+    connection_stage::run("relay_pickup", wait_for_open(ws)).await
 }
 
 /// Join, through the relay, the host showing a pairing code with `slot`.
 pub(crate) async fn dial_pairing(relay: &RelayAccess, slot: &str) -> Result<RelaySocket> {
     let ws = open(relay, &format!("/v1/pair/{slot}"), None).await?;
 
-    wait_for_open(ws).await
+    connection_stage::run("relay_pickup", wait_for_open(ws)).await
 }
 
 async fn wait_for_open(mut ws: RelaySocket) -> Result<RelaySocket> {
-    timeout(OPEN_TIMEOUT, async {
+    timeout(CONNECT_TIMEOUT, async {
         loop {
             match ws.next().await {
-                Some(Ok(Message::Text(text))) if text.contains("\"open\"") => return Ok(()),
+                Some(Ok(Message::Text(text))) => match serde_json::from_str::<RelayMessage>(&text)?
+                {
+                    RelayMessage::Open { id } => {
+                        if let Some(id) = id {
+                            Span::current().record("relay_connection", &id);
+
+                            info!(relay_connection = %id, "relay host accepted the connection");
+                        }
+
+                        return Ok(());
+                    }
+                    RelayMessage::Pong => {}
+                },
                 Some(Ok(Message::Close(frame))) => {
                     let offline = frame
                         .as_ref()
                         .is_some_and(|frame| frame.code == CloseCode::from(4404));
 
                     if offline {
-                        bail!("the host is not connected to the relay");
+                        return Err(Error::from(ReceiveEnd::Close(frame))
+                            .context("the host is not connected to the relay"));
                     }
 
-                    bail!("the relay closed the connection");
+                    return Err(ReceiveEnd::Close(frame).into());
                 }
                 Some(Ok(_)) => {}
                 Some(Err(error)) => return Err(error.into()),
-                None => bail!("the relay closed the connection"),
+                None => return Err(ReceiveEnd::StreamEnd.into()),
             }
         }
     })
