@@ -12,9 +12,9 @@ use std::time::Instant;
 
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, Bounds, Context, FollowMode, Image, ImageFormat, IntoElement, ListAlignment,
-    ListOffset, ListState, Pixels, Render, ScrollHandle, SharedString, Window, div, list, px,
-    relative,
+    AnyElement, Bounds, Context, Entity, FollowMode, Image, ImageFormat, IntoElement,
+    ListAlignment, ListOffset, ListState, Pixels, Render, ScrollHandle, SharedString, Window, div,
+    list, px, relative,
 };
 use gpui_component::button::Button;
 use gpui_component::modern_menu::ModernMenuExt as _;
@@ -34,6 +34,7 @@ use crate::agent_tab::settings::{AgentSettings, UI_RADIUS};
 use crate::agent_tab::transcript::code::is_code_item;
 use crate::agent_tab::transcript::incremental::RowCache;
 use crate::agent_tab::transcript::measurement::Measurements;
+use crate::agent_tab::transcript::navigation::{Navigate, Navigation};
 use crate::agent_tab::transcript::render::image_preview::{ImagePreview, ImagePreviewLayer};
 use crate::agent_tab::transcript::render::menus::{copy_entry_menu, prompt_row_menu};
 use crate::agent_tab::transcript::render::message_rows::{
@@ -71,6 +72,9 @@ use crate::agent_tab::transcript::{
 /// own conversation and a child agent's conversation render through here, so
 /// their presentation cannot drift apart.
 pub struct TranscriptView {
+    navigation: Option<Entity<Navigation>>,
+    navigation_epoch: u64,
+    navigation_dirty: Option<usize>,
     pub(super) search: SearchState,
     pub(super) measurements: Measurements,
     logical_rows: Vec<TranscriptRow>,
@@ -138,6 +142,60 @@ pub(crate) struct TranscriptAttribution {
 }
 
 impl TranscriptView {
+    fn navigate_message(&mut self, target: &Navigate, cx: &mut Context<Self>) {
+        self.sync_content();
+
+        if target.epoch != self.navigation_epoch {
+            return;
+        }
+
+        if self
+            .conversation
+            .borrow()
+            .changes_since(target.version)
+            .is_some_and(|change| change.reset_from.is_some_and(|first| first <= target.entry))
+        {
+            return;
+        }
+
+        self.refresh_rows(cx.global::<AgentSettings>().collapse_tool_calls);
+
+        if !matches!(
+            self.conversation
+                .borrow()
+                .content
+                .entries()
+                .get(target.entry)
+                .map(|entry| &entry.item),
+            Some(SessionItem::UserMessage { .. })
+        ) {
+            return;
+        }
+
+        let Some(row) = self.rows.iter().position(
+            |row| matches!(row.spec, RowSpec::Entry { index, .. } if index == target.entry),
+        ) else {
+            return;
+        };
+
+        let offset = ListOffset {
+            item_ix: row,
+            offset_in_item: px(-16.),
+        };
+
+        let settings = cx.global::<AgentSettings>();
+
+        self.transcript_list.pause_following_tail();
+
+        if settings.smooth_wheel && !settings.reduce_motion {
+            self.transcript_list.scroll_to_smooth(offset);
+        } else {
+            self.transcript_list.scroll_to(offset);
+        }
+
+        cx.notify();
+    }
+
     pub(crate) fn open_find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         search::open(self, window, cx);
     }
@@ -146,6 +204,9 @@ impl TranscriptView {
         let collapse_mode = CollapseRows::default();
 
         Self {
+            navigation: None,
+            navigation_epoch: 0,
+            navigation_dirty: Some(0),
             measurements: Default::default(),
             logical_rows: Vec::new(),
             logical_starts: Vec::new(),
@@ -296,6 +357,9 @@ impl TranscriptView {
     }
 
     pub(crate) fn reset_presentation(&mut self) {
+        self.navigation_epoch += 1;
+        self.navigation_dirty = Some(0);
+
         search::reset(self);
 
         self.preview.image_preview = ImagePreview::Closed;
@@ -1076,6 +1140,11 @@ impl TranscriptView {
                 .unwrap_or(self.rows.len())
         };
 
+        self.navigation_dirty = Some(
+            self.navigation_dirty
+                .map_or(physical_start, |old| old.min(physical_start)),
+        );
+
         self.logical_rows.truncate(start);
         self.logical_rows.extend(new.iter().cloned());
         self.logical_starts.truncate(start);
@@ -1412,6 +1481,43 @@ impl Render for TranscriptView {
 
         search::after_rows(self, window, cx);
 
+        if self.navigation.is_none() {
+            let list = self.transcript_list.clone();
+            let navigation = cx.new(|cx| Navigation::new(list, cx));
+
+            cx.subscribe(&navigation, |this, _, target: &Navigate, cx| {
+                this.navigate_message(target, cx);
+            })
+            .detach();
+
+            self.navigation = Some(navigation);
+        }
+
+        let navigation = self
+            .navigation
+            .clone()
+            .expect("message navigation initialized");
+
+        let conversation = self.conversation.borrow();
+
+        if self.navigation_dirty.is_some()
+            || navigation.read(cx).version() != Some(conversation.version())
+        {
+            navigation.update(cx, |navigation, cx| {
+                navigation.sync(
+                    &conversation,
+                    &self.rows,
+                    self.navigation_dirty.unwrap_or(self.rows.len()),
+                    self.navigation_epoch,
+                    cx,
+                )
+            });
+
+            self.navigation_dirty = None;
+        }
+
+        drop(conversation);
+
         for range in self.measurements.take_ranges() {
             self.transcript_list.remeasure_items(range);
         }
@@ -1548,6 +1654,7 @@ impl Render for TranscriptView {
                         ),
                 )
             })
+            .child(navigation)
             .children(self.search.bar.clone().filter(|bar| bar.read(cx).visible))
             .children(self.preview.render_zoomed_image(now, window, cx))
     }

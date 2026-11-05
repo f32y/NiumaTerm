@@ -22,6 +22,7 @@ mod format;
 mod incremental;
 mod measurement;
 mod mermaid;
+mod navigation;
 mod render;
 mod reveal;
 mod row_structure;
