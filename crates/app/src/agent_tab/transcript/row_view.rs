@@ -138,11 +138,14 @@ impl RowViews {
 
         // GPUI requires a definite size for scene reuse. New content and dirty
         // descendants first measure normally; the next draw can reuse that size.
+        // Keep the list's clip bounds: text selection uses the content mask to
+        // detect viewport edges. A per-row clip would start auto-scroll while
+        // selecting text in the middle of the list.
         match row.height.get() {
             Some(height) => row
                 .view
                 .clone()
-                .cached_clipped(StyleRefinement::default().w_full().h(height))
+                .cached(StyleRefinement::default().w_full().h(height))
                 .into_any_element(),
             None => row.view.clone().into_any_element(),
         }

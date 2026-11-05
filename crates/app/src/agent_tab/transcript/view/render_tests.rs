@@ -1,7 +1,11 @@
+use std::time::Duration;
+
 use gpui::{
-    AppContext as _, Context, Entity, IntoElement, ListOffset, ParentElement as _, Render,
-    Styled as _, TestAppContext, VisualTestContext, Window, div, px,
+    AppContext as _, Context, Entity, IntoElement, ListOffset, Modifiers, MouseButton,
+    ParentElement as _, Render, Styled as _, TestAppContext, VisualTestContext, Window, div, point,
+    px,
 };
+use gpui_base::{TextSelection, TextSelectionLayer};
 use nmt_agent::chat::Item;
 use nmt_agent::transcript::TextField;
 use nmt_config::agent::CollapseRows;
@@ -17,12 +21,156 @@ struct TranscriptRoot {
 
 impl Render for TranscriptRoot {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div().w(px(900.)).h(px(480.)).child(self.transcript.clone())
+        div()
+            .w(px(900.))
+            .h(px(480.))
+            .child(TextSelectionLayer)
+            .child(self.transcript.clone())
     }
 }
 
 fn draw(cx: &mut VisualTestContext) {
     cx.update(|window, cx| window.draw(cx).clear(cx));
+}
+
+#[gpui::test]
+fn horizontal_text_selection_preserves_transcript_scroll_position(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+
+        cx.set_global(AgentSettings {
+            reduce_motion: true,
+            collapse_tool_calls: CollapseRows::Off,
+            ..AgentSettings::default()
+        });
+    });
+
+    let (root, cx) = cx.add_window_view(|_, cx| TranscriptRoot {
+        transcript: cx.new(|_| {
+            let mut view = TranscriptView::new(AgentKind::Claude, None);
+
+            for index in 0..40 {
+                view.push_stamped(
+                    1,
+                    Item::AgentMessage {
+                        id: format!("reply-{index}"),
+                        text: Some("Selectable words in a completed reply.".into()),
+                        questions: None,
+                    },
+                );
+            }
+
+            view
+        }),
+    });
+
+    let cx: &mut VisualTestContext = cx;
+    let transcript = root.read_with(cx, |root, _| root.transcript.clone());
+
+    cx.run_until_parked();
+
+    transcript.update(cx, |view, cx| {
+        view.transcript_list.scroll_to(ListOffset {
+            item_ix: 20,
+            offset_in_item: px(0.),
+        });
+
+        cx.notify();
+    });
+
+    cx.run_until_parked();
+
+    draw(cx);
+    draw(cx);
+
+    for selector in [
+        "transcript-agent-20",
+        "transcript-agent-23",
+        "transcript-agent-28",
+    ] {
+        let bounds = cx.debug_bounds(selector).expect("a visible reply");
+        let start = point(bounds.left() + px(8.), bounds.top() + px(8.));
+        let end = point(start.x + px(100.), start.y);
+        let before = transcript.read_with(cx, |view, _| view.transcript_list.logical_scroll_top());
+
+        cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
+
+        // The first draw updates selection; the next draw uses the cached row.
+        draw(cx);
+        draw(cx);
+
+        cx.simulate_mouse_move(end, Some(MouseButton::Left), Modifiers::default());
+        cx.run_until_parked();
+
+        for _ in 0..6 {
+            cx.executor().advance_clock(Duration::from_millis(20));
+            cx.run_until_parked();
+
+            draw(cx);
+        }
+
+        let after = transcript.read_with(cx, |view, _| view.transcript_list.logical_scroll_top());
+
+        cx.simulate_mouse_up(end, MouseButton::Left, Modifiers::default());
+
+        assert!(
+            !cx.update(TextSelection::selected_text).is_empty(),
+            "{selector}"
+        );
+        assert_eq!(
+            (after.item_ix, after.offset_in_item),
+            (before.item_ix, before.offset_in_item),
+            "horizontal selection moved the transcript at {selector}"
+        );
+    }
+
+    for end_y in [-10., 490.] {
+        transcript.update(cx, |view, cx| {
+            view.transcript_list.scroll_to(ListOffset {
+                item_ix: 20,
+                offset_in_item: px(0.),
+            });
+
+            cx.notify();
+        });
+
+        draw(cx);
+        draw(cx);
+
+        let bounds = cx.debug_bounds("transcript-agent-23").unwrap();
+        let start = point(bounds.left() + px(8.), bounds.top() + px(8.));
+        let end = point(start.x, px(end_y));
+
+        cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
+
+        draw(cx);
+        draw(cx);
+
+        cx.simulate_mouse_move(end, Some(MouseButton::Left), Modifiers::default());
+
+        for _ in 0..6 {
+            cx.executor().advance_clock(Duration::from_millis(20));
+            cx.run_until_parked();
+
+            draw(cx);
+        }
+
+        let after = transcript.read_with(cx, |view, _| view.transcript_list.logical_scroll_top());
+
+        cx.simulate_mouse_up(end, MouseButton::Left, Modifiers::default());
+
+        if end_y < 0. {
+            assert!(
+                after.item_ix < 20,
+                "dragging above the viewport must scroll up"
+            );
+        } else {
+            assert!(
+                after.item_ix > 20 || after.offset_in_item > px(0.),
+                "dragging below the viewport must scroll down"
+            );
+        }
+    }
 }
 
 #[gpui::test]
