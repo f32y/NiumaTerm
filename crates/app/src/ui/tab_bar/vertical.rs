@@ -27,7 +27,7 @@ use crate::ui::shell::{
 };
 use crate::ui::tab_bar::drag::{DragLabelPreview, DragStyle, TAB_ROW_HEIGHT};
 use crate::ui::tab_bar::{progress_visual, viewers_mark};
-use crate::ui::terminal_status::{terminal_dot, terminal_presentation};
+use crate::ui::terminal_status::{TerminalVisual, terminal_dot, terminal_presentation};
 use crate::ui::workspace_sidebar::SIDEBAR_ROW_GUTTER;
 use crate::ui::{AppWindow, UI_RADIUS};
 use crate::workspace::TerminalActivity;
@@ -270,7 +270,16 @@ impl VerticalTabList {
                         .id(("sidebar-tab-terminal", key))
                         .aria_label(aria)
                         .flex()
-                        .child(terminal_dot(visual, TAB_ROW_DOT, cx))
+                        .child(match visual {
+                            TerminalVisual::Running => StatusMark::new(
+                                ("sidebar-tab-terminal-busy", key),
+                                StatusMarkTone::Warning,
+                                px(TAB_ROW_DOT),
+                            )
+                            .pulse()
+                            .into_any_element(),
+                            _ => terminal_dot(visual, TAB_ROW_DOT, cx),
+                        })
                         .into_any_element()
                 })
                 .or_else(|| {
