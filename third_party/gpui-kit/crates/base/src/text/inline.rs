@@ -534,17 +534,24 @@ impl Element for Inline {
                 && let Some(ch) = self.text[local..].chars().next()
                 && let Some((position, width)) = char_cell(layout, local, ch, layout.line_height())
             {
-                *search.active_bounds.lock() = Some(Bounds::from_corners(
+                let bounds = Bounds::from_corners(
                     position,
                     point(position.x + width, position.y + layout.line_height()),
-                ));
+                );
+                let active_bounds = search.active_bounds.clone();
+                window.on_draw_with_offset(cx, move |offset, _, _| {
+                    *active_bounds.lock() = Some(Bounds {
+                        origin: bounds.origin + offset,
+                        size: bounds.size,
+                    });
+                });
             }
         }
         // Report this element's laid-out extent so an ancestor TextView with
         // `max_lines` can snap its clip to a whole-line boundary. The state
         // stack only holds an entry during prepaint when that view set
         // `max_lines`, so this is a no-op otherwise.
-        if let Some(text_view_state) = GlobalState::global(cx).text_view_state().cloned() {
+        if let Some(text_view_state) = GlobalState::global(cx).text_view_state() {
             let state = text_view_state.read(cx);
             if state.max_lines.is_some()
                 && let Ok(mut line_spans) = state.line_spans.lock()
@@ -625,7 +632,7 @@ impl Element for Inline {
         }
 
         if is_selectable {
-            if let Some(text_view_state) = GlobalState::global(cx).text_view_state().cloned() {
+            if let Some(text_view_state) = GlobalState::global(cx).text_view_state() {
                 let line_height = text_layout.line_height();
                 let mask_bounds = window.content_mask().bounds;
                 let text_bounds = self.text_line_bounds(
@@ -657,14 +664,14 @@ impl Element for Inline {
                 });
             }
 
-            window.on_mouse_event({
+            window.on_mouse_event_with_offset({
                 let hitbox = hitbox.clone();
                 let text_layout = text_layout.clone();
                 let inline_state = self.state.clone();
                 let text = self.text.clone();
                 let source_offset = self.source_offset.unwrap_or(0);
-                let text_view_state = GlobalState::global(cx).text_view_state().cloned();
-                move |event: &MouseDownEvent, phase, window, cx| {
+                let text_view_state = GlobalState::global(cx).text_view_state();
+                move |event: &MouseDownEvent, offset, phase, window, cx| {
                     if !phase.bubble()
                         || !hitbox.is_hovered(window)
                         || event.button != MouseButton::Left
@@ -682,7 +689,7 @@ impl Element for Inline {
                         &text,
                         &text_layout,
                         hitbox.bounds,
-                        event.position,
+                        event.position - offset,
                         kind,
                     ) else {
                         return;
@@ -726,19 +733,19 @@ impl Element for Inline {
             });
         }
 
-        window.on_mouse_event({
+        window.on_mouse_event_with_offset({
             let hitbox = hitbox.clone();
             let text_layout = text_layout.clone();
             let links = self.links.clone();
             let inline_state = self.state.clone();
 
-            move |event: &MouseMoveEvent, phase, window, cx| {
+            move |event: &MouseMoveEvent, offset, phase, window, cx| {
                 if !phase.bubble() {
                     return;
                 }
 
                 let hovered_link = if hitbox.is_hovered(window) {
-                    Self::link_for_position(&text_layout, &links, event.position)
+                    Self::link_for_position(&text_layout, &links, event.position - offset)
                         .map(|link| link.url)
                 } else {
                     None
@@ -747,10 +754,14 @@ impl Element for Inline {
                     let Ok(mut state) = inline_state.lock() else {
                         return;
                     };
-                    if hovered_link.is_none() && state.hovered_bounds != Some(hitbox.bounds) {
+                    let bounds = Bounds {
+                        origin: hitbox.bounds.origin + offset,
+                        size: hitbox.bounds.size,
+                    };
+                    if hovered_link.is_none() && state.hovered_bounds != Some(bounds) {
                         return;
                     }
-                    state.hovered_bounds = hovered_link.as_ref().map(|_| hitbox.bounds);
+                    state.hovered_bounds = hovered_link.as_ref().map(|_| bounds);
                     if state.hovered_link == hovered_link {
                         return;
                     }
@@ -764,9 +775,12 @@ impl Element for Inline {
                 cx.notify(current_view);
 
                 if hovered_link.is_some() || previous_link.is_some() {
-                    super::TextViewDefaults::global(cx).request_link_tooltip(
+                    crate::text::TextViewDefaults::global(cx).request_link_tooltip(
                         hovered_link,
-                        hitbox.bounds,
+                        Bounds {
+                            origin: hitbox.bounds.origin + offset,
+                            size: hitbox.bounds.size,
+                        },
                         window,
                         cx,
                     );
@@ -776,14 +790,14 @@ impl Element for Inline {
 
         if !is_selection {
             // click to open link
-            window.on_mouse_event({
+            window.on_mouse_event_with_offset({
                 let links = self.links.clone();
                 let text_layout = text_layout.clone();
                 let hitbox = hitbox.clone();
-                let text_view_state = GlobalState::global(cx).text_view_state().cloned();
+                let text_view_state = GlobalState::global(cx).text_view_state();
                 let link_click_handler = self.link_click_handler.clone();
 
-                move |event: &MouseUpEvent, phase, window, cx| {
+                move |event: &MouseUpEvent, offset, phase, window, cx| {
                     if !phase.bubble() || !hitbox.is_hovered(window) {
                         return;
                     }
@@ -795,7 +809,7 @@ impl Element for Inline {
                     }
 
                     if let Some(link) =
-                        Self::link_for_position(&text_layout, &links, event.position)
+                        Self::link_for_position(&text_layout, &links, event.position - offset)
                     {
                         TextSelection::end(window, cx);
                         cx.stop_propagation();

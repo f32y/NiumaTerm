@@ -3,6 +3,7 @@
 mod bounds_tests;
 
 use std::{
+    cell::RefCell,
     collections::{HashMap, HashSet},
     ops::Range,
     rc::Rc,
@@ -205,17 +206,30 @@ impl TextSelectionSnapshot {
 }
 
 /// Per-frame geometry reported by a [`TextSelectionHandle`] participant.
+#[derive(Clone)]
 pub struct TextSelectionRegistration {
     hitbox: Hitbox,
     bounds: Bounds<Pixels>,
     scroll_offset: Point<Pixels>,
     scope: TextSelectionScopeId,
     document_order: u64,
+    paint_order: bool,
     text_bounds: Vec<Bounds<Pixels>>,
     virtual_group: Option<(EntityId, usize)>,
 }
 
 impl TextSelectionRegistration {
+    fn translated(&self, offset: Point<Pixels>) -> Self {
+        let mut registration = self.clone();
+        registration.bounds.origin += offset;
+        registration.hitbox.bounds.origin += offset;
+        registration.hitbox.content_mask.bounds.origin += offset;
+        for bounds in &mut registration.text_bounds {
+            bounds.origin += offset;
+        }
+        registration
+    }
+
     /// Creates a registration with default scope, order, and scroll offset.
     pub fn new(hitbox: Hitbox, bounds: Bounds<Pixels>) -> Self {
         Self {
@@ -224,6 +238,7 @@ impl TextSelectionRegistration {
             scroll_offset: Point::default(),
             scope: TextSelectionScopeId::default(),
             document_order: 0,
+            paint_order: false,
             text_bounds: Vec::new(),
             virtual_group: None,
         }
@@ -244,6 +259,12 @@ impl TextSelectionRegistration {
     /// Sets the stable logical document order.
     pub fn with_document_order(mut self, document_order: u64) -> Self {
         self.document_order = document_order;
+        self.paint_order = false;
+        self
+    }
+
+    pub(crate) fn with_paint_order(mut self) -> Self {
+        self.paint_order = true;
         self
     }
 
@@ -763,8 +784,19 @@ impl TextSelectionHandle {
         let Some(state) = WindowSelectionState::existing(window, cx) else {
             return;
         };
-        state.update(cx, |state, cx| {
-            state.register_participant(self.clone(), registration, cx)
+        let state = state.downgrade();
+        let participant = self.0.downgrade();
+        window.on_draw_with_offset(cx, move |offset, _, cx| {
+            let (Some(state), Some(participant)) = (state.upgrade(), participant.upgrade()) else {
+                return;
+            };
+            state.update(cx, |state, cx| {
+                state.register_participant(
+                    TextSelectionHandle(participant),
+                    registration.translated(offset),
+                    cx,
+                )
+            });
         });
     }
 
@@ -898,6 +930,7 @@ struct WindowSelectionState {
     is_selecting: bool,
     did_hit_text: bool,
     frame_generation: u64,
+    next_document_order: u64,
     finish_frame_scheduled: bool,
     mouse_down_prepared: bool,
     auto_scroll: AutoScroll,
@@ -1069,6 +1102,7 @@ impl WindowSelectionState {
         }
         self.publish_snapshots(cx);
         self.frame_generation = self.frame_generation.wrapping_add(1);
+        self.next_document_order = 0;
         handlers
     }
 
@@ -1084,9 +1118,13 @@ impl WindowSelectionState {
     pub fn register_participant(
         &mut self,
         selection: TextSelectionHandle,
-        registration: TextSelectionRegistration,
+        mut registration: TextSelectionRegistration,
         cx: &mut App,
     ) {
+        if registration.paint_order {
+            registration.document_order = self.next_document_order;
+            self.next_document_order = self.next_document_order.wrapping_add(1);
+        }
         self.prune_dead_participants();
         self.participants.insert(
             selection.entity_id(),
@@ -1732,7 +1770,7 @@ struct PendingTextSelectionScopes(HashMap<gpui::WindowId, TextSelectionScopeId>)
 impl Global for PendingTextSelectionScopes {}
 
 #[derive(Default)]
-struct TextSelectionScopeStacks(HashMap<gpui::WindowId, Vec<TextSelectionScopeId>>);
+struct TextSelectionScopeStacks(RefCell<HashMap<gpui::WindowId, Vec<TextSelectionScopeId>>>);
 
 impl Global for TextSelectionScopeStacks {}
 
@@ -1740,15 +1778,16 @@ fn push_text_selection_scope(window_id: gpui::WindowId, scope: TextSelectionScop
     if !cx.has_global::<TextSelectionScopeStacks>() {
         cx.set_global(TextSelectionScopeStacks::default());
     }
-    cx.global_mut::<TextSelectionScopeStacks>()
+    cx.global::<TextSelectionScopeStacks>()
         .0
+        .borrow_mut()
         .entry(window_id)
         .or_default()
         .push(scope);
 }
 
 fn pop_text_selection_scope(window_id: gpui::WindowId, cx: &mut App) {
-    let stacks = &mut cx.global_mut::<TextSelectionScopeStacks>().0;
+    let mut stacks = cx.global::<TextSelectionScopeStacks>().0.borrow_mut();
     let remove_stack = stacks.get_mut(&window_id).is_some_and(|stack| {
         stack.pop();
         stack.is_empty()
@@ -1766,6 +1805,7 @@ fn current_text_selection_scope(
         .then(|| {
             cx.global::<TextSelectionScopeStacks>()
                 .0
+                .borrow()
                 .get(&window_id)
                 .and_then(|stack| stack.last().copied())
         })
@@ -1899,6 +1939,8 @@ pub(crate) fn text_selection_scope(
     }
 }
 
+// A scope change invalidates descendant element identities so retained scenes
+// cannot reuse registrations associated with the previous selection scope.
 struct TextSelectionScopeMarker<E> {
     scope: TextSelectionScopeId,
     element: E,
@@ -1932,9 +1974,14 @@ impl<E: Element> Element for TextSelectionScopeMarker<E> {
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
         let window_id = window.window_handle().window_id();
-        with_text_selection_scope(window_id, self.scope, cx, |cx| {
-            self.element.request_layout(id, inspector_id, window, cx)
-        })
+        window.with_id(
+            ElementId::NamedInteger("text-selection-scope".into(), self.scope.0),
+            |window| {
+                with_text_selection_scope(window_id, self.scope, cx, |cx| {
+                    self.element.request_layout(id, inspector_id, window, cx)
+                })
+            },
+        )
     }
 
     fn prepaint(
@@ -1947,10 +1994,15 @@ impl<E: Element> Element for TextSelectionScopeMarker<E> {
         cx: &mut App,
     ) -> Self::PrepaintState {
         let window_id = window.window_handle().window_id();
-        with_text_selection_scope(window_id, self.scope, cx, |cx| {
-            self.element
-                .prepaint(id, inspector_id, bounds, request_layout, window, cx)
-        })
+        window.with_id(
+            ElementId::NamedInteger("text-selection-scope".into(), self.scope.0),
+            |window| {
+                with_text_selection_scope(window_id, self.scope, cx, |cx| {
+                    self.element
+                        .prepaint(id, inspector_id, bounds, request_layout, window, cx)
+                })
+            },
+        )
     }
 
     fn paint(
@@ -1964,17 +2016,22 @@ impl<E: Element> Element for TextSelectionScopeMarker<E> {
         cx: &mut App,
     ) {
         let window_id = window.window_handle().window_id();
-        with_text_selection_scope(window_id, self.scope, cx, |cx| {
-            self.element.paint(
-                id,
-                inspector_id,
-                bounds,
-                request_layout,
-                prepaint,
-                window,
-                cx,
-            );
-        });
+        window.with_id(
+            ElementId::NamedInteger("text-selection-scope".into(), self.scope.0),
+            |window| {
+                with_text_selection_scope(window_id, self.scope, cx, |cx| {
+                    self.element.paint(
+                        id,
+                        inspector_id,
+                        bounds,
+                        request_layout,
+                        prepaint,
+                        window,
+                        cx,
+                    );
+                })
+            },
+        );
     }
 }
 
@@ -2020,13 +2077,7 @@ impl Element for TextSelectionLayer {
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
-        // Automatic participant order is paint order within this frame. Keep
-        // this lifecycle in base so base-only applications do not need a
-        // separate root component to reset it. Otherwise, registering the
-        // first of two selected TextViews temporarily reverses their order
-        // against the previous frame and alternates coverage forever.
         GlobalState::init(cx);
-        GlobalState::global_mut(cx).begin_selection_frame();
         TextSelectionLayerPrepaintState(retain_text_selection_state(global_id, window, cx))
     }
 
@@ -2060,23 +2111,30 @@ fn retain_text_selection_state(
     if !cx.has_global::<SelectionStateRegistry>() {
         cx.set_global(SelectionStateRegistry::default());
     }
-    cx.global_mut::<SelectionStateRegistry>()
-        .0
-        .insert(window_id, state.downgrade());
+    let current = state.downgrade();
+    if cx.global::<SelectionStateRegistry>().0.get(&window_id) != Some(&current) {
+        cx.global_mut::<SelectionStateRegistry>()
+            .0
+            .insert(window_id, current);
+    }
     state
 }
 
 fn paint_text_selection(state: &Entity<WindowSelectionState>, window: &mut Window, cx: &mut App) {
-    if state.update(cx, |state, _| state.schedule_finish_frame()) {
-        let state = state.downgrade();
-        window.defer(cx, move |_, cx| {
-            let Some(state) = state.upgrade() else {
-                return;
-            };
-            let handlers = state.update(cx, |state, cx| state.finish_frame(cx));
-            dispatch_clear_handlers(handlers, cx);
-        });
-    }
+    let lifecycle = state.downgrade();
+    window.on_draw(cx, move |window, cx| {
+        let Some(state) = lifecycle.upgrade() else {
+            return;
+        };
+        if state.update(cx, |state, _| state.schedule_finish_frame()) {
+            let state = state.downgrade();
+            window.defer(cx, move |_, cx| {
+                let Some(state) = state.upgrade() else { return };
+                let handlers = state.update(cx, |state, cx| state.finish_frame(cx));
+                dispatch_clear_handlers(handlers, cx);
+            });
+        }
+    });
 
     let mouse_down_state = state.downgrade();
     window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {

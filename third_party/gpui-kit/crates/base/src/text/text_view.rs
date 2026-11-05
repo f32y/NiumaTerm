@@ -717,13 +717,17 @@ impl Element for TextView {
             }
             // Descendant `Inline`s report their line spans through the state
             // stack during prepaint (in addition to the paint-time push below).
-            GlobalState::global_mut(cx)
+            GlobalState::global(cx)
                 .text_view_state_stack
+                .borrow_mut()
                 .push(state.clone());
         }
         request_layout.element.prepaint(window, cx);
         if max_lines_active {
-            GlobalState::global_mut(cx).text_view_state_stack.pop();
+            GlobalState::global(cx)
+                .text_view_state_stack
+                .borrow_mut()
+                .pop();
         }
 
         let mut clip_bottom = None;
@@ -777,8 +781,9 @@ impl Element for TextView {
             state.update(cx, |state, _| state.selection_adapter.begin_frame());
         }
 
-        GlobalState::global_mut(cx)
+        GlobalState::global(cx)
             .text_view_state_stack
+            .borrow_mut()
             .push(state.clone());
         if let Some(clip_bottom) = prepaint.clip_bottom {
             // Snap the `max_lines` clip to the last whole line that fits, so a
@@ -792,7 +797,10 @@ impl Element for TextView {
         } else {
             request_layout.element.paint(window, cx);
         }
-        GlobalState::global_mut(cx).text_view_state_stack.pop();
+        GlobalState::global(cx)
+            .text_view_state_stack
+            .borrow_mut()
+            .pop();
 
         if self.selectable {
             let (adapter, scroll_offset, content_bounds) = {
@@ -803,12 +811,26 @@ impl Element for TextView {
                     state.bounds(),
                 )
             };
-            let document_order = GlobalState::global_mut(cx).next_selection_document_order();
+            let view = state.downgrade();
+            let geometry = adapter.clone();
+            window.on_draw_with_offset(cx, move |offset, _, cx| {
+                let _ = view.update(cx, |state, cx| {
+                    state.update_bounds(
+                        Bounds {
+                            origin: content_bounds.origin + offset,
+                            size: content_bounds.size,
+                        },
+                        cx,
+                    );
+                    state
+                        .selection_adapter
+                        .update_cached_geometry(&geometry, offset);
+                });
+            });
             adapter.register(
                 prepaint.hitbox.clone(),
                 content_bounds,
                 scroll_offset,
-                document_order,
                 window,
                 cx,
             );

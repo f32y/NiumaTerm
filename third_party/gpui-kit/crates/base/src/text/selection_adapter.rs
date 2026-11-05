@@ -80,6 +80,19 @@ pub(super) struct TextViewSelectionAdapter {
 }
 
 impl TextViewSelectionAdapter {
+    pub(super) fn update_cached_geometry(&mut self, original: &Self, offset: Point<Pixels>) {
+        self.text_bounds.clone_from(&original.text_bounds);
+        self.multi_click_bounds
+            .clone_from(&original.multi_click_bounds);
+        for bounds in self
+            .text_bounds
+            .iter_mut()
+            .chain(&mut self.multi_click_bounds)
+        {
+            bounds.origin += offset;
+        }
+    }
+
     pub(crate) fn attach_fragment(
         &mut self,
         group: Rc<RefCell<FragmentSelection>>,
@@ -275,13 +288,12 @@ impl TextViewSelectionAdapter {
         hitbox: Hitbox,
         bounds: Bounds<Pixels>,
         scroll_offset: Point<Pixels>,
-        document_order: u64,
         window: &mut Window,
         cx: &mut App,
     ) {
         let mut registration = TextSelectionRegistration::new(hitbox, bounds)
             .with_scroll_offset(scroll_offset)
-            .with_document_order(document_order)
+            .with_paint_order()
             .with_text_bounds(self.text_bounds.clone());
 
         if let Some((group, index)) = self.virtual_group {
