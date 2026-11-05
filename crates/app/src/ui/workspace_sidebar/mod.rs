@@ -9,7 +9,8 @@ use std::collections::{HashMap, HashSet};
 
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, Context, Div, DragMoveEvent, Entity, FontWeight, SharedString, Window, div, px,
+    AnyElement, App, Context, Div, DragMoveEvent, Entity, FontWeight, SharedString,
+    StyleRefinement, Window, div, px,
 };
 use gpui_component::{ActiveTheme, Disableable, IconName, IconNamed, h_flex, v_flex};
 use nmt_agent::AgentProjection;
@@ -24,7 +25,7 @@ use crate::ui::remote::RemoteWorkspace;
 use crate::ui::shell::InlineRenameSession;
 use crate::ui::sidebar_resize::ResizeDrag;
 use crate::ui::title_bar::TITLE_BAR_CONTROLS_WIDTH;
-use crate::ui::token_usage::TokenUsageView;
+use crate::ui::token_usage::{STATUS_ROW_HEIGHT, TokenUsageView};
 use crate::ui::workspace_sidebar::list::WorkspaceList;
 use crate::ui::workspace_sidebar::remote_list::remote_workspace_blocks;
 use crate::ui::{AppSettings, AppWindow, NewWorkspace, WindowRegistry, sidebar_resize};
@@ -254,7 +255,11 @@ impl Sidebar {
                     .pb(px(SIDEBAR_STATUS_PADDING_BOTTOM))
                     .border_t_1()
                     .border_color(cx.theme().sidebar_border)
-                    .children(show_daily_token_usage.then_some(usage.daily))
+                    .children(show_daily_token_usage.then(|| {
+                        usage
+                            .daily
+                            .cached(StyleRefinement::default().w_full().h(px(STATUS_ROW_HEIGHT)))
+                    }))
                     .children(
                         show_agent_usage
                             .then(|| Host::sidebar_agent_usage(usage.quotas.into_any_element())),

@@ -8,13 +8,13 @@ use std::collections::HashMap;
 use std::mem;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use gpui::prelude::*;
 use gpui::{
     AnyElement, Bounds, Context, Entity, FollowMode, Image, ImageFormat, IntoElement,
-    ListAlignment, ListOffset, ListState, Pixels, Render, ScrollHandle, SharedString, Window, div,
-    list, px, relative,
+    ListAlignment, ListOffset, ListState, Pixels, Render, ScrollHandle, SharedString, Task, Window,
+    div, list, px, relative,
 };
 use gpui_component::button::Button;
 use gpui_component::modern_menu::ModernMenuExt as _;
@@ -22,7 +22,7 @@ use gpui_component::scroll::Scrollbar;
 use gpui_component::{ActiveTheme as _, ElementExt as _, IconName, Sizable as _};
 use nmt_agent::chat::Item as SessionItem;
 use nmt_agent::session::capabilities::AgentCapabilities as _;
-use nmt_agent::transcript::conversation::ConversationState;
+use nmt_agent::transcript::conversation::{ConversationState, hidden};
 use nmt_config::agent::CollapseRows;
 use nmt_profiling::transcript::{Operation, Probe};
 use rust_i18n::t;
@@ -50,6 +50,7 @@ use crate::agent_tab::transcript::render::{
 };
 use crate::agent_tab::transcript::reveal::{Disclosures, RevealKey, revealed_block, revealed_part};
 use crate::agent_tab::transcript::row_structure::{RowGeometry, RowSource};
+use crate::agent_tab::transcript::row_view::RowViews;
 use crate::agent_tab::transcript::rows::{
     MessageBlock, PickerReservation, RowGap, TranscriptRow, folds_turns, is_run_row, spaced_rows,
     turn_opening_prompts,
@@ -72,6 +73,8 @@ use crate::agent_tab::transcript::{
 /// own conversation and a child agent's conversation render through here, so
 /// their presentation cannot drift apart.
 pub struct TranscriptView {
+    #[cfg(test)]
+    pub(super) rendered_rows: HashMap<usize, usize>,
     navigation: Option<Entity<Navigation>>,
     navigation_epoch: u64,
     navigation_dirty: Option<usize>,
@@ -82,6 +85,10 @@ pub struct TranscriptView {
     pub(crate) conversation: Rc<RefCell<ConversationState>>,
     pub(crate) image_previews: RefCell<HashMap<(usize, usize), Arc<Image>>>,
     pub(super) row_cache: RowCache,
+    pub(super) row_views: RowViews,
+    observing_styles: bool,
+    content_pending: bool,
+    row_context: (AgentKind, Option<String>),
 
     /// Virtualized transcript: only visible rows build elements each frame.
     /// `rows` mirrors the list's item count; render() rebuilds the changed
@@ -116,6 +123,8 @@ pub struct TranscriptView {
     /// The reply being let onto the screen a character at a time.
     typing: ReplyTyping,
 
+    typing_frame: Option<Task<()>>,
+
     /// Presentation inputs, not owned state: the working directory
     /// resolves transcript links, and the provider decides a few labels.
     pub(crate) cwd: Option<String>,
@@ -136,6 +145,7 @@ pub struct TranscriptView {
     pub(crate) attribution: HashMap<String, TranscriptAttribution>,
 }
 
+#[derive(PartialEq, Eq)]
 pub(crate) struct TranscriptAttribution {
     pub(crate) name: SharedString,
     pub(crate) cwd: Option<String>,
@@ -204,6 +214,8 @@ impl TranscriptView {
         let collapse_mode = CollapseRows::default();
 
         Self {
+            #[cfg(test)]
+            rendered_rows: HashMap::new(),
             navigation: None,
             navigation_epoch: 0,
             navigation_dirty: Some(0),
@@ -213,6 +225,10 @@ impl TranscriptView {
             conversation: Rc::new(RefCell::new(ConversationState::default())),
             image_previews: Default::default(),
             row_cache: RowCache::default(),
+            row_views: RowViews::default(),
+            observing_styles: false,
+            content_pending: false,
+            row_context: (kind, cwd.clone()),
             transcript_list: {
                 // Bottom alignment + tail follow give chat-log behavior: pinned
                 // to the newest row until the user scrolls up, re-engaging when
@@ -240,6 +256,7 @@ impl TranscriptView {
             code_transcripts: CodeTranscriptCache::default(),
             text_views: TranscriptTextCache::default(),
             typing: ReplyTyping::new(),
+            typing_frame: None,
             cwd,
             kind,
             observed_version: (0, 0),
@@ -248,31 +265,39 @@ impl TranscriptView {
         }
     }
 
-    /// Claim this view as one pane's own conversation, so its rows offer the
-    /// actions that address the conversation.
-    pub(crate) fn sync_content(&mut self) {
+    /// Notify once until the next render. GPUI requests a frame only when this
+    /// entity is displayed; hidden transcripts read current content on return.
+    pub(crate) fn request_content_update(&mut self, cx: &mut Context<Self>) {
+        if self.content_pending || self.conversation.borrow().version() == self.observed_version {
+            return;
+        }
+
+        self.content_pending = true;
+
+        cx.notify();
+    }
+
+    /// Update presentation caches and report whether conversation content changed.
+    pub(crate) fn sync_content(&mut self) -> bool {
         let shared = self.conversation.clone();
         let conversation = shared.borrow();
         let version = conversation.version();
 
         let Some(change) = conversation.changes_since(self.observed_version) else {
-            return;
+            return false;
         };
 
         if version.0 != self.observed_version.0 {
             self.reset_presentation();
-        } else if let Some((index, previous_bytes)) = change.reply
-            && let SessionItem::AgentMessage {
-                text: Some(text), ..
-            } = &conversation.content.entries()[index].item
-            && let Some(previous) = self
-                .typing
-                .begin(index, text, previous_bytes, Instant::now())
+        } else if let Some(previous) =
+            self.typing
+                .sync(&change, conversation.content.entries(), Instant::now())
         {
             self.row_cache.invalidate(previous);
         }
 
         self.code_transcripts.invalidate(&change);
+        self.row_views.content_changed(&change);
 
         self.text_views
             .sync_entry_count(conversation.content.entries().len());
@@ -280,13 +305,19 @@ impl TranscriptView {
         self.row_cache.invalidate(change.first);
 
         self.observed_version = version;
+
+        true
     }
 
     pub(crate) fn set_owner(&mut self, owner: gpui::WeakEntity<AgentPane>) {
+        self.row_views.clear();
+
         self.owner = Some(owner);
     }
 
     pub(crate) fn clear_owner(&mut self) {
+        self.row_views.clear();
+
         self.owner = None;
     }
 
@@ -345,11 +376,16 @@ impl TranscriptView {
         if moved {
             self.disclosures.clear();
             self.text_views.clear();
+            self.row_views.clear();
 
             self.image_previews.borrow_mut().clear();
         }
 
-        self.attribution = attribution;
+        if self.attribution != attribution {
+            self.attribution = attribution;
+
+            self.row_views.invalidate(0..usize::MAX);
+        }
 
         self.sync_content();
 
@@ -357,6 +393,10 @@ impl TranscriptView {
     }
 
     pub(crate) fn reset_presentation(&mut self) {
+        self.content_pending = false;
+
+        self.row_views.clear();
+
         self.navigation_epoch += 1;
         self.navigation_dirty = Some(0);
 
@@ -378,7 +418,8 @@ impl TranscriptView {
         self.code_transcripts.clear();
         self.text_views.clear();
 
-        self.typing.finish();
+        self.typing = ReplyTyping::new();
+        self.typing_frame = None;
     }
 
     /// The part of reply `index` the reader sees this frame: the whole of it
@@ -397,6 +438,8 @@ impl TranscriptView {
     }
 
     pub(super) fn finish_typing(&mut self) {
+        self.typing_frame = None;
+
         if let Some(index) = self.typing.finish() {
             self.row_cache.invalidate(index);
         }
@@ -411,7 +454,17 @@ impl TranscriptView {
         let conversation = self.conversation.borrow();
 
         let Some(step) = self.typing.advance(now, |index| {
-            reply_chars(conversation.content.entries(), index)
+            match conversation
+                .content
+                .entries()
+                .get(index)
+                .map(|entry| &entry.item)
+            {
+                Some(SessionItem::AgentMessage {
+                    text: Some(text), ..
+                }) => text,
+                _ => "",
+            }
         }) else {
             return false;
         };
@@ -421,6 +474,36 @@ impl TranscriptView {
         }
 
         step.moving
+    }
+
+    fn animate_reply(&mut self, now: Instant, window: &Window, cx: &mut Context<Self>) {
+        if cx.global::<AgentSettings>().reduce_motion || !window.is_window_active() {
+            self.finish_typing();
+
+            return;
+        }
+
+        let interval = Duration::from_secs_f64(1.0 / 30.0);
+
+        if self.typing.frame_delay(now, interval) == Some(Duration::ZERO) {
+            self.advance_typing(now);
+        }
+
+        match self.typing.frame_delay(now, interval) {
+            Some(delay) if self.typing_frame.is_none() => {
+                self.typing_frame = Some(cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(delay).await;
+
+                    let _ = this.update(cx, |this, cx| {
+                        this.typing_frame = None;
+
+                        cx.notify();
+                    });
+                }));
+            }
+            None => self.typing_frame = None,
+            _ => {}
+        }
     }
 
     #[cfg(test)]
@@ -476,6 +559,11 @@ impl TranscriptView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        #[cfg(test)]
+        {
+            *self.rendered_rows.entry(ix).or_default() += 1;
+        }
+
         let Some(TranscriptRow { spec, gap, block }) = self.rows.get(ix).cloned() else {
             return div().into_any_element();
         };
@@ -868,6 +956,41 @@ impl TranscriptView {
         self.row_cache.turns.truncate(keep);
 
         let (mut start, mut row_start) = self.row_cache.turns.last().copied().unwrap_or_default();
+
+        // An unfinished turn is chronological. A visible message separates
+        // adjacent work groups, so an edit can resume there without recounting
+        // earlier groups. A newly hidden message needs the preceding group too.
+        if let Some(entry) = items.get(start)
+            && !conversation.turns.is_settled(entry.turn)
+            && let Some((offset, index)) = self.logical_rows[row_start..]
+                .iter()
+                .enumerate()
+                .rev()
+                .find_map(|(offset, row)| {
+                    let index = match row.spec {
+                        RowSpec::Entry { index, .. } => index,
+                        RowSpec::RunToggle { run_start, .. } => run_start,
+                        RowSpec::Work { index, .. } if collapse == CollapseRows::Off => index,
+                        _ => return None,
+                    };
+
+                    let item = items.get(index)?;
+
+                    let separates_work = matches!(row.spec, RowSpec::Entry { .. })
+                        && !hidden(&item.item)
+                        && (!is_work_row(&item.item)
+                            || (self.show_thinking_in_stream
+                                && matches!(item.item, SessionItem::Reasoning { .. })));
+
+                    (index >= start
+                        && (index < dirty || (index == dirty && separates_work))
+                        && item.turn == entry.turn)
+                        .then_some((offset, index))
+                })
+        {
+            start = index;
+            row_start += offset;
+        }
 
         #[cfg(test)]
         {
@@ -1353,17 +1476,6 @@ impl TranscriptView {
     }
 }
 
-/// Length in characters of the reply at `index`, the target its typed edge
-/// closes on.
-fn reply_chars(items: &[Entry], index: usize) -> usize {
-    match items.get(index).map(|entry| &entry.item) {
-        Some(SessionItem::AgentMessage {
-            text: Some(text), ..
-        }) => text.chars().count(),
-        _ => 0,
-    }
-}
-
 /// Empty space left below the conversation while a picker follows it.
 ///
 /// What has to be cleared is the picker itself, which floats over the bottom
@@ -1378,6 +1490,50 @@ fn picker_reserve(viewport: Pixels) -> Pixels {
 
 impl Render for TranscriptView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.content_pending = false;
+
+        if self.row_context.0 != self.kind || self.row_context.1 != self.cwd {
+            self.row_context = (self.kind, self.cwd.clone());
+
+            self.row_views.clear();
+        }
+
+        if !self.observing_styles {
+            self.observing_styles = true;
+
+            cx.observe_global::<AgentSettings>(|view, cx| {
+                view.row_views.invalidate(0..usize::MAX);
+                view.transcript_list.remeasure();
+
+                cx.notify();
+            })
+            .detach();
+
+            cx.observe_global::<gpui_component::Theme>(|view, cx| {
+                view.row_views.invalidate(0..usize::MAX);
+                view.transcript_list.remeasure();
+
+                cx.notify();
+            })
+            .detach();
+
+            cx.observe_global::<gpui_base::Theme>(|view, cx| {
+                view.row_views.invalidate(0..usize::MAX);
+                view.transcript_list.remeasure();
+
+                cx.notify();
+            })
+            .detach();
+
+            cx.observe_global::<gpui_base::TextViewDefaults>(|view, cx| {
+                view.row_views.invalidate(0..usize::MAX);
+                view.transcript_list.remeasure();
+
+                cx.notify();
+            })
+            .detach();
+        }
+
         self.sync_content();
 
         search::refresh(self, cx);
@@ -1398,18 +1554,7 @@ impl Render for TranscriptView {
             window.request_animation_frame();
         }
 
-        // The typed edge moves once per frame, before the rows are built, so
-        // the row signatures and the prefix they are measured against describe
-        // the same frame. The stream wakes the pump as each chunk arrives; the
-        // frames between chunks are this view's to ask for. Reduced motion
-        // shows what has arrived as it arrives.
-        let reduce_motion = cx.global::<AgentSettings>().reduce_motion;
-
-        if reduce_motion {
-            self.finish_typing();
-        } else if self.advance_typing(now) {
-            window.request_animation_frame();
-        }
+        self.animate_reply(now, window, cx);
 
         let settings = cx.global::<AgentSettings>();
         let collapse_tool_calls = settings.collapse_tool_calls;
@@ -1519,11 +1664,14 @@ impl Render for TranscriptView {
         drop(conversation);
 
         for range in self.measurements.take_ranges() {
+            self.row_views.invalidate(range.clone());
             self.transcript_list.remeasure_items(range);
         }
 
         if self.transcript_font != font {
             self.transcript_font = font;
+
+            self.row_views.invalidate(0..usize::MAX);
 
             self.transcript_list.remeasure();
         }
@@ -1567,6 +1715,8 @@ impl Render for TranscriptView {
                                 if this.preview.transcript_width != Some(width) {
                                     this.preview.transcript_width = Some(width);
 
+                                    this.row_views.invalidate(0..usize::MAX);
+
                                     this.transcript_list.remeasure();
 
                                     cx.notify();
@@ -1583,8 +1733,25 @@ impl Render for TranscriptView {
                             let this = cx.entity().downgrade();
 
                             move |ix, window, cx| {
-                                this.update(cx, |this, cx| this.render_row(ix, window, cx))
-                                    .unwrap_or_else(|_| div().into_any_element())
+                                this.update(cx, |this, cx| {
+                                    let Some(row) = this.rows.get(ix) else {
+                                        return div().into_any_element();
+                                    };
+
+                                    let moving = {
+                                        let conversation = this.conversation.borrow();
+
+                                        let geometry = RowGeometry {
+                                            rows: &this.rows,
+                                            source: this.row_source(&conversation),
+                                        };
+
+                                        geometry.is_animating(ix, Instant::now())
+                                    };
+
+                                    this.row_views.render(ix, row, moving, window, cx)
+                                })
+                                .unwrap_or_else(|_| div().into_any_element())
                             }
                         })
                         .size_full()

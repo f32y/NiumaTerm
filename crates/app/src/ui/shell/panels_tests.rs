@@ -17,6 +17,9 @@ use crate::ui::workflows::WorkflowsView;
 
 #[gpui::test]
 fn empty_tabs_clear_panel_targets_and_close_background_tasks(cx: &mut TestAppContext) {
+    // The target's Git status refresh completes on the application's I/O runtime.
+    cx.executor().allow_parking();
+
     cx.update(|cx| {
         gpui_component::init(cx);
 

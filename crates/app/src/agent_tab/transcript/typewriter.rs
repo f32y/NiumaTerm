@@ -4,6 +4,11 @@ mod tests;
 
 use std::time::{Duration, Instant};
 
+use nmt_agent::chat::Item;
+use nmt_agent::transcript::conversation::{ContentChange, EntryChange};
+
+use crate::agent_tab::transcript::Entry;
+
 /// The reply this view types, while there is one. Only text that streams in
 /// through the view is typed: a restored or mirrored conversation arrives
 /// whole and is shown whole.
@@ -25,21 +30,81 @@ impl ReplyTyping {
     }
 
     pub(super) fn is_typing(&self) -> bool {
-        self.current.is_some()
+        self.current.as_ref().is_some_and(Typewriter::moving)
+    }
+
+    pub(super) fn frame_delay(&self, now: Instant, interval: Duration) -> Option<Duration> {
+        self.current
+            .as_ref()
+            .filter(|current| current.moving())
+            .map(|current| interval.saturating_sub(now.saturating_duration_since(current.ticked)))
+    }
+
+    pub(super) fn sync(
+        &mut self,
+        change: &ContentChange,
+        entries: &[Entry],
+        now: Instant,
+    ) -> Option<usize> {
+        if let Some(current) = &mut self.current {
+            if change
+                .reset_from
+                .is_some_and(|first| first <= current.index)
+            {
+                self.current = None;
+            } else if let Some((_, update)) = change
+                .entries
+                .iter()
+                .find(|(index, _)| *index == current.index)
+            {
+                match entries.get(current.index).map(|entry| &entry.item) {
+                    Some(Item::AgentMessage {
+                        text: Some(text), ..
+                    }) => {
+                        current.update(text, *update, now);
+                    }
+                    _ => self.current = None,
+                }
+            }
+        }
+
+        let (index, previous_bytes) = change.reply?;
+
+        let Item::AgentMessage {
+            text: Some(text), ..
+        } = &entries.get(index)?.item
+        else {
+            return None;
+        };
+
+        let previous_bytes = change
+            .entries
+            .iter()
+            .find_map(|(entry, update)| match update {
+                EntryChange::Append { previous_bytes } if *entry == index => Some(*previous_bytes),
+                _ => None,
+            })
+            .unwrap_or(previous_bytes);
+
+        self.begin(index, text, previous_bytes, now)
     }
 
     /// Type reply `index` from here on, starting after the `previous_bytes`
     /// of `text` that were on screen before the newest delta. A reply already
     /// being typed keeps its edge. Returns an older reply that stops being
     /// typed and appears whole, whose row has to be laid out again.
-    pub(super) fn begin(
+    fn begin(
         &mut self,
         index: usize,
         text: &str,
         previous_bytes: usize,
         now: Instant,
     ) -> Option<usize> {
-        if self.typed_edge(index).is_some() {
+        if self
+            .current
+            .as_ref()
+            .is_some_and(|current| current.index == index)
+        {
             return None;
         }
 
@@ -49,9 +114,7 @@ impl ReplyTyping {
         // completed payload merged in the same batch can replace that text with
         // a shorter or differently encoded one, so the offset is clamped to a
         // character boundary of the text as it is now.
-        let shown = &text[..text.floor_char_boundary(previous_bytes)];
-
-        self.current = Some(Typewriter::start(index, shown.chars().count(), now));
+        self.current = Some(Typewriter::start(index, text, previous_bytes, now));
 
         previous
     }
@@ -59,14 +122,24 @@ impl ReplyTyping {
     /// Stop typing and show the whole reply. Returns the reply whose row has
     /// to be laid out again.
     pub(super) fn finish(&mut self) -> Option<usize> {
-        self.current.take().map(|typewriter| typewriter.index())
+        let current = self.current.as_mut()?;
+        let changed = current.moving();
+
+        current.shown = current.total_chars as f64;
+        current.shown_bytes = current.total_bytes;
+
+        changed.then_some(current.index)
     }
 
     /// The part of reply `index` the reader sees this frame: the whole of it
     /// unless its edge is still crossing the text.
     pub(super) fn shown_reply<'a>(&self, index: usize, text: &'a str) -> &'a str {
-        match self.typed_edge(index) {
-            Some(shown) => shown_prefix(text, shown),
+        match self
+            .current
+            .as_ref()
+            .filter(|current| current.index == index)
+        {
+            Some(current) => &text[..text.floor_char_boundary(current.shown_bytes)],
             None => text,
         }
     }
@@ -76,28 +149,22 @@ impl ReplyTyping {
     pub(super) fn typed_edge(&self, index: usize) -> Option<usize> {
         self.current
             .as_ref()
-            .filter(|typewriter| typewriter.index() == index)
+            .filter(|typewriter| typewriter.index() == index && typewriter.moving())
             .map(Typewriter::shown)
     }
 
-    /// Move the edge for this frame. `reply_chars` gives the typed reply's
-    /// current length in characters. Typing ends once the edge reaches the
-    /// text.
-    pub(super) fn advance(
+    /// Advance the byte offset through newly displayed characters only.
+    pub(super) fn advance<'a>(
         &mut self,
         now: Instant,
-        reply_chars: impl FnOnce(usize) -> usize,
+        reply_text: impl FnOnce(usize) -> &'a str,
     ) -> Option<TypingStep> {
         let typewriter = self.current.as_mut()?;
         let index = typewriter.index();
         let previous = typewriter.shown();
 
-        let moving = typewriter.advance(reply_chars(index), now);
+        let moving = typewriter.advance(reply_text(index), now);
         let remeasure = typewriter.shown() != previous || !moving;
-
-        if !moving {
-            self.current = None;
-        }
 
         Some(TypingStep {
             index,
@@ -126,7 +193,7 @@ const CATCH_UP: Duration = Duration::from_millis(125);
 /// per second. Closing by a share alone would let the final characters of a
 /// chunk trickle in over many frames, which reads as the reply stalling on
 /// its last word; the floor keeps that tail arriving at a steady typing pace.
-const FLOOR_RATE: f32 = 60.0;
+const FLOOR_RATE: f64 = 60.0;
 
 /// The edge of a reply being let onto the screen, and the entry it crosses.
 ///
@@ -138,44 +205,111 @@ struct Typewriter {
 
     /// Characters shown, keeping the fraction between frames so a rate
     /// below one character a frame still moves.
-    shown: f32,
+    shown: f64,
+
+    shown_bytes: usize,
+    total_chars: usize,
+    total_bytes: usize,
+
+    #[cfg(test)]
+    scanned_bytes: usize,
 
     ticked: Instant,
 }
 
 impl Typewriter {
-    /// Start typing entry `index` from `shown` characters: the count the
-    /// entry already had on screen before streamed text reached it.
-    fn start(index: usize, shown: usize, now: Instant) -> Self {
+    /// Initialize counts from the existing UTF-8 prefix once per reply.
+    fn start(index: usize, text: &str, previous_bytes: usize, now: Instant) -> Self {
+        let shown_bytes = text.floor_char_boundary(previous_bytes);
+        let shown = text[..shown_bytes].chars().count();
+        let total_chars = shown + text[shown_bytes..].chars().count();
+
         Self {
             index,
-            shown: shown as f32,
+            shown: shown as f64,
+            shown_bytes,
+            total_chars,
+            total_bytes: text.len(),
+            #[cfg(test)]
+            scanned_bytes: text.len(),
             ticked: now,
         }
+    }
+
+    fn update(&mut self, text: &str, change: EntryChange, now: Instant) {
+        let was_moving = self.moving();
+
+        if !was_moving {
+            self.ticked = now;
+        }
+
+        match change {
+            EntryChange::Append { previous_bytes }
+                if previous_bytes == self.total_bytes && text.is_char_boundary(previous_bytes) =>
+            {
+                self.total_chars += text[previous_bytes..].chars().count();
+
+                #[cfg(test)]
+                {
+                    self.scanned_bytes += text.len() - previous_bytes;
+                }
+            }
+            _ => {
+                self.total_chars = text.chars().count();
+
+                self.shown = if was_moving {
+                    self.shown.min(self.total_chars as f64)
+                } else {
+                    self.total_chars as f64
+                };
+
+                self.shown_bytes = shown_prefix(text, self.shown()).len();
+
+                #[cfg(test)]
+                {
+                    self.scanned_bytes += text.len() + self.shown_bytes;
+                }
+            }
+        }
+
+        self.total_bytes = text.len();
+    }
+
+    fn moving(&self) -> bool {
+        self.shown < self.total_chars as f64
     }
 
     fn index(&self) -> usize {
         self.index
     }
 
-    /// Move the edge towards `total`, the reply's length in characters as of
-    /// now. Returns whether anything is still waiting behind it.
+    /// Advance towards the stored character count and report pending text.
     ///
     /// The step is the larger of the catch-up share and the floor, so a big
     /// chunk closes quickly while a lone character still arrives promptly.
     /// A long gap between frames (a pane that was hidden) closes the whole
     /// backlog at once instead of typing text the reader was not watching.
-    fn advance(&mut self, total: usize, now: Instant) -> bool {
-        let elapsed = now.saturating_duration_since(self.ticked).as_secs_f32();
+    fn advance(&mut self, text: &str, now: Instant) -> bool {
+        let elapsed = now.saturating_duration_since(self.ticked).as_secs_f64();
+        let previous = self.shown();
 
         self.ticked = now;
 
-        let total = total as f32;
+        let total = self.total_chars as f64;
         let backlog = (total - self.shown).max(0.0);
-        let share = 1.0 - (-elapsed / CATCH_UP.as_secs_f32()).exp();
+        let share = 1.0 - (-elapsed / CATCH_UP.as_secs_f64()).exp();
         let step = (backlog * share).max(FLOOR_RATE * elapsed).min(backlog);
 
         self.shown = (self.shown + step).min(total);
+
+        let added = shown_prefix(&text[self.shown_bytes..], self.shown() - previous).len();
+
+        self.shown_bytes += added;
+
+        #[cfg(test)]
+        {
+            self.scanned_bytes += added;
+        }
 
         self.shown < total
     }

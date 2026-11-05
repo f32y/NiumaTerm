@@ -15,8 +15,8 @@ use std::{fs, io};
 
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, Context, Entity, EventEmitter, FontWeight, KeyDownEvent, Render, Subscription,
-    Task, Window, div, px,
+    AnyElement, Context, Entity, EventEmitter, FontWeight, KeyDownEvent, Render, StyleRefinement,
+    Subscription, Task, Window, div, px,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::{ActiveTheme as _, Disableable as _, Sizable as _, h_flex, v_flex};
@@ -112,7 +112,7 @@ impl DefinitionEditor {
             _canvas_events: canvas_events,
         };
 
-        editor.validate();
+        editor.validate(cx);
 
         editor.check_file(cx);
 
@@ -123,8 +123,33 @@ impl DefinitionEditor {
         self.editor.is_dirty()
     }
 
-    fn validate(&mut self) {
+    fn validate(&mut self, cx: &mut Context<Self>) {
         self.errors = self.editor.errors();
+
+        let definition = self.editor.definition();
+        let edges = dependency_edges(definition);
+
+        let marked: Vec<&str> = self
+            .errors
+            .iter()
+            .flat_map(DefinitionError::nodes)
+            .collect();
+
+        let nodes: Vec<CanvasNode> = place(definition)
+            .into_iter()
+            .zip(&definition.nodes)
+            .map(|(position, node)| CanvasNode {
+                id: node.id.clone(),
+                position,
+                state: None,
+                marked: marked.contains(&node.id.as_str()),
+            })
+            .collect();
+
+        let key = format!("definition:{}", self.name);
+
+        self.canvas
+            .update(cx, |canvas, cx| canvas.show(&key, nodes, edges, cx));
     }
 
     /// Apply `edit`; returns whether it changed the definition.
@@ -133,7 +158,7 @@ impl DefinitionEditor {
             return false;
         }
 
-        self.validate();
+        self.validate(cx);
 
         cx.notify();
 
@@ -275,7 +300,7 @@ impl DefinitionEditor {
         };
 
         if stepped {
-            self.validate();
+            self.validate(cx);
 
             self.canvas.update(cx, |canvas, cx| canvas.select(None, cx));
 
@@ -432,7 +457,7 @@ impl DefinitionEditor {
 
         self.conflict = None;
 
-        self.validate();
+        self.validate(cx);
 
         self.canvas.update(cx, |canvas, cx| canvas.select(None, cx));
 
@@ -595,31 +620,6 @@ impl DefinitionEditor {
 
 impl Render for DefinitionEditor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let definition = self.editor.definition();
-        let edges = dependency_edges(definition);
-
-        let marked: Vec<&str> = self
-            .errors
-            .iter()
-            .flat_map(DefinitionError::nodes)
-            .collect();
-
-        let nodes: Vec<CanvasNode> = place(definition)
-            .into_iter()
-            .zip(&definition.nodes)
-            .map(|(position, node)| CanvasNode {
-                id: node.id.clone(),
-                position,
-                state: None,
-                marked: marked.contains(&node.id.as_str()),
-            })
-            .collect();
-
-        let key = format!("definition:{}", self.name);
-
-        self.canvas
-            .update(cx, |canvas, cx| canvas.show(&key, nodes, edges, cx));
-
         let selected = match self.canvas.read(cx).selection() {
             Some(Selection::Node(node)) => Some(node),
             Some(Selection::Edge(_)) | None => None,
@@ -663,7 +663,13 @@ impl Render for DefinitionEditor {
                 h_flex()
                     .flex_1()
                     .min_h_0()
-                    .child(div().flex_1().min_w_0().h_full().child(self.canvas.clone()))
+                    .child(
+                        div().flex_1().min_w_0().h_full().child(
+                            self.canvas
+                                .clone()
+                                .cached(StyleRefinement::default().size_full()),
+                        ),
+                    )
                     .child(panel),
             )
     }

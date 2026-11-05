@@ -4,6 +4,7 @@ pub(super) mod cache_expiry;
 pub(super) mod composer_layout;
 pub(super) mod composer_notices;
 pub(super) mod composer_status;
+pub(super) mod composer_view;
 pub(super) mod profile_switch;
 pub(super) mod progress_panel;
 pub(super) mod recent_sessions;

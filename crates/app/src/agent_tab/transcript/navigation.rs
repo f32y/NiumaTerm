@@ -82,6 +82,9 @@ impl Navigation {
                 });
 
         let version = conversation.version();
+        let previous_current = self.current;
+
+        let mut changed = reset;
 
         let first = if reset {
             0
@@ -92,10 +95,13 @@ impl Navigation {
         };
 
         if reset || self.version != Some(version) {
-            self.messages.truncate(
-                self.messages
-                    .partition_point(|message| message.entry < first),
-            );
+            let keep = self
+                .messages
+                .partition_point(|message| message.entry < first);
+
+            changed |= keep != self.messages.len();
+
+            self.messages.truncate(keep);
 
             for (entry, content) in conversation
                 .content
@@ -105,6 +111,8 @@ impl Navigation {
                 .skip(first)
             {
                 if let Item::UserMessage { text } = &content.item {
+                    changed = true;
+
                     let parsed = text.as_deref().and_then(parse_annotated_prompt);
 
                     let text = parsed
@@ -150,6 +158,7 @@ impl Navigation {
         for (row, content) in rows.iter().enumerate().skip(row_start) {
             if let RowSpec::Entry { index, .. } = content.spec {
                 while message < self.messages.len() && self.messages[message].entry < index {
+                    changed |= self.messages[message].row.is_some();
                     self.messages[message].row = None;
                     message += 1;
                 }
@@ -157,6 +166,7 @@ impl Navigation {
                 if let Some(target) = self.messages.get_mut(message)
                     && target.entry == index
                 {
+                    changed |= target.row != Some(row);
                     target.row = Some(row);
                     message += 1;
                 }
@@ -164,6 +174,7 @@ impl Navigation {
         }
 
         for target in &mut self.messages[message..] {
+            changed |= target.row.is_some();
             target.row = None;
         }
 
@@ -171,7 +182,9 @@ impl Navigation {
 
         self.update_current();
 
-        cx.notify();
+        if changed || previous_current != self.current {
+            cx.notify();
+        }
     }
 
     pub(super) fn version(&self) -> Option<(u64, u64)> {

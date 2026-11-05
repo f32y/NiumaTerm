@@ -6,7 +6,7 @@ use app::design::{
     SPACE_2,
 };
 use gpui::prelude::*;
-use gpui::{AnyElement, Context, DragMoveEvent, Entity, Pixels, Window, div};
+use gpui::{AnyElement, Context, DragMoveEvent, Entity, Pixels, StyleRefinement, Window, div};
 use gpui_component::{StyledExt as _, v_flex};
 
 use crate::ui::background_tasks::BackgroundTasksView;
@@ -171,8 +171,16 @@ impl Render for RightPanel {
         // One content is mounted at a time; two right-side columns are not
         // representable by this layout.
         let body: AnyElement = match self.selection.kind {
-            RightPanelKind::BackgroundTasks => self.tasks.clone().into_any_element(),
-            RightPanelKind::Workflows => self.workflows.clone().into_any_element(),
+            RightPanelKind::BackgroundTasks => self
+                .tasks
+                .clone()
+                .cached(StyleRefinement::default().size_full())
+                .into_any_element(),
+            RightPanelKind::Workflows => self
+                .workflows
+                .clone()
+                .cached(StyleRefinement::default().size_full())
+                .into_any_element(),
         };
 
         // The auxiliary card shares the content baseline and uses the same

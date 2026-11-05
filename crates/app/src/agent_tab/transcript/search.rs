@@ -153,6 +153,7 @@ fn handle_event(view: &mut TranscriptView, event: &FindEvent, cx: &mut Context<T
             restore(view);
 
             view.text_views.search.clear();
+            view.row_views.invalidate(0..usize::MAX);
             view.code_transcripts.set_search(HashMap::new(), cx);
         }
     }
@@ -410,6 +411,8 @@ fn collect_sections(entry: usize, item: &Item, query: &LiteralSearch, sections: 
 }
 
 fn decorate(view: &mut TranscriptView, cx: &mut Context<TranscriptView>) {
+    view.row_views.invalidate(0..usize::MAX);
+
     let active = view
         .search
         .current

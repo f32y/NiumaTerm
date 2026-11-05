@@ -37,7 +37,7 @@ const PLACEHOLDER: &str = "-";
 
 /// Height of the status row, matched to the quota row under it so the two
 /// stack as one cluster.
-const STATUS_ROW_HEIGHT: f32 = 24.0;
+pub(super) const STATUS_ROW_HEIGHT: f32 = 24.0;
 
 /// The glyph sits well below the value it introduces: the number is the
 /// readout, and the coin only says which number it is.
@@ -185,6 +185,7 @@ impl Render for TokenUsageView {
         let usage = self.refresh.value.clone();
 
         let trigger = Button::new("token-usage")
+            .debug_selector(|| "token-usage-trigger".into())
             .ghost()
             .small()
             .w_full()
@@ -458,6 +459,7 @@ fn render_usage_panel(
     let waiting = usage.is_none();
 
     v_flex()
+        .debug_selector(|| "token-usage-details-panel".into())
         .w(USAGE_PANEL_WIDTH)
         .gap_2()
         .text_size(px(14.0))

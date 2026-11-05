@@ -26,6 +26,7 @@ mod navigation;
 mod render;
 mod reveal;
 mod row_structure;
+mod row_view;
 mod rows;
 mod search;
 mod text;

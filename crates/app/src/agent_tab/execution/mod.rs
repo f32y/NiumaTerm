@@ -186,6 +186,10 @@ pub(super) struct PresentationEffect {
 
 impl EventEmitter<PresentationEffect> for AgentSession {}
 
+pub(super) struct TranscriptChanged;
+
+impl EventEmitter<TranscriptChanged> for AgentSession {}
+
 impl EventEmitter<AgentPaneEvent> for AgentSession {}
 
 /// The session replaced its conversation with a new one, whether its own
@@ -620,6 +624,16 @@ impl AgentSession {
     }
 
     pub(super) fn publish(&self, effect: SessionEffect, cx: &mut Context<Self>) {
+        match effect {
+            SessionEffect::Unchanged => return,
+            SessionEffect::TranscriptChanged => {
+                cx.emit(TranscriptChanged);
+
+                return;
+            }
+            _ => {}
+        }
+
         let epoch = self.controller.borrow().runtime().epoch();
 
         match &effect {

@@ -23,7 +23,7 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use futures::channel::oneshot;
-use gpui::{App, AppContext as _, BackgroundExecutor, Context, Entity, Task};
+use gpui::{App, AppContext as _, BackgroundExecutor, Context, Entity, EventEmitter, Task};
 use nmt_agent::AgentWorkspace;
 use nmt_agent::agent_spec::ProfileReference;
 use nmt_agent::chat::{Item, SendOutcome, ThreadSettings};
@@ -38,7 +38,7 @@ use nmt_agent::transcript::TranscriptEntry;
 use nmt_agent::transcript::conversation::EntryMetadata;
 use nmt_config::profile::AgentProfile;
 
-use crate::agent_tab::execution::{AgentSession, ExecutionSignal, SessionOwner};
+use crate::agent_tab::execution::{AgentSession, ExecutionSignal, SessionOwner, TranscriptChanged};
 use crate::agent_tab::orchestration::slot::{LiveNode, SlotHost, SlotObservation};
 use crate::agent_tab::orchestration::turn::{saved_entries, turn_entries, turn_items};
 use crate::agent_tab::settings::AgentSettings;
@@ -71,6 +71,8 @@ pub struct OrchestrationRuntime {
     load_failed: bool,
     closed: bool,
 }
+
+impl EventEmitter<TranscriptChanged> for OrchestrationRuntime {}
 
 impl OrchestrationRuntime {
     /// Start a new run of `graph`. The caller has checked that every slot's
@@ -547,11 +549,20 @@ impl OrchestrationRuntime {
 
         let changed = cx.observe(&session, |this, _, cx| this.schedule(cx));
 
+        let content = cx.subscribe(&session, |_, _, _: &TranscriptChanged, cx| {
+            cx.emit(TranscriptChanged);
+        });
+
         if self.slots.len() <= slot {
             self.slots.resize_with(slot + 1, || None);
         }
 
-        self.slots[slot] = Some(SlotHost::new(owner, kind, resumed, vec![events, changed]));
+        self.slots[slot] = Some(SlotHost::new(
+            owner,
+            kind,
+            resumed,
+            vec![events, changed, content],
+        ));
     }
 
     /// Compose and save `node`'s text, record it as sending, then send it.

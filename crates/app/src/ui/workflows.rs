@@ -10,7 +10,9 @@
 use app::agent_tab::AgentPane;
 use app::agent_tab::transcript::TranscriptView;
 use gpui::prelude::*;
-use gpui::{AnyElement, Context, Entity, Hsla, ScrollHandle, WeakEntity, Window, div, px};
+use gpui::{
+    AnyElement, Context, Entity, Hsla, ScrollHandle, Subscription, WeakEntity, Window, div, px,
+};
 use gpui_component::{ActiveTheme as _, IconName, StyledExt as _, h_flex, v_flex};
 use nmt_agent::workflow::{WorkflowAgent, WorkflowAgentState, WorkflowRun, WorkflowRunState};
 use nmt_profiling::transcript::{Operation, Probe};
@@ -24,6 +26,8 @@ pub(crate) struct WorkflowsView {
     /// while the panel is still mounted for its closing animation.
     target: Option<WeakEntity<AgentPane>>,
 
+    target_subscription: Option<Subscription>,
+
     /// Renders an open agent conversation with the parent conversation's own
     /// presentation, so a reader does not learn a second layout.
     detail_transcript: Option<Entity<TranscriptView>>,
@@ -36,6 +40,7 @@ impl WorkflowsView {
     pub(crate) fn new() -> Self {
         Self {
             target: None,
+            target_subscription: None,
             detail_transcript: None,
             scroll: ScrollHandle::new(),
             visible: false,
@@ -56,6 +61,11 @@ impl WorkflowsView {
         // The pane being replaced must stop refreshing for a view that is no
         // longer pointed at it.
         self.report_visibility(false, cx);
+
+        self.target_subscription = target
+            .as_ref()
+            .and_then(WeakEntity::upgrade)
+            .map(|target| cx.observe(&target, |_, _, cx| cx.notify()));
 
         self.target = target;
         self.detail_transcript = None;

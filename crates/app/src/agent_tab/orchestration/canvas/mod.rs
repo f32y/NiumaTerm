@@ -99,6 +99,9 @@ pub(super) enum CanvasEvent {
 }
 
 pub(super) struct GraphCanvas {
+    #[cfg(test)]
+    pub(super) render_count: usize,
+
     /// Which graph is shown; a new one is fitted into view once laid out.
     key: String,
 
@@ -131,6 +134,8 @@ impl Focusable for GraphCanvas {
 impl GraphCanvas {
     pub(super) fn new(editable: bool, cx: &mut Context<Self>) -> Self {
         Self {
+            #[cfg(test)]
+            render_count: 0,
             key: String::new(),
             nodes: Vec::new(),
             edges: Vec::new(),
@@ -154,13 +159,16 @@ impl GraphCanvas {
         edges: Vec<(usize, usize)>,
         cx: &mut Context<Self>,
     ) {
-        if self.key != key {
+        let graph_changed = self.key != key;
+        let content_changed = self.nodes != nodes || self.edges != edges;
+
+        if graph_changed {
             self.key = key.to_owned();
             self.fit_pending = true;
             self.selection = None;
         }
 
-        if self.nodes != nodes || self.edges != edges {
+        if content_changed {
             self.nodes = nodes;
             self.edges = edges;
 
@@ -173,7 +181,11 @@ impl GraphCanvas {
             if !exists {
                 self.selection = None;
             }
+        }
 
+        // A different graph resets selection and fitting even when its
+        // nodes and edges match the previous graph.
+        if graph_changed || content_changed {
             cx.notify();
         }
     }
@@ -443,6 +455,11 @@ impl GraphCanvas {
 
 impl Render for GraphCanvas {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        #[cfg(test)]
+        {
+            self.render_count += 1;
+        }
+
         // Fitting needs the element's size, known once it has been laid out;
         // the paint below asks for this render again when it was not.
         if self.fit_pending

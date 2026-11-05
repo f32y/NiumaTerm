@@ -319,6 +319,28 @@ impl RowSource<'_> {
 }
 
 impl RowGeometry<'_> {
+    pub(super) fn is_animating(&self, ix: usize, now: Instant) -> bool {
+        let disclosures = self.source.disclosures;
+
+        if disclosures.settled(now) {
+            return matches!(self.rows[ix].spec, RowSpec::Working { .. });
+        }
+
+        let moving = |key| disclosures.moving(key, now);
+
+        let own = match self.rows[ix].spec {
+            RowSpec::Entry { index, .. } | RowSpec::Work { index, .. } => {
+                moving(RevealKey::Row(index)) || moving(RevealKey::Annotation(index))
+            }
+            RowSpec::RunToggle { run_start, .. } => moving(RevealKey::Group(run_start)),
+            RowSpec::TurnFold { turn, .. } => moving(RevealKey::Turn(turn)),
+            RowSpec::Working { .. } => return true,
+            _ => false,
+        };
+
+        own || self.revealed_by(ix, now).is_some_and(moving)
+    }
+
     /// The list rows a run toggle or a turn fold currently has on screen,
     /// whichever ramp they happen to be travelling on this frame.
     pub(crate) fn revealed_parts(&self, key: RevealKey) -> Vec<RevealedPart> {

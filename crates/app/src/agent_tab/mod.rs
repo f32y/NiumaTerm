@@ -120,6 +120,7 @@ use crate::agent_tab::composer::{
 };
 use crate::agent_tab::execution::{
     AgentSession, ChildReader, CommandBinding, ConversationReset, PresentationEffect, SessionOwner,
+    TranscriptChanged,
 };
 use crate::agent_tab::fade::FrostedLayer;
 use crate::agent_tab::input_history::{
@@ -150,6 +151,7 @@ use crate::agent_tab::view::composer_notices::{
     last_response_mark, multi_root_notice, multi_root_strip, queued_prompts,
 };
 use crate::agent_tab::view::composer_status::{ComposerStatusBar, poll_git_branch};
+use crate::agent_tab::view::composer_view::ComposerView;
 use crate::agent_tab::view::progress_panel::ProgressPanel;
 use crate::agent_tab::view::recent_sessions::{ListControl, RecentSessionsMode, SessionHistoryUi};
 use crate::agent_tab::view::selection_menu::show_selected_text_menu;
@@ -249,6 +251,7 @@ pub struct AgentPane {
     pending_prompt_edit: Option<String>,
     history_ui: SessionHistoryUi,
     progress_panel: ProgressPanel,
+    composer_view: Entity<ComposerView>,
     side_chat: SideChatWindow,
 
     /// Provider state and transitions, independent of widgets and rendering.
@@ -2975,9 +2978,9 @@ impl AgentPane {
             .update(cx, |transcript, _| transcript.sync_content());
 
         self.side_chat.transcript.update(cx, |transcript, cx| {
-            transcript.sync_content();
-
-            cx.notify();
+            if transcript.sync_content() {
+                cx.notify();
+            }
         });
 
         match effect {
@@ -2986,6 +2989,9 @@ impl AgentPane {
             SessionEffect::TeamDecision(_) => {}
             SessionEffect::ProviderTurnFinished { .. } => {}
             SessionEffect::Changed => cx.notify(),
+            SessionEffect::TranscriptChanged => {
+                self.transcript.update(cx, |_, cx| cx.notify());
+            }
             SessionEffect::Title(_) => {}
             SessionEffect::Ready(settings) => self.on_ready(settings, cx),
             SessionEffect::Commands => {
@@ -3762,6 +3768,9 @@ impl AgentPane {
             transcript
         });
 
+        let composer_owner = cx.entity();
+        let composer_view = cx.new(|cx| ComposerView::new(composer_owner, cx));
+
         let mut this = Self {
             focus: cx.focus_handle(),
             input_history_scope,
@@ -3783,6 +3792,7 @@ impl AgentPane {
             owned_session: None,
             history_ui: SessionHistoryUi::default(),
             progress_panel: ProgressPanel::default(),
+            composer_view,
             side_chat: SideChatWindow::new(side_transcript),
             prompts: QuestionPanel::default(),
             effort_drag: None,
@@ -3815,17 +3825,28 @@ impl AgentPane {
             this.start_working(cx);
         }
 
-        cx.observe(host, |this, _, cx| {
+        cx.subscribe(host, |this, _, _: &TranscriptChanged, cx| {
             this.transcript.update(cx, |view, cx| {
-                view.sync_content();
-
-                cx.notify();
+                view.request_content_update(cx);
             });
 
             this.side_chat.transcript.update(cx, |view, cx| {
-                view.sync_content();
+                view.request_content_update(cx);
+            });
+        })
+        .detach();
 
-                cx.notify();
+        cx.observe(host, |this, _, cx| {
+            this.transcript.update(cx, |view, cx| {
+                if view.sync_content() {
+                    cx.notify();
+                }
+            });
+
+            this.side_chat.transcript.update(cx, |view, cx| {
+                if view.sync_content() {
+                    cx.notify();
+                }
             });
 
             cx.notify();
@@ -5203,130 +5224,25 @@ impl Render for AgentPane {
         // next turn runs with, on the same column and card as a regular
         // conversation.
         if self.team_member {
-            let interactions = self.render_team_interactions(window, cx);
-
-            // A member waiting on the user's answer cannot take a request
-            // until it has one, and its question is drawn just above.
-            let waiting = self.session.borrow().input().waiting();
-
             return v_flex()
                 .id("agent-pane")
-            .key_context("AgentPane")
-            .on_action(cx.listener(|pane, _: &OpenFind, window, cx| {
-                pane.transcript.update(cx, |view, cx| view.open_find(window, cx));
-            }))
+                .key_context("AgentPane")
+                .on_action(cx.listener(|pane, _: &OpenFind, window, cx| {
+                    pane.transcript
+                        .update(cx, |view, cx| view.open_find(window, cx));
+                }))
                 .role(Role::Pane)
                 .size_full()
                 .min_h_0()
                 .track_focus(&self.focus)
                 .on_drop(cx.listener(Self::on_file_drop))
                 .child(div().flex_1().min_h_0().child(self.transcript.clone()))
-                .child(
-                    transcript_column(
-                        v_flex()
-                            .w_full()
-                            .child(
-                                composer_card(cx)
-                                    .debug_selector(|| "team-member-composer".into())
-                                    .children(interactions)
-                                    .child(
-                                        composer_input_row()
-                                            .capture_action(cx.listener(
-                                                |this, action: &Enter, window, cx| {
-                                                    match composer_enter_behavior(
-                                                        cx.global::<AgentSettings>()
-                                                            .newline_shortcut,
-                                                        action,
-                                                    ) {
-                                                        ComposerEnterBehavior::InsertNewline => {
-                                                            this.input.update(cx, |input, cx| {
-                                                                input.replace("\n", window, cx)
-                                                            })
-                                                        }
-                                                        ComposerEnterBehavior::Submit
-                                                        | ComposerEnterBehavior::ActivateOrSubmit => {
-                                                            this.send_user_message(window, cx)
-                                                        }
-                                                    }
-
-                                                    cx.stop_propagation();
-                                                },
-                                            ))
-                                            .child(div().flex_1().min_w_0().child(
-                                                Textarea::new(&self.input).appearance(false),
-                                            )),
-                                    )
-                                    .child(
-                                        composer_controls_row()
-                                            .child(div().flex_1().min_w_0().child(render_row(
-                                                &self.session.borrow().controls,
-                                                session_kind,
-                                                None,
-                                                cx,
-                                            )))
-                                            .child(
-                                                send_button("team-member-send", false, waiting)
-                                                    .on_click(cx.listener(
-                                                        |this, _, window, cx| {
-                                                            this.send_user_message(window, cx)
-                                                        },
-                                                    )),
-                                            ),
-                                    ),
-                            )
-                            .child(self.render_composer_status(cx)),
-                        cx,
-                    )
-                    .pb_3()
-                    .pt_1(),
-                )
+                .child(ComposerView::element(&self.composer_view, window, cx))
                 .into_any_element();
         }
 
-        let command_palette = self.palette_model(cx).map(|model| {
-            let hover_selects = self.branch_picker_is_open();
-
-            self.palette.render(model, hover_selects, cx)
-        });
-
-        let notices = composer_notice_panel(
-            self.palette
-                .render_feedback(self.session.borrow().commands(), cx)
-                .map(IntoElement::into_any_element)
-                .into_iter()
-                .chain(
-                    queued_prompts(self.session.borrow().queued_prompts(), cx)
-                        .map(IntoElement::into_any_element),
-                )
-                .collect(),
-            cx,
-        );
-
         let side_chat =
             (self.side_chat_shown() == Some(true)).then(|| side_chat_window(&self.side_chat, cx));
-
-        let approval = self.render_approval_panel(cx);
-        let composer_free = !self.branch_flow_holds_composer();
-
-        let questions = self
-            .prompts
-            .render(&self.session, composer_free, window, cx);
-
-        let running = self.session.borrow().runtime().status() == Status::Running;
-
-        let profile = self.can_switch_profile(cx).then(|| {
-            let current = session_host.read(cx).profile().clone();
-            let profiles = cx.global::<AgentSettings>().profiles.clone();
-
-            profile_picker(cx, &current, profiles)
-        });
-
-        let update_suspended = self
-            .session
-            .borrow()
-            .runtime()
-            .update_suspension()
-            .is_some();
 
         let update_banner = update_banner(self.session.borrow().runtime().update_suspension(), cx);
         let multi_root_notice = self.render_multi_root_notice(cx);
@@ -5353,19 +5269,7 @@ impl Render for AgentPane {
 
         self.send_held_input(window, cx);
 
-        let branch_flow_active = self.branch_flow_holds_composer();
-        let session_loading = self.history_ui.mode == RecentSessionsMode::Loading;
-
-        // Input held for a launch is what the harness answers first, so the
-        // composer takes no more until it has gone out.
-        let input_held = self.send_on_ready;
-
-        // Nothing sends while a branch flow, a conversation load, an update or a
-        // held launch owns the composer. The trailing control stops a running
-        // turn instead, which stays available in every one of these states.
-        let send_blocked = branch_flow_active || session_loading || update_suspended || input_held;
-
-        let held = input_held.then(|| {
+        let held = self.send_on_ready.then(|| {
             held_prompt(
                 self.held_draft.as_ref().map(|draft| draft.text.as_str()),
                 session_kind.display(),
@@ -5382,46 +5286,13 @@ impl Render for AgentPane {
             cx.theme().sidebar
         };
 
-        // Blank tabs expose recent sessions automatically; `/resume` can
-        // request the same list after a conversation has started. A count
-        // result reserves placeholder rows until the full entries arrive.
         let transcript_empty = self.transcript.read(cx).is_empty();
         let composer_empty = self.input.read(cx).text().len() == 0;
 
-        // Text the composer is holding. A correction written while a turn runs
-        // is the one message that reaches the model before that turn ends, so
-        // it gets a control of its own while there is something to send.
-        let composer_has_text = !composer_empty;
-
-        // A side chat starts empty on purpose and cannot switch to another
-        // conversation, so it never offers the list.
-        // A held message has left the composer without starting the
-        // conversation yet, and the list would offer to replace it.
-        let history = (self.history_ui.is_visible(transcript_empty, composer_empty)
+        let blur_transcript = !transcript_empty
+            && self.history_ui.is_visible(transcript_empty, composer_empty)
             && !self.side_chat_member
-            && !input_held)
-            .then(|| self.history_ui.render(cx));
-
-        // A list opened over a live conversation is a picker, and the
-        // transcript behind it is not what the next click should reach. Blur
-        // pushes it back a layer while keeping the tab recognizable as that
-        // conversation; a blank tab has nothing to push back.
-        let blur_transcript = history.is_some() && !transcript_empty;
-
-        // Progress stays up while the history list is open: the list floats
-        // over it, and hiding the panel would move the transcript under the
-        // blur for a picker that is about to close again.
-        let progress = {
-            let session = self.session.borrow();
-
-            self.progress_panel.render(
-                session.goal(),
-                session.task_list(),
-                session.plan_mode(),
-                window,
-                cx,
-            )
-        };
+            && !self.send_on_ready;
 
         let now = Instant::now();
 
@@ -5500,77 +5371,252 @@ impl Render for AgentPane {
                         this.child(FrostedLayer::new(transcript_frost).light())
                     }),
             )
-            .child({
-                // Progress takes its own space above the composer, so opening
-                // its details pushes the transcript up instead of covering it.
-                // Painting it before the card tucks its lower edge behind the
-                // card's shadow.
-                transcript_column(
-                    v_flex()
+            .child(ComposerView::element(&self.composer_view, window, cx))
+            // The Side Chat window floats over the transcript and the composer
+            // but under the blocking layer, which must cover the whole pane.
+            .children(side_chat)
+            // Painted last so it sits over the transcript and the composer.
+            .children(blocking_layer)
+            .children(sheet)
+            .into_any_element()
+    }
+}
+
+impl AgentPane {
+    fn render_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let Some(session_host) = self.host.upgrade() else {
+            return div().into_any_element();
+        };
+
+        let session_kind = session_host.read(cx).kind;
+
+        if self.team_member {
+            let interactions = self.render_team_interactions(window, cx);
+
+            // A member waiting on the user's answer cannot take a request
+            // until it has one, and its question is drawn just above.
+            let waiting = self.session.borrow().input().waiting();
+
+            return transcript_column(
+                v_flex()
+                    .w_full()
+                    .child(
+                        composer_card(cx)
+                            .debug_selector(|| "team-member-composer".into())
+                            .children(interactions)
+                            .child(
+                                composer_input_row()
+                                    .capture_action(cx.listener(
+                                        |this, action: &Enter, window, cx| {
+                                            match composer_enter_behavior(
+                                                cx.global::<AgentSettings>().newline_shortcut,
+                                                action,
+                                            ) {
+                                                ComposerEnterBehavior::InsertNewline => {
+                                                    this.input.update(cx, |input, cx| {
+                                                        input.replace("\n", window, cx)
+                                                    })
+                                                }
+                                                ComposerEnterBehavior::Submit
+                                                | ComposerEnterBehavior::ActivateOrSubmit => {
+                                                    this.send_user_message(window, cx)
+                                                }
+                                            }
+
+                                            cx.stop_propagation();
+                                        },
+                                    ))
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .child(Textarea::new(&self.input).appearance(false)),
+                                    ),
+                            )
+                            .child(
+                                composer_controls_row()
+                                    .child(div().flex_1().min_w_0().child(render_row(
+                                        &self.session.borrow().controls,
+                                        session_kind,
+                                        None,
+                                        cx,
+                                    )))
+                                    .child(
+                                        send_button("team-member-send", false, waiting).on_click(
+                                            cx.listener(|this, _, window, cx| {
+                                                this.send_user_message(window, cx)
+                                            }),
+                                        ),
+                                    ),
+                            ),
+                    )
+                    .child(self.render_composer_status(cx)),
+                cx,
+            )
+            .pb_3()
+            .pt_1()
+            .into_any_element();
+        }
+
+        let command_palette = self.palette_model(cx).map(|model| {
+            let hover_selects = self.branch_picker_is_open();
+
+            self.palette.render(model, hover_selects, cx)
+        });
+
+        let notices = composer_notice_panel(
+            self.palette
+                .render_feedback(self.session.borrow().commands(), cx)
+                .map(IntoElement::into_any_element)
+                .into_iter()
+                .chain(
+                    queued_prompts(self.session.borrow().queued_prompts(), cx)
+                        .map(IntoElement::into_any_element),
+                )
+                .collect(),
+            cx,
+        );
+
+        let approval = self.render_approval_panel(cx);
+        let composer_free = !self.branch_flow_holds_composer();
+
+        let questions = self
+            .prompts
+            .render(&self.session, composer_free, window, cx);
+
+        let running = self.session.borrow().runtime().status() == Status::Running;
+
+        let profile = self.can_switch_profile(cx).then(|| {
+            let current = session_host.read(cx).profile().clone();
+            let profiles = cx.global::<AgentSettings>().profiles.clone();
+
+            profile_picker(cx, &current, profiles)
+        });
+
+        let update_suspended = self
+            .session
+            .borrow()
+            .runtime()
+            .update_suspension()
+            .is_some();
+
+        let branch_flow_active = self.branch_flow_holds_composer();
+        let session_loading = self.history_ui.mode == RecentSessionsMode::Loading;
+
+        // Input held for a launch is what the harness answers first, so the
+        // composer takes no more until it has gone out.
+        let input_held = self.send_on_ready;
+
+        // Nothing sends while a branch flow, a conversation load, an update or a
+        // held launch owns the composer. The trailing control stops a running
+        // turn instead, which stays available in every one of these states.
+        let send_blocked = branch_flow_active || session_loading || update_suspended || input_held;
+
+        // Blank tabs expose recent sessions automatically; `/resume` can
+        // request the same list after a conversation has started. A count
+        // result reserves placeholder rows until the full entries arrive.
+        let transcript_empty = self.transcript.read(cx).is_empty();
+        let composer_empty = self.input.read(cx).text().len() == 0;
+
+        // Text the composer is holding. A correction written while a turn runs
+        // is the one message that reaches the model before that turn ends, so
+        // it gets a control of its own while there is something to send.
+        let composer_has_text = !composer_empty;
+
+        // A side chat starts empty on purpose and cannot switch to another
+        // conversation, so it never offers the list.
+        // A held message has left the composer without starting the
+        // conversation yet, and the list would offer to replace it.
+        let history = (self.history_ui.is_visible(transcript_empty, composer_empty)
+            && !self.side_chat_member
+            && !input_held)
+            .then(|| self.history_ui.render(cx));
+
+        // Progress stays up while the history list is open: the list floats
+        // over it, and hiding the panel would move the transcript under the
+        // blur for a picker that is about to close again.
+        let progress = {
+            let session = self.session.borrow();
+
+            self.progress_panel.render(
+                session.goal(),
+                session.task_list(),
+                session.plan_mode(),
+                window,
+                cx,
+            )
+        };
+
+        // Progress takes its own space above the composer, so opening
+        // its details pushes the transcript up instead of covering it.
+        // Painting it before the card tucks its lower edge behind the
+        // card's shadow.
+        transcript_column(
+            v_flex()
+                .w_full()
+                .children(progress)
+                .children(notices)
+                .child(
+                    div()
                         .w_full()
-                        .children(progress)
-                        .children(notices)
-                        .child(
+                        .relative()
+                        // History is a picker over the conversation, so it
+                        // floats from the card's top edge and leaves the
+                        // progress panel and the transcript where they are.
+                        .children(history.map(|panel| {
                             div()
-                                .w_full()
-                                .relative()
-                                // History is a picker over the conversation, so it
-                                // floats from the card's top edge and leaves the
-                                // progress panel and the transcript where they are.
-                                .children(history.map(|panel| {
-                                    div()
-                                        .absolute()
-                                        .left_0()
-                                        .right_0()
-                                        .bottom(relative(1.))
-                                        .child(panel)
-                                }))
+                                .absolute()
+                                .left_0()
+                                .right_0()
+                                .bottom(relative(1.))
+                                .child(panel)
+                        }))
+                        .child(
+                            composer_card(cx)
+                                .debug_selector(|| "agent-progress-composer".into())
+                                .children(approval)
+                                .children(questions)
+                                .children(self.attachments.render(cx))
                                 .child(
-                                    composer_card(cx)
-                                        .debug_selector(|| "agent-progress-composer".into())
-                                        .children(approval)
-                                        .children(questions)
-                                        .children(self.attachments.render(cx))
-                                        .child(
-                                            composer_input_row()
-                                                // GPUI resolves these keystrokes
-                                                // into Textarea actions before raw
-                                                // key listeners run. Capturing
-                                                // the actions lets the palette
-                                                // own navigation while visible;
-                                                // the handler propagates them
-                                                // unchanged when it is closed.
-                                                // The composer's own paste inserts
-                                                // text; an image on the clipboard has
-                                                // to be taken before it gets there.
-                                                .capture_action(cx.listener(
-                                                    |this, _: &Paste, window, cx| {
-                                                        if this.paste_image(window, cx) {
-                                                            cx.stop_propagation();
-                                                        }
-                                                    },
-                                                ))
-                                                .capture_action(cx.listener(
-                                                    |this, _: &MoveUp, window, cx| {
-                                                        this.handle_palette_control(
-                                                            PaletteControl::Previous,
-                                                            window,
-                                                            cx,
-                                                        )
-                                                    },
-                                                ))
-                                                .capture_action(cx.listener(
-                                                    |this, _: &MoveDown, window, cx| {
-                                                        this.handle_palette_control(
-                                                            PaletteControl::Next,
-                                                            window,
-                                                            cx,
-                                                        )
-                                                    },
-                                                ))
-                                                .capture_action(cx.listener(
-                                                    |this, action: &Enter, window, cx| {
-                                                        match composer_enter_behavior(
+                                    composer_input_row()
+                                        // GPUI resolves these keystrokes
+                                        // into Textarea actions before raw
+                                        // key listeners run. Capturing
+                                        // the actions lets the palette
+                                        // own navigation while visible;
+                                        // the handler propagates them
+                                        // unchanged when it is closed.
+                                        // The composer's own paste inserts
+                                        // text; an image on the clipboard has
+                                        // to be taken before it gets there.
+                                        .capture_action(cx.listener(
+                                            |this, _: &Paste, window, cx| {
+                                                if this.paste_image(window, cx) {
+                                                    cx.stop_propagation();
+                                                }
+                                            },
+                                        ))
+                                        .capture_action(cx.listener(
+                                            |this, _: &MoveUp, window, cx| {
+                                                this.handle_palette_control(
+                                                    PaletteControl::Previous,
+                                                    window,
+                                                    cx,
+                                                )
+                                            },
+                                        ))
+                                        .capture_action(cx.listener(
+                                            |this, _: &MoveDown, window, cx| {
+                                                this.handle_palette_control(
+                                                    PaletteControl::Next,
+                                                    window,
+                                                    cx,
+                                                )
+                                            },
+                                        ))
+                                        .capture_action(cx.listener(
+                                            |this, action: &Enter, window, cx| {
+                                                match composer_enter_behavior(
                                                     cx.global::<AgentSettings>().newline_shortcut,
                                                     action,
                                                 ) {
@@ -5593,124 +5639,108 @@ impl Render for AgentPane {
                                                             cx,
                                                         ),
                                                 }
-                                                    },
-                                                ))
-                                                .capture_action(cx.listener(
-                                                    |this, _: &IndentInline, window, cx| {
-                                                        this.handle_palette_control(
-                                                            PaletteControl::Complete,
-                                                            window,
-                                                            cx,
-                                                        )
-                                                    },
-                                                ))
-                                                .capture_action(cx.listener(
-                                                    |this, _: &Escape, window, cx| {
-                                                        this.handle_palette_control(
-                                                            PaletteControl::Dismiss,
-                                                            window,
-                                                            cx,
-                                                        )
-                                                    },
-                                                ))
-                                                // The prompt editor reads larger than the
-                                                // chrome around it (t3code uses 16px over
-                                                // a 14px UI); +2 keeps that ratio at any
-                                                // configured agent font size.
-                                                .text_size(px(cx
-                                                    .global::<AgentSettings>()
-                                                    .font_size
-                                                    + 2.0))
-                                                .child(
-                                                    div().flex_1().min_w_0().child(
-                                                        Textarea::new(&self.input)
-                                                            .appearance(false)
-                                                            .disabled(self.composer_locked()),
-                                                    ),
-                                                ),
-                                        )
-                                        .child(
-                                            composer_controls_row()
-                                                .child(div().flex_1().min_w_0().child(render_row(
-                                                    &self.session.borrow().controls,
-                                                    session_kind,
-                                                    profile,
+                                            },
+                                        ))
+                                        .capture_action(cx.listener(
+                                            |this, _: &IndentInline, window, cx| {
+                                                this.handle_palette_control(
+                                                    PaletteControl::Complete,
+                                                    window,
                                                     cx,
-                                                )))
-                                                .children(self.render_last_response(cx))
-                                                // Send stands at the card's trailing
-                                                // corner, past the settings it is
-                                                // qualified by: those say what the next
-                                                // message is sent as, and this is the
-                                                // one control that sends it, so it is
-                                                // the last thing the eye reaches on its
-                                                // way out of the card. Stop replaces
-                                                // Send in place while a turn runs.
-                                                .children((running && composer_has_text).then(
-                                                    || {
-                                                        // A correction needs its own control
-                                                        // while a turn runs. The trailing
-                                                        // button stops that turn, so without
-                                                        // this one a correction could only be
-                                                        // sent from the keyboard.
-                                                        steer_button("agent-steer", send_blocked)
-                                                            .debug_selector(|| "agent-steer".into())
-                                                            .on_click(cx.listener(
-                                                                |this, _, window, cx| {
-                                                                    this.send_user_message(
-                                                                        window, cx,
-                                                                    )
-                                                                },
-                                                            ))
-                                                    },
-                                                ))
-                                                .child(
-                                                    send_button(
-                                                        "agent-send",
-                                                        running,
-                                                        !running && send_blocked,
-                                                    )
-                                                    .on_click(cx.listener(
-                                                        move |this, _, window, cx| {
-                                                            if running {
-                                                                this.interrupt_from_ui(window, cx)
-                                                            } else {
-                                                                this.send_user_message(window, cx)
-                                                            }
-                                                        },
-                                                    )),
-                                                ),
+                                                )
+                                            },
+                                        ))
+                                        .capture_action(cx.listener(
+                                            |this, _: &Escape, window, cx| {
+                                                this.handle_palette_control(
+                                                    PaletteControl::Dismiss,
+                                                    window,
+                                                    cx,
+                                                )
+                                            },
+                                        ))
+                                        // The prompt editor reads larger than the
+                                        // chrome around it (t3code uses 16px over
+                                        // a 14px UI); +2 keeps that ratio at any
+                                        // configured agent font size.
+                                        .text_size(px(cx.global::<AgentSettings>().font_size + 2.0))
+                                        .child(
+                                            div().flex_1().min_w_0().child(
+                                                Textarea::new(&self.input)
+                                                    .appearance(false)
+                                                    .disabled(self.composer_locked()),
+                                            ),
                                         ),
                                 )
-                                // The status footer reads out what the session has
-                                // spent so far, which is context for the message
-                                // and not part of composing it. It is drawn under
-                                // the card on the pane's own surface, so the card's
-                                // edge still ends at the input it encloses.
-                                .child(self.render_composer_status(cx))
-                                .children(command_palette.map(|palette| {
-                                    div()
-                                        .absolute()
-                                        .left_0()
-                                        .right_0()
-                                        .bottom(relative(1.))
-                                        .mb_2()
-                                        .occlude()
-                                        .child(palette)
-                                })),
-                        ),
-                    cx,
-                )
-                .pb_3()
-                .pt_1()
-            })
-            // The Side Chat window floats over the transcript and the composer
-            // but under the blocking layer, which must cover the whole pane.
-            .children(side_chat)
-            // Painted last so it sits over the transcript and the composer.
-            .children(blocking_layer)
-            .children(sheet)
-            .into_any_element()
+                                .child(
+                                    composer_controls_row()
+                                        .child(div().flex_1().min_w_0().child(render_row(
+                                            &self.session.borrow().controls,
+                                            session_kind,
+                                            profile,
+                                            cx,
+                                        )))
+                                        .children(self.render_last_response(cx))
+                                        // Send stands at the card's trailing
+                                        // corner, past the settings it is
+                                        // qualified by: those say what the next
+                                        // message is sent as, and this is the
+                                        // one control that sends it, so it is
+                                        // the last thing the eye reaches on its
+                                        // way out of the card. Stop replaces
+                                        // Send in place while a turn runs.
+                                        .children((running && composer_has_text).then(|| {
+                                            // A correction needs its own control
+                                            // while a turn runs. The trailing
+                                            // button stops that turn, so without
+                                            // this one a correction could only be
+                                            // sent from the keyboard.
+                                            steer_button("agent-steer", send_blocked)
+                                                .debug_selector(|| "agent-steer".into())
+                                                .on_click(cx.listener(|this, _, window, cx| {
+                                                    this.send_user_message(window, cx)
+                                                }))
+                                        }))
+                                        .child(
+                                            send_button(
+                                                "agent-send",
+                                                running,
+                                                !running && send_blocked,
+                                            )
+                                            .on_click(
+                                                cx.listener(move |this, _, window, cx| {
+                                                    if running {
+                                                        this.interrupt_from_ui(window, cx)
+                                                    } else {
+                                                        this.send_user_message(window, cx)
+                                                    }
+                                                }),
+                                            ),
+                                        ),
+                                ),
+                        )
+                        // The status footer reads out what the session has
+                        // spent so far, which is context for the message
+                        // and not part of composing it. It is drawn under
+                        // the card on the pane's own surface, so the card's
+                        // edge still ends at the input it encloses.
+                        .child(self.render_composer_status(cx))
+                        .children(command_palette.map(|palette| {
+                            div()
+                                .absolute()
+                                .left_0()
+                                .right_0()
+                                .bottom(relative(1.))
+                                .mb_2()
+                                .occlude()
+                                .child(palette)
+                        })),
+                ),
+            cx,
+        )
+        .pb_3()
+        .pt_1()
+        .into_any_element()
     }
 }
 

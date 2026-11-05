@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
 
 use futures::channel::oneshot;
-use gpui::{App, AppContext as _, BackgroundExecutor, Context, Entity, Task};
+use gpui::{App, AppContext as _, BackgroundExecutor, Context, Entity, EventEmitter, Task};
 use nmt_agent::AgentWorkspace;
 use nmt_agent::chat::SendOutcome;
 use nmt_agent::session::team_capabilities::TeamLaunch;
@@ -26,7 +26,7 @@ use nmt_agent::team::room::Room;
 use nmt_agent::team::session::{AttemptEventKey, TeamError, TeamSession};
 use nmt_config::profile::AgentProfile;
 
-use crate::agent_tab::execution::{AgentSession, ExecutionSignal, SessionOwner};
+use crate::agent_tab::execution::{AgentSession, ExecutionSignal, SessionOwner, TranscriptChanged};
 use crate::agent_tab::settings::AgentSettings;
 use crate::agent_tab::team::member_host::MemberHost;
 use crate::agent_tab::team::operations::MemberSnapshot;
@@ -52,6 +52,8 @@ pub struct TeamRuntime {
     load_failed: bool,
     closed: bool,
 }
+
+impl EventEmitter<TranscriptChanged> for TeamRuntime {}
 
 impl Drop for TeamRuntime {
     fn drop(&mut self) {
@@ -433,8 +435,12 @@ impl TeamRuntime {
 
         let changed = cx.observe(&session, move |this, _, cx| this.schedule(cx));
 
+        let content = cx.subscribe(&session, |_, _, _: &TranscriptChanged, cx| {
+            cx.emit(TranscriptChanged);
+        });
+
         self.hosts
-            .insert(id, MemberHost::new(owner, vec![events, changed]));
+            .insert(id, MemberHost::new(owner, vec![events, changed, content]));
     }
 
     #[cfg(all(test, windows))]

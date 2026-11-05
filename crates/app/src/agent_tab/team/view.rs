@@ -28,6 +28,7 @@ use nmt_agent::team::model::{MemberId, RoomId, UserInput};
 use nmt_agent::team::session::TeamError;
 use rust_i18n::t;
 
+use crate::agent_tab::execution::TranscriptChanged;
 use crate::agent_tab::settings::AgentSettings;
 use crate::agent_tab::team::view::history::TeamHistory;
 use crate::agent_tab::team::view::membership::MemberDraft;
@@ -58,6 +59,7 @@ pub struct TeamPane {
     member_panes: BTreeMap<MemberId, Entity<AgentPane>>,
 
     timeline: TimelineMirror,
+    content_pending: bool,
     member_draft: MemberDraft,
     error: Option<String>,
     loaded: bool,
@@ -65,13 +67,13 @@ pub struct TeamPane {
     adding_member: bool,
     abandoning: bool,
     history: TeamHistory,
-    runtime_observer: Subscription,
+    runtime_observers: [Subscription; 2],
     _input_observer: Subscription,
     _observers: Vec<Subscription>,
 }
 
-fn observe_runtime(runtime: &Entity<TeamRuntime>, cx: &mut Context<TeamPane>) -> Subscription {
-    cx.observe(runtime, |this, _, cx| {
+fn observe_runtime(runtime: &Entity<TeamRuntime>, cx: &mut Context<TeamPane>) -> [Subscription; 2] {
+    let state = cx.observe(runtime, |this, _, cx| {
         if !this.loaded && !this.runtime.read(cx).loading() {
             this.targeting = DiscussionTargeting::from_room(this.runtime.read(cx).room());
             this.loaded = true;
@@ -81,7 +83,17 @@ fn observe_runtime(runtime: &Entity<TeamRuntime>, cx: &mut Context<TeamPane>) ->
             .sync_timeline(&this.runtime, &this.transcript, cx);
 
         cx.notify();
-    })
+    });
+
+    let content = cx.subscribe(runtime, |this, _, _: &TranscriptChanged, cx| {
+        if !this.content_pending {
+            this.content_pending = true;
+
+            cx.notify();
+        }
+    });
+
+    [state, content]
 }
 
 impl TeamPane {
@@ -137,7 +149,8 @@ impl TeamPane {
             adding_member: false,
             abandoning: false,
             history,
-            runtime_observer: changed,
+            runtime_observers: changed,
+            content_pending: false,
             _input_observer: input_changed,
             _observers: Vec::new(),
         };
@@ -223,7 +236,8 @@ impl TeamPane {
             this._observers.clear();
 
             this.runtime = runtime.clone();
-            this.runtime_observer = observe_runtime(&runtime, cx);
+            this.runtime_observers = observe_runtime(&runtime, cx);
+            this.content_pending = false;
             this.targeting = DiscussionTargeting::from_room(runtime.read(cx).room());
             this.loaded = true;
             this.inspected = None;
@@ -1006,6 +1020,13 @@ impl Focusable for TeamPane {
 
 impl Render for TeamPane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.content_pending {
+            self.content_pending = false;
+
+            self.timeline
+                .sync_timeline(&self.runtime, &self.transcript, cx);
+        }
+
         let settings = cx.global::<AgentSettings>();
 
         let background = if settings.pane_background_follows_terminal {

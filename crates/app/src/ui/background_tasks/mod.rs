@@ -17,7 +17,8 @@ use app::agent_tab::execution::ChildReader;
 use app::agent_tab::transcript::TranscriptView;
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, Context, Entity, ScrollHandle, SharedString, Task, WeakEntity, Window, div, px,
+    AnyElement, Context, Entity, ScrollHandle, SharedString, Subscription, Task, WeakEntity,
+    Window, div, px,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::{
@@ -125,6 +126,8 @@ pub(crate) struct BackgroundTasksView {
     /// while the panel is still mounted for its closing animation.
     target: Option<WeakEntity<AgentPane>>,
 
+    target_subscription: Option<Subscription>,
+
     running_expanded: bool,
     finished_expanded: bool,
     scroll: ScrollHandle,
@@ -143,6 +146,7 @@ impl BackgroundTasksView {
             detail_transcript: None,
             detail_interest: None,
             target: None,
+            target_subscription: None,
             running_expanded: false,
             finished_expanded: false,
             scroll: ScrollHandle::new(),
@@ -161,6 +165,11 @@ impl BackgroundTasksView {
         if self.target == target {
             return;
         }
+
+        self.target_subscription = target
+            .as_ref()
+            .and_then(WeakEntity::upgrade)
+            .map(|target| cx.observe(&target, |_, _, cx| cx.notify()));
 
         self.target = target;
 

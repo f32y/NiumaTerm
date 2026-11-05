@@ -1098,6 +1098,8 @@ impl SessionController {
             return SessionEffect::Unchanged;
         }
 
+        let awaiting_output = self.conversation.borrow().submitted_at.is_some();
+
         let effect = match event {
             Event::Ready(settings) => self
                 .prepare_ready(settings)
@@ -1237,17 +1239,17 @@ impl SessionController {
             Event::AgentMessageDelta { item_id, delta } => {
                 self.append_delta(&item_id, &delta, TextField::Reply);
 
-                SessionEffect::Changed
+                SessionEffect::TranscriptChanged
             }
             Event::ReasoningSummaryDelta { item_id, delta } => {
                 self.append_delta(&item_id, &delta, TextField::ReasoningSummary);
 
-                SessionEffect::Changed
+                SessionEffect::TranscriptChanged
             }
             Event::CommandOutputDelta { item_id, delta } => {
                 self.append_delta(&item_id, &delta, TextField::CommandOutput);
 
-                SessionEffect::Changed
+                SessionEffect::TranscriptChanged
             }
             Event::ApprovalRequested { description } => {
                 self.input.ask_approval(description);
@@ -1415,6 +1417,16 @@ impl SessionController {
                     SessionEffect::Unchanged
                 }
             }
+        };
+
+        // The first visible output also updates submission state and latency.
+        let effect = if matches!(effect, SessionEffect::TranscriptChanged)
+            && awaiting_output
+            && self.conversation.borrow().submitted_at.is_none()
+        {
+            SessionEffect::Changed
+        } else {
+            effect
         };
 
         self.record_content(effect)
@@ -2030,6 +2042,7 @@ pub struct SessionReplay {
 pub enum SessionEffect {
     Unchanged,
     Changed,
+    TranscriptChanged,
     Ready(SessionReady),
     Commands,
     Skills,

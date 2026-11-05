@@ -16,11 +16,13 @@ use futures::channel::mpsc::unbounded;
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, Context, Entity, EntityId, FocusHandle, Focusable, FontWeight, Hsla, Render,
-    Role, Subscription, Task, Window, div, px,
+    Role, StyleRefinement, Subscription, Task, Window, div, px,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
-use gpui_component::{ActiveTheme as _, Disableable as _, IconName, Sizable as _, h_flex, v_flex};
+use gpui_component::{
+    ActiveTheme as _, Disableable as _, IconName, Sizable as _, Theme, h_flex, v_flex,
+};
 use nmt_agent::AgentWorkspace;
 use nmt_agent::orchestration::library::{
     DefinitionEntry, create_definition, definitions_directory, load_definitions,
@@ -35,6 +37,7 @@ use notify::{
 use rust_i18n::t;
 
 use crate::agent_tab::AgentPane;
+use crate::agent_tab::execution::TranscriptChanged;
 use crate::agent_tab::orchestration::canvas::{
     CanvasEvent, CanvasNode, CardState, GraphCanvas, dependency_edges,
 };
@@ -78,6 +81,8 @@ pub struct OrchestrationPane {
     runs: Vec<RunSummary>,
     runtime: Option<Entity<OrchestrationRuntime>>,
     runtime_observer: Option<Subscription>,
+    runtime_content_observer: Option<Subscription>,
+    content_pending: bool,
     detail: Option<NodeDetail>,
     transcript: Entity<TranscriptView>,
     canvas: Entity<GraphCanvas>,
@@ -133,6 +138,9 @@ impl OrchestrationPane {
         let transcript = cx.new(|_| TranscriptView::new(AgentKind::Codex, None));
         let canvas = cx.new(|cx| GraphCanvas::new(false, cx));
 
+        cx.observe_global::<Theme>(|this, cx| this.sync_canvas(cx))
+            .detach();
+
         let canvas_events = cx.subscribe(&canvas, |this, _, event, cx| match event {
             CanvasEvent::OpenDetails(node) if this.main == MainView::Run => {
                 this.open_detail(*node, cx)
@@ -154,6 +162,8 @@ impl OrchestrationPane {
             runs: Vec::new(),
             runtime: None,
             runtime_observer: None,
+            runtime_content_observer: None,
+            content_pending: false,
             detail: None,
             transcript,
             canvas,
@@ -202,6 +212,8 @@ impl OrchestrationPane {
         }
 
         self.runtime_observer = None;
+        self.runtime_content_observer = None;
+        self.content_pending = false;
 
         self.slot_panes.clear();
     }
@@ -651,12 +663,26 @@ impl OrchestrationPane {
                 this.reload(cx);
             }
 
+            this.sync_canvas(cx);
             this.sync_detail(cx);
 
             cx.notify();
         }));
 
+        self.runtime_content_observer = Some(cx.subscribe(
+            &runtime,
+            |this, _, _: &TranscriptChanged, cx| {
+                if this.detail.is_some() && !this.content_pending {
+                    this.content_pending = true;
+
+                    cx.notify();
+                }
+            },
+        ));
+
         self.runtime = Some(runtime);
+
+        self.sync_canvas(cx);
 
         cx.notify();
     }
@@ -1010,6 +1036,43 @@ impl OrchestrationPane {
         }
     }
 
+    fn sync_canvas(&mut self, cx: &mut Context<Self>) {
+        let Some(runtime) = &self.runtime else {
+            return;
+        };
+
+        let runtime = runtime.read(cx);
+
+        let (Some(run), Some(graph)) = (runtime.run(), runtime.graph()) else {
+            return;
+        };
+
+        let key = format!("run:{}", run.id());
+        let edges = dependency_edges(run.definition());
+
+        let nodes = place(run.definition())
+            .into_iter()
+            .enumerate()
+            .map(|(node, position)| {
+                let state = &run.nodes()[node].state;
+
+                CanvasNode {
+                    id: graph.definition().nodes[node].id.clone(),
+                    position,
+                    state: Some(CardState {
+                        label: node_state_label(state),
+                        color: node_state_color(state, cx),
+                        needs_input: runtime.needs_input(node, cx),
+                    }),
+                    marked: false,
+                }
+            })
+            .collect();
+
+        self.canvas
+            .update(cx, |canvas, cx| canvas.show(&key, nodes, edges, cx));
+    }
+
     fn render_run(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let Some(runtime) = self.runtime.clone() else {
             return placeholder(
@@ -1025,7 +1088,7 @@ impl OrchestrationPane {
 
         let runtime_ref = runtime.read(cx);
 
-        let (Some(run), Some(graph)) = (runtime_ref.run(), runtime_ref.graph()) else {
+        let (Some(run), Some(_)) = (runtime_ref.run(), runtime_ref.graph()) else {
             let message = runtime_ref
                 .error()
                 .map(str::to_owned)
@@ -1036,35 +1099,9 @@ impl OrchestrationPane {
 
         let stoppable = runtime_ref.stoppable();
         let resumable = runtime_ref.resumable();
-        let key = format!("run:{}", run.id());
         let name = run.definition_name().to_owned();
         let input = run.input().lines().next().unwrap_or_default().to_owned();
         let state = run_state_label(run.state());
-        let edges = dependency_edges(run.definition());
-
-        // The run's own copy of the definition holds the layout it started
-        // with, so later moves of the definition do not move this run.
-        let nodes: Vec<CanvasNode> = place(run.definition())
-            .into_iter()
-            .enumerate()
-            .map(|(node, position)| {
-                let state = &run.nodes()[node].state;
-
-                CanvasNode {
-                    id: graph.definition().nodes[node].id.clone(),
-                    position,
-                    state: Some(CardState {
-                        label: node_state_label(state),
-                        color: node_state_color(state, cx),
-                        needs_input: runtime_ref.needs_input(node, cx),
-                    }),
-                    marked: false,
-                }
-            })
-            .collect();
-
-        self.canvas
-            .update(cx, |canvas, cx| canvas.show(&key, nodes, edges, cx));
 
         let theme = cx.theme();
 
@@ -1153,7 +1190,13 @@ impl OrchestrationPane {
             .size_full()
             .child(header)
             .children(confirmation)
-            .child(div().flex_1().min_h_0().child(self.canvas.clone()))
+            .child(
+                div().flex_1().min_h_0().child(
+                    self.canvas
+                        .clone()
+                        .cached(StyleRefinement::default().size_full()),
+                ),
+            )
             .into_any_element()
     }
 
@@ -1320,6 +1363,12 @@ impl Focusable for OrchestrationPane {
 
 impl Render for OrchestrationPane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.content_pending {
+            self.content_pending = false;
+
+            self.sync_detail(cx);
+        }
+
         let settings = cx.global::<AgentSettings>();
 
         let background = if settings.pane_background_follows_terminal {

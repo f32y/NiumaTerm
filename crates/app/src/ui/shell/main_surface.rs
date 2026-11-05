@@ -19,12 +19,13 @@ use crate::ui::shell::{AppWindow, TabSurface};
 /// The active tab's pane tree as nested resizable groups. The main surface
 /// owns the outer frame, so a single pane renders without another card.
 ///
-/// Each pane is embedded as a cached view. The window re-renders from its
-/// root whenever anything in the chrome changes, and a busy mark in the
-/// sidebar or tab strip animates for as long as an agent works; without the
-/// cache every one of those frames would also rebuild the transcript or the
-/// terminal grid. A pane still re-renders when it, a view inside it, or an
-/// entity or global it read is notified or changed.
+/// Terminal and Git panes use view caches to reuse unchanged
+/// content during chrome updates. Their own notifications, descendant
+/// notifications and changes to observed data invalidate those caches.
+/// Orchestration caches its canvases separately so updates to controls do
+/// not invalidate unchanged graphs.
+/// Agent and Team transcripts cache individual rows so streaming updates
+/// can reuse completed messages.
 ///
 /// `agent` is the Agent pane the surface holds, if any, and `settings` the
 /// settings page to show when the surface is the settings entry.
@@ -50,7 +51,7 @@ pub(super) fn tab_surface_view(
             return div()
                 .size_full()
                 .overflow_hidden()
-                .child(pane.clone().cached(pane_style()))
+                .child(pane.clone())
                 .into_any_element();
         }
         TabSurface::TeamUnavailable { message, .. } => {
@@ -71,7 +72,7 @@ pub(super) fn tab_surface_view(
             return div()
                 .size_full()
                 .overflow_hidden()
-                .child(pane.clone().cached(pane_style()))
+                .child(pane.clone())
                 .into_any_element();
         }
         TabSurface::OrchestrationDisabled(_) => {
@@ -104,7 +105,7 @@ pub(super) fn tab_surface_view(
         return div()
             .size_full()
             .overflow_hidden()
-            .child(agent.cached(pane_style()))
+            .child(agent)
             .into_any_element();
     }
 
