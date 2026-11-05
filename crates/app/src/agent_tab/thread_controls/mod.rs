@@ -383,6 +383,7 @@ pub(super) fn setting_picker(
         .unwrap_or_else(|| "—".to_string());
 
     let pill = settings_pill(Button::new(id))
+        .debug_selector(move || id.into())
         .min_w(px(120.))
         .tooltip(name.clone())
         .accessibility_label(format!("{name}: {current_label}"))

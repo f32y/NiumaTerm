@@ -5237,7 +5237,7 @@ impl Render for AgentPane {
                 .track_focus(&self.focus)
                 .on_drop(cx.listener(Self::on_file_drop))
                 .child(div().flex_1().min_h_0().child(self.transcript.clone()))
-                .child(ComposerView::element(&self.composer_view, window, cx))
+                .child(self.composer_view.clone())
                 .into_any_element();
         }
 
@@ -5371,7 +5371,7 @@ impl Render for AgentPane {
                         this.child(FrostedLayer::new(transcript_frost).light())
                     }),
             )
-            .child(ComposerView::element(&self.composer_view, window, cx))
+            .child(self.composer_view.clone())
             // The Side Chat window floats over the transcript and the composer
             // but under the blocking layer, which must cover the whole pane.
             .children(side_chat)
