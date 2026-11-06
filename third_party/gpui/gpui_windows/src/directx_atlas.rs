@@ -23,6 +23,7 @@ struct DirectXAtlasState {
     polychrome_textures: AtlasTextureList<DirectXAtlasTexture>,
     subpixel_textures: AtlasTextureList<DirectXAtlasTexture>,
     tiles_by_key: FxHashMap<AtlasKey, AtlasTile>,
+    reuse_version: u64,
 }
 
 struct DirectXAtlasTexture {
@@ -43,6 +44,7 @@ impl DirectXAtlas {
             polychrome_textures: Default::default(),
             subpixel_textures: Default::default(),
             tiles_by_key: Default::default(),
+            reuse_version: 0,
         }))
     }
 
@@ -53,6 +55,10 @@ impl DirectXAtlas {
         let lock = self.0.lock();
         let tex = lock.texture(id);
         tex.view.clone()
+    }
+
+    pub(crate) fn reuse_version(&self) -> u64 {
+        self.0.lock().reuse_version
     }
 
     pub(crate) fn handle_device_lost(
@@ -101,6 +107,9 @@ impl PlatformAtlas for DirectXAtlas {
         let Some(tile) = lock.tiles_by_key.remove(key) else {
             return;
         };
+        // A freed texture slot can later use the same tile identifiers for
+        // different pixels. Scene comparisons must then discard old snapshots.
+        lock.reuse_version = lock.reuse_version.wrapping_add(1);
         let id = tile.texture_id;
 
         let textures = match id.kind {
@@ -341,7 +350,7 @@ fn etagere_point_to_device(value: etagere::Point) -> Point<DevicePixels> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::directx_atlas::*;
     use gpui::{ImageId, RenderImageParams};
     use std::borrow::Cow;
     use windows::Win32::{

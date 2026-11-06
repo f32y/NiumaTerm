@@ -1,13 +1,18 @@
+mod damage;
+#[cfg(test)]
+mod partial_tests;
+
 use std::{
     slice,
     sync::{Arc, OnceLock},
 };
 
 use anyhow::{Context, Result};
+use gpui::*;
 use gpui_util::ResultExt;
 use windows::{
     Win32::{
-        Foundation::{CloseHandle, HANDLE, HWND, RECT},
+        Foundation::{CloseHandle, HANDLE, HWND, RECT, S_OK},
         Graphics::{
             Direct3D::*,
             Direct3D11::*,
@@ -20,9 +25,9 @@ use windows::{
     core::{HSTRING, Interface},
 };
 
+use crate::directx_renderer::damage::{FrameDamage, SceneDamage, select_primitives};
 use crate::directx_renderer::shader_resources::{RawShaderBytes, ShaderModule, ShaderTarget};
 use crate::*;
-use gpui::*;
 
 pub(crate) const DISABLE_DIRECT_COMPOSITION: &str = "GPUI_DISABLE_DIRECT_COMPOSITION";
 const RENDER_TARGET_FORMAT: DXGI_FORMAT = DXGI_FORMAT_B8G8R8A8_UNORM;
@@ -72,6 +77,9 @@ pub(crate) struct DirectXRenderer {
     disable_direct_composition: bool,
     composited_blur_available: bool,
     force_full_present: bool,
+    damage: SceneDamage,
+    partial_scene: Scene,
+    atlas_reuse_version: u64,
     /// Also empty while the composition is being rebuilt after device loss.
     composition: Option<WindowComposition>,
     font_info: &'static FontInfo,
@@ -93,6 +101,9 @@ pub(crate) struct DirectXRendererDevices {
     pub(crate) dxgi_factory: IDXGIFactory6,
     pub(crate) device: ID3D11Device,
     pub(crate) device_context: ID3D11DeviceContext,
+    device_context1: Option<ID3D11DeviceContext1>,
+    rasterizer_state: ID3D11RasterizerState,
+    scissor_rasterizer_state: ID3D11RasterizerState,
     dxgi_device: Option<IDXGIDevice>,
     annotation: Option<ID3DUserDefinedAnnotation>,
 }
@@ -194,6 +205,27 @@ impl DirectXRendererDevices {
             Some(device.cast().context("Creating DXGI device")?)
         };
         let annotation = device_context.cast().ok();
+        let mut options = D3D11_FEATURE_DATA_D3D11_OPTIONS::default();
+        // SAFETY: The output points to the initialized options structure and
+        // its size matches the selected feature query.
+        let supports_clear_view = unsafe {
+            device.CheckFeatureSupport(
+                D3D11_FEATURE_D3D11_OPTIONS,
+                &mut options as *mut _ as _,
+                std::mem::size_of_val(&options) as u32,
+            )
+        }
+        .is_ok()
+            && options.ClearView.as_bool();
+        let device_context1 = if supports_clear_view {
+            device_context.cast().ok()
+        } else {
+            None
+        };
+        let rasterizer_state = create_rasterizer_state(device, false)?;
+        let scissor_rasterizer_state = create_rasterizer_state(device, true)?;
+        // SAFETY: The state was created on the same device as this context.
+        unsafe { device_context.RSSetState(&rasterizer_state) };
 
         Ok(Self {
             adapter: adapter.clone(),
@@ -202,6 +234,9 @@ impl DirectXRendererDevices {
             device_context: device_context.clone(),
             dxgi_device,
             annotation,
+            device_context1,
+            rasterizer_state,
+            scissor_rasterizer_state,
         })
     }
 }
@@ -259,6 +294,9 @@ impl DirectXRenderer {
             composited_blur_available: !disable_direct_composition
                 && windows_build_number().is_some_and(|build| build >= 22000),
             force_full_present: false,
+            damage: SceneDamage::new(BUFFER_COUNT),
+            partial_scene: Scene::default(),
+            atlas_reuse_version: 0,
             composition,
             font_info: Self::get_font_info(),
             width: 1,
@@ -271,13 +309,10 @@ impl DirectXRenderer {
         self.atlas.clone()
     }
 
-    fn pre_draw(&self, clear_color: &[f32; 4]) -> Result<()> {
+    fn pre_draw(&self, clear_color: &[f32; 4], region: Option<RECT>) -> Result<()> {
         let resources = self.resources.as_ref().expect("resources missing");
-        let device_context = &self
-            .devices
-            .as_ref()
-            .expect("devices missing")
-            .device_context;
+        let devices = self.devices.as_ref().context("devices missing")?;
+        let device_context = &devices.device_context;
         update_buffer(
             device_context,
             self.globals.global_params_buffer.as_ref().unwrap(),
@@ -290,14 +325,25 @@ impl DirectXRenderer {
                 _pad: [0; 3],
             }],
         )?;
+        let view = resources
+            .render_target_view
+            .as_ref()
+            .context("missing render target view")?;
+        // SAFETY: The view and states use this context's device. The optional
+        // rectangle was clamped to the render target and is nonempty.
         unsafe {
-            device_context.ClearRenderTargetView(
-                resources
-                    .render_target_view
+            if let Some(region) = region {
+                devices
+                    .device_context1
                     .as_ref()
-                    .context("missing render target view")?,
-                clear_color,
-            );
+                    .context("partial clears unavailable")?
+                    .ClearView(view, clear_color, Some(slice::from_ref(&region)));
+                device_context.RSSetState(&devices.scissor_rasterizer_state);
+                device_context.RSSetScissorRects(Some(slice::from_ref(&region)));
+            } else {
+                device_context.ClearRenderTargetView(view, clear_color);
+                device_context.RSSetState(&devices.rasterizer_state);
+            }
             device_context
                 .OMSetRenderTargets(Some(slice::from_ref(&resources.render_target_view)), None);
             device_context.RSSetViewports(Some(slice::from_ref(&resources.viewport)));
@@ -312,18 +358,8 @@ impl DirectXRenderer {
     }
 
     #[inline]
-    fn present(&mut self, damage: Option<&[Bounds<ScaledPixels>]>) -> Result<()> {
-        // Dirty rects (physical pixels, clamped to the back buffer) hint the
-        // compositor which regions changed; no damage = full-frame present
-        // (spec: low-latency-present). The back buffer is always fully drawn.
-        let dirty_rects: Vec<RECT> = damage
-            .map(|rects| {
-                rects
-                    .iter()
-                    .filter_map(|rect| self.clamp_damage_rect(rect))
-                    .collect()
-            })
-            .unwrap_or_default();
+    fn present(&mut self, damage: Option<RECT>) -> Result<()> {
+        let dirty_rects = damage.as_slice();
         let params = DXGI_PRESENT_PARAMETERS {
             DirtyRectsCount: dirty_rects.len() as u32,
             pDirtyRects: if dirty_rects.is_empty() {
@@ -341,6 +377,11 @@ impl DirectXRenderer {
                 .swap_chain
                 .Present1(0, DXGI_PRESENT(0), &params)
         };
+        // An occluded presentation may not rotate buffers. Reinitialize them
+        // before using damage history after presentation resumes.
+        if result != S_OK {
+            self.damage.invalidate();
+        }
         result.ok().context("Presenting swap chain failed")
     }
 
@@ -552,28 +593,76 @@ impl DirectXRenderer {
                 frame_stats::record_gpu_wait(wait_started_at.elapsed());
             }
         }
-        self.render(scene)?;
-        // Every pixel's alpha semantics change with the mode, even when GPUI's
-        // scene damage covers only the setting control that triggered it.
-        self.present(if self.force_full_present {
-            None
-        } else {
-            damage
-        })?;
+        let result = self
+            .render_frame(scene, damage)
+            .and_then(|region| self.present(region));
+        if let Err(error) = result {
+            self.damage.invalidate();
+            return Err(error);
+        }
         self.force_full_present = false;
         Ok(())
     }
 
-    /// Clear the render target for the applied background appearance and encode every
-    /// primitive batch of `scene` into it, without presenting. Shared by
+    fn render_frame(
+        &mut self,
+        scene: &Scene,
+        damage: Option<&[Bounds<ScaledPixels>]>,
+    ) -> Result<Option<RECT>> {
+        let devices = self.devices.as_ref().context("devices missing")?;
+        let atlas_reuse_version = self.atlas.reuse_version();
+        if self.force_full_present
+            || devices.device_context1.is_none()
+            || self.atlas_reuse_version != atlas_reuse_version
+        {
+            self.damage.invalidate();
+        }
+        self.atlas_reuse_version = atlas_reuse_version;
+        let viewport = Bounds {
+            origin: point(ScaledPixels(0.), ScaledPixels(0.)),
+            size: size(
+                ScaledPixels(self.width as f32),
+                ScaledPixels(self.height as f32),
+            ),
+        };
+        match self.damage.update(scene, damage, viewport) {
+            FrameDamage::Full => {
+                self.render(scene, None)?;
+                Ok(None)
+            }
+            FrameDamage::Region(bounds) => {
+                let region = self
+                    .clamp_damage_rect(&bounds)
+                    .context("empty partial draw region")?;
+                let mut partial_scene = std::mem::take(&mut self.partial_scene);
+                select_primitives(scene, bounds, &mut partial_scene);
+                let result = self.render(&partial_scene, Some(region));
+                self.partial_scene = partial_scene;
+                // SAFETY: Restore the shared context before glyph rasterization,
+                // whose render targets have different dimensions and no scissor.
+                let devices = self.devices.as_ref().context("devices missing")?;
+                unsafe { devices.device_context.RSSetState(&devices.rasterizer_state) };
+                result?;
+                Ok(Some(region))
+            }
+            FrameDamage::None => Ok(None),
+        }
+    }
+
+    /// Clear the requested region and encode the supplied primitive batches
+    /// without presenting. Full frames and partial frames use the same shaders.
+    /// Shared by
     /// [`draw`](Self::draw) (which then presents) and
     /// [`render_to_image`](Self::render_to_image) (which reads the target back
     /// instead), so the two cannot drift.
-    fn render(&mut self, scene: &Scene) -> Result<()> {
-        self.pre_draw(&match self.background_appearance {
-            WindowBackgroundAppearance::Opaque => [1.0f32; 4],
-            _ => [0.0f32; 4],
-        })?;
+    fn render(&mut self, scene: &Scene, region: Option<RECT>) -> Result<()> {
+        self.pre_draw(
+            &match self.background_appearance {
+                WindowBackgroundAppearance::Opaque => [1.0f32; 4],
+                _ => [0.0f32; 4],
+            },
+            region,
+        )?;
         self.upload_scene_buffers(scene)?;
 
         let annotation = self
@@ -645,8 +734,13 @@ impl DirectXRenderer {
             "render_to_image unavailable while recovering from a lost device"
         );
         self.set_background_appearance(background_appearance)?;
-        self.render(scene)?;
+        self.damage.invalidate();
+        self.render(scene, None)?;
+        self.read_render_target()
+    }
 
+    #[cfg(any(test, feature = "test-support"))]
+    fn read_render_target(&self) -> Result<image::RgbaImage> {
         let devices = self.devices.as_ref().context("devices missing")?;
         let device = &devices.device;
         let context = &devices.device_context;
@@ -713,6 +807,7 @@ impl DirectXRenderer {
         }
         self.width = width;
         self.height = height;
+        self.damage.invalidate();
 
         // Clear the render target before resizing
         let devices = self.devices.as_ref().context("devices missing")?;
@@ -1313,7 +1408,6 @@ impl DirectXResources {
             path_intermediate_msaa_view,
             viewport,
         ) = create_resources(devices, &swap_chain, width, height)?;
-        set_rasterizer_state(&devices.device, &devices.device_context)?;
 
         Ok(Self {
             swap_chain,
@@ -2152,7 +2246,10 @@ fn create_path_intermediate_msaa_texture_and_view(
 }
 
 #[inline]
-fn set_rasterizer_state(device: &ID3D11Device, device_context: &ID3D11DeviceContext) -> Result<()> {
+fn create_rasterizer_state(
+    device: &ID3D11Device,
+    scissor_enabled: bool,
+) -> Result<ID3D11RasterizerState> {
     let desc = D3D11_RASTERIZER_DESC {
         FillMode: D3D11_FILL_SOLID,
         CullMode: D3D11_CULL_NONE,
@@ -2161,17 +2258,17 @@ fn set_rasterizer_state(device: &ID3D11Device, device_context: &ID3D11DeviceCont
         DepthBiasClamp: 0.0,
         SlopeScaledDepthBias: 0.0,
         DepthClipEnable: true.into(),
-        ScissorEnable: false.into(),
+        ScissorEnable: scissor_enabled.into(),
         MultisampleEnable: true.into(),
         AntialiasedLineEnable: false.into(),
     };
+    // SAFETY: The descriptor is fully initialized and the device owns the state.
     let rasterizer_state = unsafe {
         let mut state = None;
         device.CreateRasterizerState(&desc, Some(&mut state))?;
         state.unwrap()
     };
-    unsafe { device_context.RSSetState(&rasterizer_state) };
-    Ok(())
+    Ok(rasterizer_state)
 }
 
 /// Opaque composition still needs RGB blending for antialiased edges and
@@ -2886,10 +2983,10 @@ mod tests {
         })
     }
 
-    struct TestWindow(HWND);
+    pub(super) struct TestWindow(pub(super) HWND);
 
     impl TestWindow {
-        fn new() -> Result<Self> {
+        pub(super) fn new() -> Result<Self> {
             unsafe {
                 OleInitialize(None)?;
                 Ok(Self(CreateWindowExW(
