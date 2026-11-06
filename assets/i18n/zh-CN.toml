@@ -344,6 +344,7 @@
 "shell-close-tab-processes-description" = "此标签页中有%{processes}。关闭标签页将终止这些进程。"
 "shell-close-tab-description" = "关闭标签页将终止其中的 Shell。"
 "shell-close-tab-title" = "关闭此标签页？"
+"shell-close-sleeping-tab-description" = "关闭后，此休眠标签页将从工作区移除。"
 "shell-hibernate-tab-title" = "休眠此标签页？"
 "shell-hibernate-tab-description" = "休眠将终止标签页中的 Shell。标签页会保留标题、目录和布局，点击“唤醒”后才会启动新的 Shell。"
 "shell-hibernate-tab-processes-description" = "此标签页中有%{processes}。休眠将终止这些进程，点击“唤醒”后才会启动新的 Shell。"

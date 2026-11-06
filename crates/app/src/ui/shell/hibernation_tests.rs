@@ -1,8 +1,11 @@
 use std::path::Path;
 
 use gpui::{
-    AppContext as _, Context, Entity, Modifiers, Render, TestAppContext, VisualTestContext, Window,
+    AppContext as _, Context, Entity, Modifiers, ParentElement as _, Render, Styled as _,
+    TestAppContext, VisualTestContext, Window, div,
 };
+use gpui_base::actions::{Cancel, Confirm};
+use gpui_component::Root;
 use nmt_agent::AgentMonitor;
 use nmt_config::Config;
 use nmt_config::local_state::TabState;
@@ -84,8 +87,8 @@ fn sleeping_shell(cx: &mut VisualTestContext, surface: TabSurface) -> Entity<App
 struct SleepingTabProbe(Entity<AppWindow>);
 
 impl Render for SleepingTabProbe {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
-        self.0.update(cx, |shell, cx| {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
+        let surface = self.0.update(cx, |shell, cx| {
             tab_surface_view(
                 shell.workspaces.active_tabs().active(),
                 shell.workspaces.active_tabs().list().active_id(),
@@ -93,16 +96,23 @@ impl Render for SleepingTabProbe {
                 None,
                 cx,
             )
-        })
+        });
+
+        div()
+            .size_full()
+            .child(surface)
+            .children(Root::render_dialog_layer(window, cx))
     }
 }
 
-fn draw_sleeping_tab(
-    cx: &mut VisualTestContext,
-    shell: &Entity<AppWindow>,
-) -> Entity<SleepingTabProbe> {
-    let probe =
-        cx.update(|window, cx| window.replace_root(cx, |_, _| SleepingTabProbe(shell.clone())));
+fn draw_sleeping_tab(cx: &mut VisualTestContext, shell: &Entity<AppWindow>) -> Entity<Root> {
+    let probe = cx.update(|window, cx| {
+        window.replace_root(cx, |window, cx| {
+            let view = cx.new(|_| SleepingTabProbe(shell.clone()));
+
+            Root::new(view, window, cx)
+        })
+    });
 
     cx.refresh().unwrap();
 
@@ -110,12 +120,15 @@ fn draw_sleeping_tab(
 }
 
 #[gpui::test]
-fn switching_to_sleeping_tabs_keeps_the_saved_state_and_close_does_not_start_them(
-    cx: &mut TestAppContext,
-) {
+fn sleeping_tab_close_honors_confirmation_without_starting_sessions(cx: &mut TestAppContext) {
     let cx = cx.add_empty_window();
 
-    for agent in [None, Some("codex".to_string())] {
+    for (confirm, agent) in [
+        (false, None),
+        (true, None),
+        (false, Some("codex".to_string())),
+        (true, Some("codex".to_string())),
+    ] {
         let saved = TabState {
             cwd: Some("C:/sleeping-project".into()),
             agent,
@@ -127,6 +140,11 @@ fn switching_to_sleeping_tabs_keeps_the_saved_state_and_close_does_not_start_the
             TabSurface::Hibernated(Box::new(saved.clone())),
         ] {
             let shell = sleeping_shell(cx, surface);
+
+            cx.update(|_, cx| {
+                cx.global_mut::<AppSettings>()
+                    .edit_system(|system| system.confirm_before_closing_workspace = confirm);
+            });
 
             let _probe = draw_sleeping_tab(cx, &shell);
 
@@ -173,6 +191,41 @@ fn switching_to_sleeping_tabs_keeps_the_saved_state_and_close_does_not_start_the
             let close = cx.debug_bounds("close-hibernated-tab").unwrap();
 
             cx.simulate_click(close.center(), Modifiers::default());
+            cx.refresh().unwrap();
+
+            if confirm {
+                assert!(cx.debug_bounds("dialog-layer").is_some());
+
+                cx.dispatch_action(Cancel);
+                cx.refresh().unwrap();
+
+                assert!(cx.debug_bounds("dialog-layer").is_none());
+
+                cx.update(|_, cx| {
+                    let shell = shell.read(cx);
+                    let snapshot = session_state(&shell.workspaces, None, cx);
+
+                    assert_eq!(shell.workspaces.active_tabs().list().len(), 2);
+                    assert!(matches!(
+                        shell.workspaces.active_tabs().active(),
+                        TabSurface::Pending(_) | TabSurface::Hibernated(_)
+                    ));
+                    assert_eq!(snapshot.workspaces[0].tabs[1].cwd, saved.cwd);
+                    assert_eq!(snapshot.workspaces[0].tabs[1].agent, saved.agent);
+                });
+
+                let close = cx.debug_bounds("close-hibernated-tab").unwrap();
+
+                cx.simulate_click(close.center(), Modifiers::default());
+                cx.refresh().unwrap();
+
+                assert!(cx.debug_bounds("dialog-layer").is_some());
+
+                cx.dispatch_action(Confirm { secondary: false });
+                cx.refresh().unwrap();
+            }
+
+            assert!(cx.debug_bounds("dialog-layer").is_none());
 
             cx.update(|_, cx| {
                 let shell = shell.read(cx);

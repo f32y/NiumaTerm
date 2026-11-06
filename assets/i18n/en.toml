@@ -345,6 +345,7 @@
 "shell-close-tab-processes-description" = "%{processes} in this tab. Closing the tab will terminate them."
 "shell-close-tab-description" = "Closing the tab will terminate its shell."
 "shell-close-tab-title" = "Close this tab?"
+"shell-close-sleeping-tab-description" = "Closing this sleeping tab will remove it from the workspace."
 "shell-hibernate-tab-title" = "Hibernate this tab?"
 "shell-hibernate-tab-description" = "Hibernating the tab will terminate its shell. The tab keeps its title, directories, and layout. Choose Wake to start a new shell."
 "shell-hibernate-tab-processes-description" = "%{processes} in this tab. Hibernating the tab will terminate them. Choose Wake to start a new shell."

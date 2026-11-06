@@ -1321,8 +1321,9 @@ impl AppWindow {
             .sum()
     }
 
-    /// Close a tab, with a confirm dialog first when the shell has running
-    /// child processes. Closing the last tab closes its workspace too
+    /// Close a tab, confirming saved sleeping tabs when confirmation is
+    /// enabled and running shells according to the process warning setting.
+    /// Closing the last tab closes its workspace too
     /// (confirmed first); on the last workspace that routes into the
     /// quit/replace/cancel dialog.
     ///
@@ -1424,26 +1425,28 @@ impl AppWindow {
             return;
         }
 
-        if matches!(surface, TabSurface::Pending(_) | TabSurface::Hibernated(_)) {
-            self.close_tab_now(id, window, cx);
-
-            return;
-        }
-
+        let is_sleeping = matches!(surface, TabSurface::Pending(_) | TabSurface::Hibernated(_));
         let settings = cx.global::<AppSettings>();
-        let warn_before_terminating_shell = settings.config().system.warn_before_terminating_shell;
 
-        if !should_confirm_close(
-            is_agent && settings.config().system.confirm_before_closing_workspace,
-            warn_before_terminating_shell,
-            &count,
-        ) {
+        let confirm = if is_sleeping {
+            settings.config().system.confirm_before_closing_workspace
+        } else {
+            should_confirm_close(
+                is_agent && settings.config().system.confirm_before_closing_workspace,
+                settings.config().system.warn_before_terminating_shell,
+                &count,
+            )
+        };
+
+        if !confirm {
             self.close_tab_now(id, window, cx);
 
             return;
         }
 
-        let description = if is_agent {
+        let description = if is_sleeping {
+            t!("shell-close-sleeping-tab-description").into_owned()
+        } else if is_agent {
             t!("shell-close-tab-agent-description").to_string()
         } else {
             close_description(
