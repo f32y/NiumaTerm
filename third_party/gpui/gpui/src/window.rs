@@ -131,6 +131,7 @@ struct WindowInvalidatorInner {
     pub dirty: bool,
     pub draw_phase: DrawPhase,
     pub dirty_views: FxHashSet<EntityId>,
+    #[cfg(feature = "profiler")]
     pub update_count: usize,
     #[cfg(feature = "profiler")]
     pub frame_dirty: FrameDirtyAccumulator,
@@ -163,6 +164,7 @@ impl WindowInvalidator {
                 dirty: true,
                 draw_phase: DrawPhase::None,
                 dirty_views: FxHashSet::default(),
+                #[cfg(feature = "profiler")]
                 update_count: 0,
                 #[cfg(feature = "profiler")]
                 frame_dirty: FrameDirtyAccumulator::default(),
@@ -173,7 +175,10 @@ impl WindowInvalidator {
 
     pub fn invalidate_view(&self, entity: EntityId, cx: &mut App) -> bool {
         let mut inner = self.inner.borrow_mut();
-        inner.update_count += 1;
+        #[cfg(feature = "profiler")]
+        {
+            inner.update_count += 1;
+        }
         inner.dirty_views.insert(entity);
         if inner.draw_phase == DrawPhase::None {
             #[cfg(feature = "profiler")]
@@ -206,11 +211,11 @@ impl WindowInvalidator {
         let mut inner = self.inner.borrow_mut();
         let became_dirty = dirty && !inner.dirty;
         inner.dirty = dirty;
-        if dirty {
-            inner.update_count += 1;
-        }
         #[cfg(feature = "profiler")]
-        let dirty_at = dirty.then(|| Self::record_frame_dirty(&mut inner));
+        let dirty_at = dirty.then(|| {
+            inner.update_count += 1;
+            Self::record_frame_dirty(&mut inner)
+        });
         let waker = became_dirty.then(|| inner.platform_waker.clone()).flatten();
         #[cfg(feature = "profiler")]
         let window_id = inner.window_id;
@@ -248,6 +253,7 @@ impl WindowInvalidator {
         self.inner.borrow_mut().draw_phase = phase
     }
 
+    #[cfg(feature = "profiler")]
     pub fn update_count(&self) -> usize {
         self.inner.borrow().update_count
     }
@@ -1219,9 +1225,6 @@ pub struct Window {
     /// one `present()`. `None` presents the full frame. See spec
     /// low-latency-present.
     present_damage: Option<Vec<Bounds<Pixels>>>,
-    /// Tracks recent input event timestamps to determine if input is arriving at a high rate.
-    /// Used to selectively enable VRR optimization only when input rate exceeds 60fps.
-    pub(crate) input_rate_tracker: Rc<RefCell<InputRateTracker>>,
     #[cfg(feature = "profiler")]
     window_profiler: profiler::WindowProfiler,
     last_input_modality: InputModality,
@@ -1251,51 +1254,6 @@ pub struct Window {
 struct ModifierState {
     modifiers: Modifiers,
     saw_other_input: bool,
-}
-
-/// Tracks input event timestamps to determine if input is arriving at a high rate.
-/// Used for selective VRR (Variable Refresh Rate) optimization.
-#[derive(Clone, Debug)]
-pub(crate) struct InputRateTracker {
-    timestamps: Vec<Instant>,
-    window: Duration,
-    inputs_per_second: u32,
-    sustain_until: Instant,
-    sustain_duration: Duration,
-}
-
-impl Default for InputRateTracker {
-    fn default() -> Self {
-        Self {
-            timestamps: Vec::new(),
-            window: Duration::from_millis(100),
-            inputs_per_second: 60,
-            sustain_until: Instant::now(),
-            sustain_duration: Duration::from_secs(1),
-        }
-    }
-}
-
-impl InputRateTracker {
-    pub fn record_input(&mut self) {
-        let now = Instant::now();
-        self.timestamps.push(now);
-        self.prune_old_timestamps(now);
-
-        let min_events = self.inputs_per_second as u128 * self.window.as_millis() / 1000;
-        if self.timestamps.len() as u128 >= min_events {
-            self.sustain_until = now + self.sustain_duration;
-        }
-    }
-
-    pub fn is_high_rate(&self) -> bool {
-        Instant::now() < self.sustain_until
-    }
-
-    fn prune_old_timestamps(&mut self, now: Instant) {
-        self.timestamps
-            .retain(|&t| now.duration_since(t) <= self.window);
-    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1469,7 +1427,6 @@ impl Window {
         let hovered = Rc::new(Cell::new(platform_window.is_hovered()));
         let needs_present = Rc::new(Cell::new(false));
         let next_frame_callbacks: Rc<RefCell<Vec<FrameCallback>>> = Default::default();
-        let input_rate_tracker = Rc::new(RefCell::new(InputRateTracker::default()));
         let last_frame_time = Rc::new(Cell::new(None));
 
         platform_window
@@ -1582,7 +1539,6 @@ impl Window {
             let active = active.clone();
             let needs_present = needs_present.clone();
             let next_frame_callbacks = next_frame_callbacks.clone();
-            let input_rate_tracker = input_rate_tracker.clone();
             let mut deferred_force_render = false;
             move |request_frame_options| {
                 frame_stats::record_request_serviced();
@@ -1627,7 +1583,7 @@ impl Window {
                         && next_frame_callbacks.borrow().is_empty())
                 {
                     None
-                } else if !active.get() && !input_rate_tracker.borrow_mut().is_high_rate() {
+                } else if !active.get() {
                     inactive_frame_interval
                 } else if let Some(ThermalState::Critical | ThermalState::Serious) = thermal_state {
                     Some(Duration::from_micros(16667))
@@ -1670,12 +1626,8 @@ impl Window {
                         .log_err();
                 }
 
-                // Keep presenting if input was recently arriving at a high rate (>= 60fps).
-                // Once high-rate input is detected, we sustain presentation for 1 second
-                // to prevent display underclocking during active input.
-                let needs_present = request_frame_options.require_presentation
-                    || needs_present.get()
-                    || input_rate_tracker.borrow_mut().is_high_rate();
+                let needs_present =
+                    request_frame_options.require_presentation || needs_present.get();
 
                 if invalidator.is_dirty() || force_render {
                     measure("frame duration", || {
@@ -1713,10 +1665,7 @@ impl Window {
                 // after this frame (the window was re-invalidated mid-draw, or
                 // animations scheduled next-frame callbacks), re-arm the frame
                 // source explicitly.
-                if invalidator.is_dirty()
-                    || !next_frame_callbacks.borrow().is_empty()
-                    || (active.get() && input_rate_tracker.borrow_mut().is_high_rate())
-                {
+                if invalidator.is_dirty() || !next_frame_callbacks.borrow().is_empty() {
                     invalidator.wake_platform();
                 }
             }
@@ -1924,7 +1873,6 @@ impl Window {
             hovered,
             needs_present,
             present_damage: None,
-            input_rate_tracker,
             #[cfg(feature = "profiler")]
             window_profiler: profiler::WindowProfiler::new(handle.window_id())?,
             last_input_modality: InputModality::Mouse,
@@ -5389,6 +5337,7 @@ impl Window {
     pub fn dispatch_event(&mut self, event: PlatformInput, cx: &mut App) -> DispatchEventResult {
         #[cfg(feature = "profiler")]
         self.window_profiler.begin_input(event.kind_name());
+        #[cfg(feature = "profiler")]
         let update_count_before = self.invalidator.update_count();
         // Track input modality for focus-visible styling and hover suppression.
         // Hover is suppressed during keyboard modality so that keyboard navigation
@@ -5515,12 +5464,9 @@ impl Window {
         // is the last chance for drag listeners to see the pointer leave and reset their state.
         self.promote_external_drag_to_platform(&event, cx);
 
-        let caused_invalidation = self.invalidator.update_count() > update_count_before;
-        if caused_invalidation {
-            self.input_rate_tracker.borrow_mut().record_input();
-        }
         #[cfg(feature = "profiler")]
-        self.window_profiler.end_input(caused_invalidation);
+        self.window_profiler
+            .end_input(self.invalidator.update_count() > update_count_before);
 
         DispatchEventResult {
             propagate: cx.propagate_event,
@@ -7356,6 +7302,79 @@ mod tests {
         // subsequent draws of both windows work against a fresh arena.
         cx.update_window(window.into(), |_, window, cx| window.draw(cx).clear(cx))
             .unwrap();
+    }
+
+    #[gpui::test]
+    fn input_burst_returns_to_idle_and_new_demand_wakes_the_window(cx: &mut TestAppContext) {
+        struct RepaintsOnMouseMove;
+
+        impl Render for RepaintsOnMouseMove {
+            fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .size_full()
+                    .on_mouse_move(cx.listener(|_, _, _, cx| cx.notify()))
+            }
+        }
+
+        let window = cx.add_window(|_, _| RepaintsOnMouseMove);
+        let test_window = cx.test_window(window.into());
+        window
+            .update(cx, |_, window, _| window.active.set(true))
+            .unwrap();
+        test_window.simulate_frame_request(RequestFrameOptions::default());
+        test_window.simulate_scheduled_frame();
+
+        for x in 1..=8 {
+            cx.update_window(window.into(), |_, window, cx| {
+                window.simulate_mouse_move(point(px(x as f32), px(1.)), cx);
+            })
+            .unwrap();
+            test_window.simulate_frame_request(RequestFrameOptions::default());
+        }
+
+        let wakes = test_window.frame_wake_count();
+        test_window.simulate_scheduled_frame();
+        assert!(
+            !test_window.frame_scheduled(),
+            "completed input must not sustain presentation"
+        );
+        assert_eq!(
+            test_window.frame_wake_count(),
+            wakes,
+            "completed input must not rearm the frame source"
+        );
+
+        window.update(cx, |_, _, cx| cx.notify()).unwrap();
+        assert!(test_window.frame_wake_count() > wakes);
+        test_window.simulate_frame_request(RequestFrameOptions::default());
+        assert!(
+            test_window.frame_scheduled(),
+            "new content must be presented after idle"
+        );
+        test_window.simulate_scheduled_frame();
+        assert!(!test_window.frame_scheduled());
+
+        window
+            .update(cx, |_, window, _| {
+                window.on_next_frame(|window, _| window.refresh());
+            })
+            .unwrap();
+        assert!(test_window.simulate_scheduled_frame());
+        assert!(
+            test_window.frame_scheduled(),
+            "animation callbacks must still present updated content"
+        );
+        test_window.simulate_scheduled_frame();
+        assert!(!test_window.frame_scheduled());
+
+        test_window.simulate_frame_request(RequestFrameOptions {
+            require_presentation: true,
+            ..Default::default()
+        });
+        assert!(
+            test_window.frame_scheduled(),
+            "platform presentation requests must still be served"
+        );
     }
 
     /// Platforms that stop requesting frames for idle windows (currently web)
