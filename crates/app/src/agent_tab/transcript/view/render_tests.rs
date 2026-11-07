@@ -29,8 +29,93 @@ impl Render for TranscriptRoot {
     }
 }
 
+struct UserBubbleRoot {
+    transcript: Entity<TranscriptView>,
+    prompt: String,
+    annotated_prompt: String,
+    width: f32,
+}
+
+impl Render for UserBubbleRoot {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        use crate::agent_tab::transcript::render::user_row::user_prompt_row;
+
+        div()
+            .w(px(self.width))
+            .children(self.transcript.update(cx, |view, cx| {
+                [&self.prompt, &self.annotated_prompt]
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, text)| {
+                        user_prompt_row(view, index, text, Vec::new(), None, |menu, _, _| menu, cx)
+                    })
+                    .collect::<Vec<_>>()
+            }))
+    }
+}
+
 fn draw(cx: &mut VisualTestContext) {
     cx.update(|window, cx| window.draw(cx).clear(cx));
+}
+
+#[gpui::test]
+fn expanded_annotations_use_the_user_bubble_width(cx: &mut TestAppContext) {
+    use std::slice::from_ref;
+    use std::time::Instant;
+
+    use crate::agent_tab::composer::prompt_with_response_annotations;
+
+    cx.update(|cx| {
+        gpui_component::init(cx);
+
+        cx.set_global(AgentSettings {
+            reduce_motion: true,
+            collapse_tool_calls: CollapseRows::Off,
+            ..AgentSettings::default()
+        });
+    });
+
+    let long_text = "Long annotation text with words that should wrap. ".repeat(12);
+
+    let (root, cx) = cx.add_window_view(|_, cx| UserBubbleRoot {
+        width: 900.,
+        annotated_prompt: prompt_with_response_annotations("Explain this", from_ref(&long_text)),
+        prompt: long_text,
+        transcript: cx.new(|_| {
+            let mut view = TranscriptView::new(AgentKind::Claude, None);
+
+            view.disclosures
+                .open(RevealKey::Annotation(1), Instant::now(), false);
+
+            view
+        }),
+    });
+
+    let cx: &mut VisualTestContext = cx;
+
+    for width in [900., 420.] {
+        root.update(cx, |root, cx| {
+            root.width = width;
+
+            cx.notify();
+        });
+
+        cx.run_until_parked();
+
+        draw(cx);
+        draw(cx);
+
+        let annotation = cx.debug_bounds("transcript-annotations-1").unwrap();
+        let message = cx.debug_bounds("transcript-user-0").unwrap();
+
+        assert!(message.size.width > px(width * 0.6));
+        assert!(
+            (annotation.size.width - message.size.width).abs() <= px(1.),
+            "annotation: {annotation:?}, message: {message:?}"
+        );
+        assert!((annotation.right() - message.right()).abs() <= px(1.));
+        assert!(annotation.left() >= px(0.));
+    }
 }
 
 #[gpui::test]

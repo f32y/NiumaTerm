@@ -144,10 +144,10 @@ pub(crate) fn user_prompt_row(
             });
 
             v_flex()
-                // Sized to what it says, like the prompt below it, and
-                // right-aligned with it by the column both sit in. The
-                // quotations are the wider of the two, so opening them is
-                // what grows the bubble.
+                // Expanded text needs a definite width to wrap within the
+                // same limit as the user prompt. The collapsed header can
+                // still size to its label.
+                .when(annotations_shown, |this| this.w_full())
                 .min_w_0()
                 .child(
                     // A second bubble in the prompt's own language: same
@@ -159,6 +159,7 @@ pub(crate) fn user_prompt_row(
                     // below it as soon as that setting moves.
                     h_flex()
                         .id(("entry-response-annotations", index))
+                        .debug_selector(move || format!("transcript-annotations-{index}"))
                         .role(gpui::Role::Button)
                         .aria_label(action_label)
                         .w_full()
@@ -200,6 +201,7 @@ pub(crate) fn user_prompt_row(
     });
 
     let message = div()
+        .debug_selector(move || format!("transcript-user-{index}"))
         // The width cap lives on the column below, which has a definite
         // width to take a fraction of. A fraction here would resolve
         // against this bubble's own shrink-to-fit parent instead, wrapping
@@ -236,18 +238,11 @@ pub(crate) fn user_prompt_row(
         .child(hover_stamp(at, cx))
         .child(
             v_flex()
-                // Both bubbles size to their own content and end on this
-                // column's trailing edge, so the cap that keeps a prompt
-                // off the full width is set here instead of on either. The
-                // row above is `w_full`, so the fraction has a definite
-                // width to resolve against and tracks the pane.
-                //
-                // A foldable prompt takes that measure as its width, not
-                // as a ceiling: a bubble asking for the full width of
-                // a shrink-to-fit column would still be sized by its own
-                // longest line, since a percentage contributes nothing to
-                // what a column asks for.
-                .map(|this| match fills_column {
+                // Expanded annotations and foldable prompts need a definite
+                // column width so nested percentage widths resolve before
+                // text measurement. Other bubbles size to their content,
+                // up to the same fraction of the transcript row.
+                .map(|this| match fills_column || annotations_shown {
                     true => this.w(relative(USER_BUBBLE_WIDTH_FRACTION)),
                     false => this.max_w(relative(USER_BUBBLE_WIDTH_FRACTION)),
                 })
