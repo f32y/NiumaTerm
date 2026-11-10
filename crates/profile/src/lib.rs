@@ -186,6 +186,15 @@ pub struct AgentProfile {
     /// executable runs whatever release is installed and ignores this.
     #[serde(default, rename = "dsh-version")]
     pub dsh_version: DshVersion,
+
+    /// File replacing Claude Code's default system prompt. None uses the
+    /// CLI default; other agent kinds ignore this setting.
+    #[serde(
+        default,
+        rename = "system-prompt-file",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub system_prompt_file: Option<String>,
 }
 
 /// On-disk shape of one `[[agent-profiles.list]]` entry. Credentials arrive
@@ -233,6 +242,8 @@ struct PersistedAgentProfile {
     sandbox: String,
     #[serde(default, rename = "dsh-version")]
     dsh_version: DshVersion,
+    #[serde(default, rename = "system-prompt-file")]
+    system_prompt_file: Option<String>,
 }
 
 impl TryFrom<PersistedAgentProfile> for AgentProfile {
@@ -279,6 +290,7 @@ impl TryFrom<PersistedAgentProfile> for AgentProfile {
             approval: persisted.approval,
             sandbox: persisted.sandbox,
             dsh_version: persisted.dsh_version,
+            system_prompt_file: persisted.system_prompt_file,
         })
     }
 }
@@ -365,6 +377,10 @@ pub fn patch_agent_table(
         table["approval"] = value(&profile.approval);
         table["sandbox"] = value(&profile.sandbox);
         table["dsh-version"] = value::<&str>(profile.dsh_version.into());
+
+        if let Some(path) = &profile.system_prompt_file {
+            table["system-prompt-file"] = value(path);
+        }
 
         tables.push(table);
     }

@@ -171,7 +171,7 @@ pub fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
     // leave the configured executable unused. Other agent kinds always launch
     // their configured executable even if a hand-edited file names a package
     // launcher that their adapter does not support.
-    let (executable, executable_args) = match (profile.kind, profile.launcher) {
+    let (executable, mut executable_args) = match (profile.kind, profile.launcher) {
         (AgentKind::DeepSeek, AgentProfileLauncher::Npx) => (
             dsh::NPX_EXECUTABLE.to_string(),
             dsh::npx_arguments(profile.dsh_version.into()),
@@ -182,6 +182,13 @@ pub fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
         ),
         _ => (profile.executable.trim().to_string(), Vec::new()),
     };
+
+    if profile.kind == AgentKind::Claude
+        && let Some(path) = &profile.system_prompt_file
+        && !path.is_empty()
+    {
+        executable_args.extend(["--system-prompt-file".to_string(), path.clone()]);
+    }
 
     LaunchConfig {
         executable,

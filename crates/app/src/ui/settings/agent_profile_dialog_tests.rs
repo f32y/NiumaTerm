@@ -58,8 +58,8 @@ fn profile_dialogs_keep_separate_drafts_and_release_cancelled_credentials(cx: &m
     let mut cx = VisualTestContext::from_window(window.into(), cx);
 
     cx.update(move |window, cx| {
-        window.open_dialog(cx, move |dialog, window, _| {
-            agent_profile_dialog(dialog, &first, None, window)
+        window.open_dialog(cx, move |dialog, window, cx| {
+            agent_profile_dialog(dialog, &first, None, window, cx)
         });
 
         save_agent_profile_draft(&second, cx);

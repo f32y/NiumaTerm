@@ -12,8 +12,8 @@ use app::agent_tab::{AgentKind, AgentKindExt as _};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, AppContext as _, ClickEvent, Context, Div, DragMoveEvent, Entity, Hsla,
-    InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Window, div, px,
+    InteractiveElement as _, IntoElement, ParentElement as _, PathPromptOptions, Pixels, Render,
+    SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::dialog::{DIALOG_BUTTON_MIN_WIDTH, Dialog, DialogClose, DialogFooter};
@@ -25,7 +25,8 @@ use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::scroll::ScrollableElement as _;
 use gpui_component::switch::Switch;
 use gpui_component::{
-    ActiveTheme as _, Icon, IconName, IndexPath, Sizable as _, WindowExt as _, h_flex, v_flex,
+    ActiveTheme as _, Disableable as _, Icon, IconName, IndexPath, Sizable as _, WindowExt as _,
+    h_flex, v_flex,
 };
 use nmt_agent::claude_code::stream_json;
 use nmt_agent::codex::app_server;
@@ -591,8 +592,8 @@ pub(super) fn open_agent_profile_dialog(target: Option<usize>, window: &mut Wind
         env_editor: EnvVarEditor::default(),
     });
 
-    window.open_dialog(cx, move |dialog, window, _| {
-        agent_profile_dialog(dialog, &draft, target, window)
+    window.open_dialog(cx, move |dialog, window, cx| {
+        agent_profile_dialog(dialog, &draft, target, window, cx)
     });
 }
 
@@ -601,6 +602,7 @@ fn agent_profile_dialog(
     draft: &Entity<AgentProfileDraft>,
     target: Option<usize>,
     window: &Window,
+    cx: &App,
 ) -> Dialog {
     let saved_draft = draft.clone();
     let content_draft = draft.clone();
@@ -613,20 +615,30 @@ fn agent_profile_dialog(
 
     let settings_height = window.viewport_size().height;
     let dialog_height = settings_height * 0.72;
+    let profile = &draft.read(cx).profile;
+
+    let missing_prompt_file = profile.kind == AgentKind::Claude
+        && profile
+            .system_prompt_file
+            .as_ref()
+            .is_some_and(String::is_empty);
 
     // Deleting lives in the profile list's own row control, so this
     // dialog stays an editor: everything in it is reversible by cancelling.
     let footer = DialogFooter::new()
         .child(
-            Button::new("agent-profile-save")
-                .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                .primary()
-                .label(t!("settings-common-save"))
-                .on_click(move |_, window, cx: &mut App| {
-                    save_agent_profile_draft(&saved_draft, cx);
+            div().debug_selector(|| "agent-profile-save".into()).child(
+                Button::new("agent-profile-save")
+                    .min_w(DIALOG_BUTTON_MIN_WIDTH)
+                    .primary()
+                    .label(t!("settings-common-save"))
+                    .disabled(missing_prompt_file)
+                    .on_click(move |_, window, cx: &mut App| {
+                        save_agent_profile_draft(&saved_draft, cx);
 
-                    window.close_dialog(cx);
-                }),
+                        window.close_dialog(cx);
+                    }),
+            ),
         )
         .child(
             DialogClose::new().child(
@@ -766,6 +778,101 @@ fn draft_choice<T: Copy + 'static>(
             })
         })
         .into_any_element()
+}
+
+fn select_system_prompt_file(
+    _: &mut AgentProfileDraft,
+    _: &ClickEvent,
+    _: &mut Window,
+    cx: &mut Context<AgentProfileDraft>,
+) {
+    let rx = cx.prompt_for_paths(PathPromptOptions {
+        files: true,
+        directories: false,
+        multiple: false,
+        prompt: Some(t!("settings-agent-profile-system-prompt-select-file").into()),
+        file_types: Vec::new(),
+    });
+
+    cx.spawn(async move |draft, cx| {
+        if let Ok(Ok(Some(paths))) = rx.await
+            && let Some(path) = paths.first()
+        {
+            let _ = draft.update(cx, |draft, cx| {
+                if draft.profile.kind == AgentKind::Claude
+                    && draft.profile.system_prompt_file.is_some()
+                {
+                    draft.profile.system_prompt_file = Some(path.display().to_string());
+
+                    cx.notify();
+                }
+            });
+        }
+    })
+    .detach();
+}
+
+fn system_prompt_fields(draft: &AgentProfileDraft, cx: &Context<AgentProfileDraft>) -> Div {
+    let custom = draft.profile.system_prompt_file.is_some();
+    let default_label = t!("settings-agent-profile-system-prompt-default");
+    let custom_label = t!("settings-agent-profile-system-prompt-custom");
+
+    let choice = draft_choice(
+        "agent-profile-dialog-system-prompt",
+        if custom {
+            custom_label.clone()
+        } else {
+            default_label.clone()
+        },
+        vec![(false, default_label.into()), (true, custom_label.into())],
+        move |option| option == custom,
+        |draft, custom| {
+            if custom != draft.profile.system_prompt_file.is_some() {
+                draft.profile.system_prompt_file = custom.then(String::new);
+            }
+        },
+        cx,
+    );
+
+    v_flex()
+        .child(card_row(
+            t!("settings-agent-profile-system-prompt"),
+            t!("settings-agent-profile-system-prompt-description"),
+            div()
+                .debug_selector(|| "agent-profile-system-prompt-choice".into())
+                .child(choice),
+            cx,
+        ))
+        .when(custom, |this| {
+            let path = draft.profile.system_prompt_file.clone().unwrap_or_default();
+
+            let label: SharedString = if path.is_empty() {
+                t!("settings-common-none").into()
+            } else {
+                path.into()
+            };
+
+            this.child(card_row(
+                t!("settings-agent-profile-system-prompt-file"),
+                "",
+                h_flex()
+                    .debug_selector(|| "agent-profile-system-prompt-file".into())
+                    .w_64()
+                    .gap_2()
+                    .child(div().flex_1().min_w_0().truncate().child(label))
+                    .child(
+                        div()
+                            .debug_selector(|| "agent-profile-system-prompt-browse".into())
+                            .child(
+                                Button::new("agent-profile-dialog-system-prompt-browse")
+                                    .outline()
+                                    .label(t!("settings-common-browse"))
+                                    .on_click(cx.listener(select_system_prompt_file)),
+                            ),
+                    ),
+                cx,
+            ))
+        })
 }
 
 fn agent_profile_dialog_content(
@@ -1151,6 +1258,9 @@ fn agent_profile_dialog_content(
             cx,
         ))
         .child(env_section)
+        .when(profile.kind == AgentKind::Claude, |this| {
+            this.child(system_prompt_fields(draft, cx))
+        })
 }
 
 /// Which half of an environment-variable row is open for editing.
