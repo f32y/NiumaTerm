@@ -185,7 +185,7 @@ fn progress_panel_is_narrower_and_expands_above_the_composer(cx: &mut TestAppCon
 }
 
 #[gpui::test]
-fn finished_tasks_leave_the_composer_and_workspace_progress(cx: &mut TestAppContext) {
+fn finished_goal_and_tasks_leave_the_composer_and_workspace_progress(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_component::init(cx);
 
@@ -275,6 +275,16 @@ fn finished_tasks_leave_the_composer_and_workspace_progress(cx: &mut TestAppCont
 
     deliver_session_event(
         &pane,
+        Event::GoalUpdated(Some(GoalStatus {
+            objective: "Verify both targets".into(),
+            phase: "active".into(),
+            ..GoalStatus::default()
+        })),
+        cx,
+    );
+
+    deliver_session_event(
+        &pane,
         Event::TaskListUpdated(list([TaskStatus::Completed; 2])),
         cx,
     );
@@ -286,8 +296,65 @@ fn finished_tasks_leave_the_composer_and_workspace_progress(cx: &mut TestAppCont
     });
 
     assert!(
+        cx.debug_bounds("agent-progress-panel").is_some(),
+        "an active goal remains visible after its checklist completes"
+    );
+
+    for phase in [
+        "paused",
+        "blocked",
+        "usageLimited",
+        "budgetLimited",
+        "failed",
+    ] {
+        deliver_session_event(
+            &pane,
+            Event::GoalUpdated(Some(GoalStatus {
+                objective: "Verify both targets".into(),
+                phase: phase.into(),
+                ..GoalStatus::default()
+            })),
+            cx,
+        );
+
+        cx.run_until_parked();
+
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+
+        assert!(
+            cx.debug_bounds("agent-progress-panel").is_some(),
+            "an unfinished goal must remain visible: {phase}"
+        );
+    }
+
+    deliver_session_event(
+        &pane,
+        Event::GoalUpdated(Some(GoalStatus {
+            objective: "Verify both targets".into(),
+            phase: "complete".into(),
+            ..GoalStatus::default()
+        })),
+        cx,
+    );
+
+    pane.read_with(cx, |pane, _| {
+        let session = pane.session.borrow();
+
+        assert_eq!(session.goal().unwrap().phase, "complete");
+        assert!(session.task_list().unwrap().all_completed());
+    });
+
+    cx.run_until_parked();
+
+    cx.update(|window, cx| {
+        let _ = window.draw(cx);
+    });
+
+    assert!(
         cx.debug_bounds("agent-progress-panel").is_none(),
-        "a finished list has nothing left to show above the composer"
+        "a finished goal and checklist must disappear from the composer"
     );
     assert!(
         cx.debug_bounds("agent-task-list").is_some(),
@@ -312,6 +379,17 @@ fn finished_tasks_leave_the_composer_and_workspace_progress(cx: &mut TestAppCont
         &pane,
         Event::TaskListUpdated(list([TaskStatus::Completed, TaskStatus::InProgress])),
         cx,
+    );
+
+    cx.run_until_parked();
+
+    cx.update(|window, cx| {
+        let _ = window.draw(cx);
+    });
+
+    assert!(
+        cx.debug_bounds("agent-progress-panel").is_some(),
+        "new unfinished tasks remain visible even with a completed goal"
     );
 
     assert_eq!(

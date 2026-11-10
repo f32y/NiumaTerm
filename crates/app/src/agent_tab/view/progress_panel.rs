@@ -56,6 +56,9 @@ impl ProgressPanel {
         let empty = TaskList::default();
         let spinner_fps = status_animation_fps(window);
 
+        // Providers retain completed goals until cleared or replaced.
+        let goal = goal.filter(|goal| goal.phase != "complete");
+
         // A finished list has nothing left to steer by, and the transcript
         // already shows it under the reply that finished it.
         let tasks = tasks
